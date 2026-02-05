@@ -1,0 +1,684 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@/components/ui/badge"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Search,
+  Plus,
+  Edit,
+  Trash2,
+  Play,
+  Copy,
+  BookOpen,
+  Filter,
+  Code,
+  CheckCircle,
+  AlertCircle,
+  Loader2,
+} from "lucide-react"
+import { hedgesApi } from "@/lib/api"
+import { useState as useStateCompat } from "react"
+
+type SearchHedge = {
+  id: string
+  name: string
+  category: string
+  query: string
+  description: string
+  estimatedResults: number
+  precision: number
+  recall: number
+  createdAt: string
+  isTemplate: boolean
+}
+
+const mockHedges: SearchHedge[] = [
+  {
+    id: "1",
+    name: "Diabetes Mellitus Tipo 2 - Tratamiento",
+    category: "Enfermedades Metabólicas",
+    query: '("Diabetes Mellitus, Type 2"[MeSH] OR "Type 2 Diabetes"[tiab]) AND ("Drug Therapy"[MeSH] OR "Treatment Outcome"[MeSH]) AND ("2019"[PDAT] : "2024"[PDAT])',
+    description: "Hedge para búsqueda de tratamientos farmacológicos en DM2",
+    estimatedResults: 1250,
+    precision: 0.85,
+    recall: 0.78,
+    createdAt: "2024-01-15T00:00:00Z",
+    isTemplate: true,
+  },
+]
+
+export default function ProfessorHedgesPage() {
+  const [hedges, setHedges] = useState<SearchHedge[]>([])
+  const [categories, setCategories] = useState<string[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const [searchQuery, setSearchQuery] = useState("")
+  const [selectedCategory, setSelectedCategory] = useState<string>("all")
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [editingHedge, setEditingHedge] = useState<SearchHedge | null>(null)
+
+  const [formData, setFormData] = useState({
+    name: "",
+    category: "",
+    query: "",
+    description: "",
+    isTemplate: false,
+    estimatedResults: 0,
+    precision: 0.8,
+    recall: 0.8,
+  })
+  const [queryValidation, setQueryValidation] = useState<"valid" | "invalid" | null>(null)
+  const [testResult, setTestResult] = useState<any>(null)
+  const [isTesting, setIsTesting] = useState(false)
+
+  useEffect(() => {
+    loadHedgesAndCategories()
+  }, [])
+
+  const loadHedgesAndCategories = async () => {
+    try {
+      setIsLoading(true)
+      setError(null)
+
+      const hedgesData = await hedgesApi.getAll()
+      setHedges(hedgesData as SearchHedge[])
+
+      const categoriesData = await hedgesApi.getCategories()
+      setCategories(categoriesData as string[])
+    } catch (err) {
+      console.error("Error loading hedges:", err)
+      setError("No se pudieron cargar los hedges. Usando datos de demostración.")
+      setHedges(mockHedges)
+      setCategories([
+        "Enfermedades Metabólicas",
+        "Cardiología",
+        "Enfermedades Infecciosas",
+        "Oncología",
+        "Neurología",
+        "Pediatría",
+        "Farmacología",
+      ])
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleCreateHedge = async () => {
+    try {
+      if (!formData.name || !formData.category || !formData.query) {
+        alert("Por favor completa todos los campos requeridos")
+        return
+      }
+
+      const newHedge = {
+        id: "",
+        createdAt: new Date().toISOString(),
+        ...formData,
+      } as any
+
+      const created = await hedgesApi.create(newHedge)
+      setHedges([...hedges, created as SearchHedge])
+      setIsCreateDialogOpen(false)
+      resetForm()
+    } catch (err) {
+      console.error("Error creating hedge:", err)
+      alert("Error al crear el hedge")
+    }
+  }
+
+  const handleUpdateHedge = async () => {
+    if (!editingHedge) return
+
+    try {
+      if (!formData.name || !formData.category || !formData.query) {
+        alert("Por favor completa todos los campos requeridos")
+        return
+      }
+
+      const updated = await hedgesApi.update(editingHedge.id, {
+        id: editingHedge.id,
+        createdAt: editingHedge.createdAt,
+        ...formData,
+      } as any)
+
+      setHedges(hedges.map(h => h.id === editingHedge.id ? (updated as SearchHedge) : h))
+      setIsEditDialogOpen(false)
+      resetForm()
+      setEditingHedge(null)
+    } catch (err) {
+      console.error("Error updating hedge:", err)
+      alert("Error al actualizar el hedge")
+    }
+  }
+
+  const handleDeleteHedge = async (id: string) => {
+    if (!confirm("¿Estás seguro de que deseas eliminar este hedge?")) return
+
+    try {
+      await hedgesApi.delete(id)
+      setHedges(hedges.filter(h => h.id !== id))
+    } catch (err) {
+      console.error("Error deleting hedge:", err)
+      alert("Error al eliminar el hedge")
+    }
+  }
+
+  const handleEditHedge = (hedge: SearchHedge) => {
+    setEditingHedge(hedge)
+    setFormData({
+      name: hedge.name,
+      category: hedge.category,
+      query: hedge.query,
+      description: hedge.description,
+      isTemplate: hedge.isTemplate,
+      estimatedResults: hedge.estimatedResults,
+      precision: hedge.precision,
+      recall: hedge.recall,
+    })
+    setIsEditDialogOpen(true)
+  }
+
+  const resetForm = () => {
+    setFormData({
+      name: "",
+      category: "",
+      query: "",
+      description: "",
+      isTemplate: false,
+      estimatedResults: 0,
+      precision: 0.8,
+      recall: 0.8,
+    })
+    setQueryValidation(null)
+    setTestResult(null)
+  }
+
+  const validateQuery = (query: string) => {
+    if (query.length > 20 && query.includes("[MeSH]")) {
+      setQueryValidation("valid")
+    } else if (query.length > 0) {
+      setQueryValidation("invalid")
+    } else {
+      setQueryValidation(null)
+    }
+  }
+
+  const handleTestQuery = async () => {
+    if (!formData.query) {
+      alert("Por favor ingresa una query")
+      return
+    }
+
+    try {
+      setIsTesting(true)
+      const result = await hedgesApi.test(formData.query)
+      setTestResult(result)
+      validateQuery(formData.query)
+
+      setFormData(prev => ({
+        ...prev,
+        estimatedResults: result.resultCount || 0,
+        precision: result.estimatedPrecision || 0.85,
+        recall: result.estimatedRecall || 0.78,
+      }))
+    } catch (err) {
+      console.error("Error testing query:", err)
+      alert("Error al probar la query")
+    } finally {
+      setIsTesting(false)
+    }
+  }
+
+  const filteredHedges = hedges.filter((hedge) => {
+    const matchesSearch = hedge.name.toLowerCase().includes(searchQuery.toLowerCase())
+    const matchesCategory = selectedCategory === "all" || hedge.category === selectedCategory
+    return matchesSearch && matchesCategory
+  })
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+          <p className="text-muted-foreground">Cargando hedges...</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">
+            Configurador de Search Hedges
+          </h1>
+          <p className="text-muted-foreground">
+            Crea y gestiona estrategias de búsqueda predefinidas para tus estudiantes
+          </p>
+        </div>
+
+        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+          <DialogTrigger asChild>
+            <Button onClick={() => resetForm()}>
+              <Plus className="mr-2 h-4 w-4" />
+              Nuevo Hedge
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Crear Nuevo Search Hedge</DialogTitle>
+              <DialogDescription>
+                Define una estrategia de búsqueda que los estudiantes podrán usar como plantilla.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="name">Nombre del Hedge *</Label>
+                  <Input
+                    id="name"
+                    placeholder="Ej: Diabetes - Tratamiento"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="category">Categoría *</Label>
+                  <Select value={formData.category} onValueChange={(val) => setFormData({ ...formData, category: val })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Seleccionar categoría" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {categories.map((cat) => (
+                        <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="description">Descripción</Label>
+                <Input
+                  id="description"
+                  placeholder="Breve descripción del propósito del hedge"
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="query">Query PubMed *</Label>
+                  {queryValidation && (
+                    <div className="flex items-center gap-1">
+                      {queryValidation === "valid" ? (
+                        <>
+                          <CheckCircle className="h-4 w-4 text-green-500" />
+                          <span className="text-sm text-green-600">Query válida</span>
+                        </>
+                      ) : (
+                        <>
+                          <AlertCircle className="h-4 w-4 text-red-500" />
+                          <span className="text-sm text-red-600">Query inválida</span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <Textarea
+                  id="query"
+                  placeholder='("Term"[MeSH] OR "Term"[tiab]) AND ("Filter"[MeSH])'
+                  className="font-mono text-sm min-h-[120px]"
+                  value={formData.query}
+                  onChange={(e) => {
+                    setFormData({ ...formData, query: e.target.value })
+                    validateQuery(e.target.value)
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Usa sintaxis PubMed con términos MeSH y operadores booleanos
+                </p>
+              </div>
+
+              {testResult && (
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-md space-y-2">
+                  <p className="text-sm font-medium">Resultados de la prueba:</p>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <span className="text-muted-foreground">Resultados:</span>
+                      <p className="font-semibold">{testResult.resultCount || 0}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Precisión:</span>
+                      <p className="font-semibold">{(testResult.estimatedPrecision * 100 || 85).toFixed(0)}%</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Recall:</span>
+                      <p className="font-semibold">{(testResult.estimatedRecall * 100 || 78).toFixed(0)}%</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={handleTestQuery}
+                  disabled={isTesting || !formData.query}
+                >
+                  {isTesting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                  {isTesting ? "Probando..." : "Probar Query"}
+                </Button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="isTemplate"
+                  checked={formData.isTemplate}
+                  onChange={(e) => setFormData({ ...formData, isTemplate: e.target.checked })}
+                  className="rounded border-gray-300"
+                />
+                <Label htmlFor="isTemplate" className="cursor-pointer">
+                  Marcar como plantilla reutilizable
+                </Label>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleCreateHedge}>
+                Crear Hedge
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {error && (
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 p-4 rounded-lg">
+          <p className="text-sm text-yellow-700 dark:text-yellow-300">{error}</p>
+        </div>
+      )}
+
+      <div className="flex flex-col sm:flex-row gap-4">
+        <div className="flex-1">
+          <div className="relative">
+            <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Buscar hedges..."
+              className="pl-10"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+        </div>
+        <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+          <SelectTrigger className="w-full sm:w-64">
+            <Filter className="h-4 w-4 mr-2" />
+            <SelectValue placeholder="Filtrar por categoría" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas las categorías</SelectItem>
+            {categories.map((cat) => (
+              <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {filteredHedges.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="flex items-center justify-center h-32">
+            <div className="text-center">
+              <Code className="h-8 w-8 text-muted-foreground mx-auto mb-2 opacity-50" />
+              <p className="text-muted-foreground">No hay hedges disponibles</p>
+              <p className="text-xs text-muted-foreground mt-1">Crea uno nuevo para comenzar</p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          {filteredHedges.map((hedge) => (
+            <Card key={hedge.id} className="flex flex-col">
+              <CardHeader>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <CardTitle className="text-lg break-words">{hedge.name}</CardTitle>
+                    <CardDescription>{hedge.description}</CardDescription>
+                  </div>
+                  {hedge.isTemplate && (
+                    <Badge variant="secondary" className="whitespace-nowrap">
+                      Plantilla
+                    </Badge>
+                  )}
+                </div>
+                <Badge variant="outline" className="w-fit">
+                  {hedge.category}
+                </Badge>
+              </CardHeader>
+              <CardContent className="flex-1 space-y-4">
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-muted-foreground">Query</p>
+                  <code className="block bg-muted p-3 rounded text-xs break-words max-h-32 overflow-y-auto font-mono">
+                    {hedge.query}
+                  </code>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded">
+                    <p className="text-xs text-muted-foreground">Resultados</p>
+                    <p className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                      {hedge.estimatedResults.toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded">
+                    <p className="text-xs text-muted-foreground">Precisión</p>
+                    <p className="text-lg font-bold text-green-600 dark:text-green-400">
+                      {(hedge.precision * 100).toFixed(0)}%
+                    </p>
+                  </div>
+                  <div className="bg-orange-50 dark:bg-orange-900/20 p-3 rounded">
+                    <p className="text-xs text-muted-foreground">Recall</p>
+                    <p className="text-lg font-bold text-orange-600 dark:text-orange-400">
+                      {(hedge.recall * 100).toFixed(0)}%
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <p className="text-xs text-muted-foreground">
+                    Creado: {new Date(hedge.createdAt).toLocaleDateString('es-ES')}
+                  </p>
+                </div>
+              </CardContent>
+              <div className="px-6 py-4 border-t flex gap-2">
+                <Dialog open={isEditDialogOpen && editingHedge?.id === hedge.id} onOpenChange={setIsEditDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => handleEditHedge(hedge)}
+                    >
+                      <Edit className="mr-2 h-4 w-4" />
+                      Editar
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                      <DialogTitle>Editar Search Hedge</DialogTitle>
+                      <DialogDescription>
+                        Actualiza los detalles de tu estrategia de búsqueda.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="edit-name">Nombre del Hedge *</Label>
+                          <Input
+                            id="edit-name"
+                            placeholder="Ej: Diabetes - Tratamiento"
+                            value={formData.name}
+                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="edit-category">Categoría *</Label>
+                          <Select value={formData.category} onValueChange={(val) => setFormData({ ...formData, category: val })}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Seleccionar categoría" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {categories.map((cat) => (
+                                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-description">Descripción</Label>
+                        <Input
+                          id="edit-description"
+                          placeholder="Breve descripción del propósito del hedge"
+                          value={formData.description}
+                          onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="edit-query">Query PubMed *</Label>
+                          {queryValidation && (
+                            <div className="flex items-center gap-1">
+                              {queryValidation === "valid" ? (
+                                <>
+                                  <CheckCircle className="h-4 w-4 text-green-500" />
+                                  <span className="text-sm text-green-600">Query válida</span>
+                                </>
+                              ) : (
+                                <>
+                                  <AlertCircle className="h-4 w-4 text-red-500" />
+                                  <span className="text-sm text-red-600">Query inválida</span>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <Textarea
+                          id="edit-query"
+                          placeholder='("Term"[MeSH] OR "Term"[tiab]) AND ("Filter"[MeSH])'
+                          className="font-mono text-sm min-h-[120px]"
+                          value={formData.query}
+                          onChange={(e) => {
+                            setFormData({ ...formData, query: e.target.value })
+                            validateQuery(e.target.value)
+                          }}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Usa sintaxis PubMed con términos MeSH y operadores booleanos
+                        </p>
+                      </div>
+
+                      {testResult && (
+                        <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-md space-y-2">
+                          <p className="text-sm font-medium">Resultados de la prueba:</p>
+                          <div className="grid grid-cols-3 gap-2 text-xs">
+                            <div>
+                              <span className="text-muted-foreground">Resultados:</span>
+                              <p className="font-semibold">{testResult.resultCount || 0}</p>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Precisión:</span>
+                              <p className="font-semibold">{(testResult.estimatedPrecision * 100 || 85).toFixed(0)}%</p>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Recall:</span>
+                              <p className="font-semibold">{(testResult.estimatedRecall * 100 || 78).toFixed(0)}%</p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          className="flex-1"
+                          onClick={handleTestQuery}
+                          disabled={isTesting || !formData.query}
+                        >
+                          {isTesting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                          {isTesting ? "Probando..." : "Probar Query"}
+                        </Button>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="edit-isTemplate"
+                          checked={formData.isTemplate}
+                          onChange={(e) => setFormData({ ...formData, isTemplate: e.target.checked })}
+                          className="rounded border-gray-300"
+                        />
+                        <Label htmlFor="edit-isTemplate" className="cursor-pointer">
+                          Marcar como plantilla reutilizable
+                        </Label>
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                        Cancelar
+                      </Button>
+                      <Button onClick={handleUpdateHedge}>
+                        Guardar Cambios
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 text-destructive hover:text-destructive"
+                  onClick={() => handleDeleteHedge(hedge.id)}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Eliminar
+                </Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}

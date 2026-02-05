@@ -1,0 +1,44 @@
+package com.uci.competencia.model.entity;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "search_sessions")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class SearchSession {
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private String id;
+    
+    @ManyToOne
+    @JoinColumn(name = "user_id")
+    private User user;
+    
+    private String originalQuery;
+    private String transformedQuery;
+    private LocalDateTime startedAt;
+    private LocalDateTime completedAt;
+    private Integer resultsCount;
+    private String searchEngine;
+    
+    @Lob
+    private String filtersApplied;
+    
+    private Boolean isPractice = false;
+    private Double efficiencyScore;
+    
+    @Lob
+    private String feedback;
+    
+    @PrePersist
+    protected void onCreate() {
+        startedAt = LocalDateTime.now();
+    }
+}
