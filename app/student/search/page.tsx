@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { searchApi } from '@/lib/api'
 import type { MeshTerm, SearchQuery, SearchSession, SearchFilters, SearchResult } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -44,6 +45,8 @@ import {
   Settings,
 } from 'lucide-react'
 import QueryBuilder from '@/components/query-builder'
+import { useStudent } from '@/contexts/student-context'
+import { useStudentSearch } from '@/hooks/use-student-search'
 
 const BOOLEAN_OPERATORS = ['AND', 'OR', 'NOT'] as const
 type BooleanOperator = (typeof BOOLEAN_OPERATORS)[number]
@@ -69,29 +72,36 @@ export default function SearchPage() {
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
   const [selectedTerms, setSelectedTerms] = useState<MeshTerm[]>([])
   const [operators, setOperators] = useState<BooleanOperator[]>([])
-  const [filters, setFilters] = useState<SearchFilters>({
+  const [queryMode, setQueryMode] = useState<'visual' | 'advanced'>('visual')
+  const [visualQuery, setVisualQuery] = useState<{
+    rawQuery: string
+    terms: MeshTerm[]
+    operators: BooleanOperator[]
+  } | null>(null)
+  const DEFAULT_FILTERS: SearchFilters = {
     yearRange: [2018, 2026],
     studyTypes: [],
     minSampleSize: 0,
-  })
-  const [searchHistory, setSearchHistory] = useState<SearchQuery[]>([])
+  }
+
+  const normalizeFilters = useCallback(
+    (filters?: SearchFilters): SearchFilters => ({
+      yearRange: filters?.yearRange ?? DEFAULT_FILTERS.yearRange,
+      studyTypes: filters?.studyTypes ?? DEFAULT_FILTERS.studyTypes,
+      minSampleSize: filters?.minSampleSize ?? DEFAULT_FILTERS.minSampleSize,
+    }),
+    []
+  )
+
+  const [filters, setFilters] = useState<SearchFilters>(() => normalizeFilters())
+  const { searchHistory, loadHistory, executeSearch: executeSearchHook } = useStudentSearch()
   const [currentSession, setCurrentSession] = useState<SearchSession | null>(null)
   const [isSearching, setIsSearching] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedArticle, setSelectedArticle] = useState<SearchResult | null>(null)
-
-  // Load search history on mount
-  useEffect(() => {
-    async function loadHistory() {
-      try {
-        const { searches } = await searchApi.getHistory(1, 10)
-        setSearchHistory(searches)
-      } catch (err) {
-        console.error('[v0] Error loading search history:', err)
-      }
-    }
-    loadHistory()
-  }, [])
+  const [selectedResults, setSelectedResults] = useState<SearchResult[]>([])
+  const { addActivity, addSavedSearch, setSavedSearches, toggleSearchFavorite } = useStudent()
+  const router = useRouter()
 
   // Debounced MeSH suggestions
   useEffect(() => {
@@ -125,7 +135,20 @@ export default function SearchPage() {
   }, [])
 
   const removeTerm = useCallback((termId: string) => {
-    setSelectedTerms((prev) => prev.filter((t) => t.id !== termId))
+    setSelectedTerms((prev) => {
+      const index = prev.findIndex((t) => t.id === termId)
+      if (index === -1) return prev
+      setOperators((prevOps) => {
+        if (prev.length <= 1) return []
+        const nextOps = [...prevOps]
+        const removeAt = Math.max(0, index - 1)
+        if (nextOps.length > 0) {
+          nextOps.splice(removeAt, 1)
+        }
+        return nextOps
+      })
+      return prev.filter((t) => t.id !== termId)
+    })
   }, [])
 
   const addOperator = useCallback((operator: BooleanOperator) => {
@@ -149,7 +172,11 @@ export default function SearchPage() {
   }, [selectedTerms, operators, filters])
 
   const executeSearch = useCallback(async () => {
-    if (selectedTerms.length === 0) {
+    const activeTerms = queryMode === 'visual' ? (visualQuery?.terms ?? []) : selectedTerms
+    const activeOperators = queryMode === 'visual' ? (visualQuery?.operators ?? []) : operators
+    const activeRawQuery =
+      queryMode === 'visual' ? (visualQuery?.rawQuery ?? '') : buildQueryString()
+    if (activeTerms.length === 0) {
       setError('Añade al menos un término MeSH para buscar')
       return
     }
@@ -158,43 +185,124 @@ export default function SearchPage() {
     setError(null)
 
     try {
-      const query: Omit<SearchQuery, 'id' | 'createdAt'> = {
-        terms: selectedTerms,
-        operators,
+      const query: SearchQuery = {
+        id: `query-${Date.now()}`,
+        terms: activeTerms,
+        operators: activeOperators,
         filters,
-        rawQuery: buildQueryString(),
+        rawQuery: activeRawQuery,
+        createdAt: new Date().toISOString(),
       }
 
-      const session = await searchApi.execute(query)
-      setCurrentSession(session)
-
-      // Refresh history
-      const { searches } = await searchApi.getHistory(1, 10)
-      setSearchHistory(searches)
+      const session = await executeSearchHook(query)
+      if (session) {
+        setCurrentSession(session)
+        setSelectedResults([])
+      }
+      await loadHistory(1, 10)
     } catch (err) {
       setError('Error al ejecutar la búsqueda. Intenta de nuevo.')
       console.error('[v0] Search error:', err)
     } finally {
       setIsSearching(false)
     }
-  }, [selectedTerms, operators, filters, buildQueryString])
+  }, [selectedTerms, operators, filters, buildQueryString, queryMode, visualQuery, executeSearchHook, loadHistory])
+
+  const toggleResultSelection = useCallback((result: SearchResult) => {
+    setSelectedResults((prev) => {
+      const exists = prev.some((item) => item.id === result.id)
+      if (exists) {
+        return prev.filter((item) => item.id !== result.id)
+      }
+      return [...prev, result]
+    })
+  }, [])
+
+  const exportSelection = useCallback(() => {
+    if (selectedResults.length === 0) {
+      setError('Selecciona al menos un artÃ­culo para exportar.')
+      return
+    }
+    try {
+      localStorage.setItem('search_selection', JSON.stringify(selectedResults))
+      router.push('/student/bibliography?source=search')
+    } catch (err) {
+      console.error('[v0] Error exporting selection:', err)
+    }
+  }, [selectedResults, router])
 
   const toggleFavorite = useCallback(async (searchId: string, currentFavorite: boolean) => {
     try {
       await searchApi.saveSearch(searchId, !currentFavorite)
-      setSearchHistory((prev) =>
-        prev.map((s) => (s.id === searchId ? { ...s, isFavorite: !currentFavorite } : s))
-      )
+      toggleSearchFavorite(searchId)
+      await loadHistory(1, 10)
     } catch (err) {
       console.error('[v0] Error toggling favorite:', err)
     }
+  }, [toggleSearchFavorite, loadHistory])
+
+  const reuseSearch = useCallback(
+    (query: SearchQuery) => {
+      setSelectedTerms(query.terms)
+      setOperators(query.operators)
+      setFilters(normalizeFilters(query.filters))
+    },
+    [normalizeFilters]
+  )
+
+  const yearRangeValue = useMemo(
+    () => filters.yearRange ?? DEFAULT_FILTERS.yearRange,
+    [filters.yearRange]
+  )
+  const minSampleValue = useMemo(
+    () => [filters.minSampleSize ?? DEFAULT_FILTERS.minSampleSize],
+    [filters.minSampleSize]
+  )
+
+  const [yearRangeDraft, setYearRangeDraft] = useState<[number, number]>(yearRangeValue)
+  const [minSampleDraft, setMinSampleDraft] = useState<number[]>(minSampleValue)
+
+  useEffect(() => {
+    if (
+      yearRangeDraft[0] !== yearRangeValue[0] ||
+      yearRangeDraft[1] !== yearRangeValue[1]
+    ) {
+      setYearRangeDraft(yearRangeValue)
+    }
+  }, [yearRangeDraft, yearRangeValue])
+
+  useEffect(() => {
+    if (minSampleDraft[0] !== minSampleValue[0]) {
+      setMinSampleDraft(minSampleValue)
+    }
+  }, [minSampleDraft, minSampleValue])
+
+  const updateYearRange = useCallback((value: [number, number]) => {
+    setFilters((prev) => {
+      const current = prev.yearRange ?? DEFAULT_FILTERS.yearRange
+      if (current[0] === value[0] && current[1] === value[1]) {
+        return prev
+      }
+      return { ...prev, yearRange: value }
+    })
   }, [])
 
-  const reuseSearch = useCallback((query: SearchQuery) => {
-    setSelectedTerms(query.terms)
-    setOperators(query.operators)
-    setFilters(query.filters)
+  const updateMinSampleSize = useCallback((value: number) => {
+    setFilters((prev) => {
+      const current = prev.minSampleSize ?? DEFAULT_FILTERS.minSampleSize
+      if (current === value) {
+        return prev
+      }
+      return { ...prev, minSampleSize: value }
+    })
   }, [])
+
+  const displayQuery =
+    queryMode === 'visual' ? (visualQuery?.rawQuery || '') : buildQueryString()
+  const canSearch =
+    queryMode === 'visual'
+      ? (visualQuery?.terms?.length || 0) > 0
+      : selectedTerms.length > 0
 
   return (
     <div className="space-y-6">
@@ -209,7 +317,7 @@ export default function SearchPage() {
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Query Builder */}
         <div className="lg:col-span-2 space-y-6">
-          <Tabs defaultValue="visual" className="w-full">
+          <Tabs value={queryMode} onValueChange={(value) => setQueryMode(value as 'visual' | 'advanced')} className="w-full">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="visual" className="flex items-center gap-2">
                 <Palette className="h-4 w-4" />
@@ -224,9 +332,8 @@ export default function SearchPage() {
             <TabsContent value="visual" className="space-y-6">
               <QueryBuilder
                 availableTerms={suggestions}
-                onQueryChange={(query) => {
-                  // Update the raw query string for execution
-                  setFilters(prev => ({ ...prev, rawQuery: query }))
+                onQueryChange={(data) => {
+                  setVisualQuery(data)
                 }}
               />
             </TabsContent>
@@ -336,48 +443,6 @@ export default function SearchPage() {
               </div>
             </CardContent>
           </Card>
-
-          {/* Query Preview */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Vista previa del query</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="p-4 rounded-lg bg-muted font-mono text-sm overflow-x-auto">
-                {buildQueryString() || (
-                  <span className="text-muted-foreground">
-                    Añade términos para construir tu query...
-                  </span>
-                )}
-              </div>
-
-              {error && (
-                <div className="mt-4 flex items-center gap-2 text-destructive text-sm">
-                  <AlertCircle className="h-4 w-4" />
-                  {error}
-                </div>
-              )}
-
-              <Button
-                className="w-full mt-4"
-                size="lg"
-                onClick={executeSearch}
-                disabled={isSearching || selectedTerms.length === 0}
-              >
-                {isSearching ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Buscando...
-                  </>
-                ) : (
-                  <>
-                    <Search className="mr-2 h-4 w-4" />
-                    Ejecutar búsqueda
-                  </>
-                )}
-              </Button>
-            </CardContent>
-          </Card>
         </TabsContent>
       </Tabs>
 
@@ -388,7 +453,7 @@ export default function SearchPage() {
             </CardHeader>
             <CardContent>
               <div className="p-4 rounded-lg bg-muted font-mono text-sm overflow-x-auto">
-                {buildQueryString() || (
+                {displayQuery || (
                   <span className="text-muted-foreground">
                     Añade términos para construir tu query...
                   </span>
@@ -406,7 +471,7 @@ export default function SearchPage() {
                 className="w-full mt-4"
                 size="lg"
                 onClick={executeSearch}
-                disabled={isSearching || selectedTerms.length === 0}
+                disabled={isSearching || !canSearch}
               >
                 {isSearching ? (
                   <>
@@ -434,7 +499,7 @@ export default function SearchPage() {
                       {currentSession.totalResults} artículos encontrados
                     </CardDescription>
                   </div>
-                  <Button variant="outline" size="sm">
+                  <Button variant="outline" size="sm" onClick={exportSelection}>
                     Exportar selección
                   </Button>
                 </div>
@@ -442,7 +507,9 @@ export default function SearchPage() {
               <CardContent>
                 <ScrollArea className="h-[500px] pr-4">
                   <div className="space-y-4">
-                    {currentSession.results.map((result) => (
+                    {currentSession.results.map((result) => {
+                      const isSelected = selectedResults.some((item) => item.id === result.id)
+                      return (
                       <Card
                         key={result.id}
                         className="cursor-pointer hover:bg-muted/50 transition-colors"
@@ -450,7 +517,12 @@ export default function SearchPage() {
                       >
                         <CardContent className="p-4">
                           <div className="flex items-start gap-4">
-                            <Checkbox id={`select-${result.id}`} />
+                            <Checkbox
+                              id={`select-${result.id}`}
+                              checked={isSelected}
+                              onCheckedChange={() => toggleResultSelection(result)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-start justify-between gap-2">
                                 <h3 className="font-medium leading-snug line-clamp-2">
@@ -543,16 +615,15 @@ export default function SearchPage() {
               {/* Year Range */}
               <div className="space-y-3">
                 <Label>
-                  Rango de años: {filters.yearRange?.[0]} - {filters.yearRange?.[1]}
+                  Rango de años: {yearRangeDraft[0]} - {yearRangeDraft[1]}
                 </Label>
                 <Slider
                   min={2000}
                   max={2026}
                   step={1}
-                  value={filters.yearRange || [2018, 2026]}
-                  onValueChange={(value) =>
-                    setFilters((prev) => ({ ...prev, yearRange: value as [number, number] }))
-                  }
+                  value={yearRangeDraft}
+                  onValueChange={(value) => setYearRangeDraft(value as [number, number])}
+                  onValueCommit={(value) => updateYearRange(value as [number, number])}
                   className="mt-2"
                 />
               </div>
@@ -585,15 +656,14 @@ export default function SearchPage() {
 
               {/* Sample Size */}
               <div className="space-y-3">
-                <Label>Tamaño muestral mínimo: {filters.minSampleSize}</Label>
+                <Label>Tamaño muestral mínimo: {minSampleDraft[0]}</Label>
                 <Slider
                   min={0}
                   max={1000}
                   step={10}
-                  value={[filters.minSampleSize || 0]}
-                  onValueChange={([value]) =>
-                    setFilters((prev) => ({ ...prev, minSampleSize: value }))
-                  }
+                  value={minSampleDraft}
+                  onValueChange={(value) => setMinSampleDraft(value as number[])}
+                  onValueCommit={([value]) => updateMinSampleSize(value)}
                 />
               </div>
             </CardContent>
@@ -695,7 +765,13 @@ export default function SearchPage() {
                 )}
 
                 <div className="flex gap-2">
-                  <Button className="flex-1">
+                  <Button
+                    className="flex-1"
+                    onClick={() => {
+                      toggleResultSelection(selectedArticle)
+                      setSelectedArticle(null)
+                    }}
+                  >
                     Añadir a bibliografía
                   </Button>
                   {selectedArticle.doi && (

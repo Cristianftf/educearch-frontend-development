@@ -9,7 +9,7 @@ export default function AdminSettingsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">
-            ConfiguraciÃ³n del Sistema
+            Configuración del Sistema
           </h1>
           <p className="text-muted-foreground">
             Administra las configuraciones globales de EDUCEARCH

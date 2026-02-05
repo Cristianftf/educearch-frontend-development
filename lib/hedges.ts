@@ -16,5 +16,12 @@ export const hedgesApi = {
   delete: (id: string) => api.delete<void>(`/hedges/${id}`),
 
   test: (query: string) =>
-    api.post<{ count: number; preview: string[] }>('/hedges/test', { query }),
+    api.post<{
+      query?: string
+      resultCount?: number
+      estimatedPrecision?: number
+      estimatedRecall?: number
+      status?: string
+      message?: string
+    }>('/hedges/test', { query }),
 }

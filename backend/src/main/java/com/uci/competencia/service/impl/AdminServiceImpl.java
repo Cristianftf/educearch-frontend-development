@@ -4,6 +4,7 @@ import com.uci.competencia.model.dto.request.UserBatchImportDTO;
 import com.uci.competencia.model.entity.User;
 import com.uci.competencia.model.enums.Role;
 import com.uci.competencia.repository.UserRepository;
+import com.uci.competencia.repository.SystemLogRepository;
 import com.uci.competencia.service.AdminService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,7 @@ public class AdminServiceImpl implements AdminService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final SystemLogRepository systemLogRepository;
 
     @Autowired(required = false)
     private CacheManager cacheManager;
@@ -43,6 +45,16 @@ public class AdminServiceImpl implements AdminService {
     @Override
     public Page<User> getUsersByRole(Role role, Pageable pageable) {
         return userRepository.findByRole(role, pageable);
+    }
+
+    @Override
+    public Page<User> getUsersByStatus(boolean active, Pageable pageable) {
+        return userRepository.findByActive(active, pageable);
+    }
+
+    @Override
+    public Page<User> getUsersByRoleAndStatus(Role role, boolean active, Pageable pageable) {
+        return userRepository.findByRoleAndActive(role, active, pageable);
     }
 
     @Override
@@ -796,5 +808,31 @@ public class AdminServiceImpl implements AdminService {
         log.info("Export prepared: {}", export.get("fileName"));
         
         return export;
+    }
+
+    // ======================== MAINTENANCE ========================
+
+    @Override
+    public void optimizeDatabase() {
+        log.info("Database optimization requested");
+        // Placeholder: in production, execute VACUUM/REINDEX via maintenance job or DBA tooling.
+    }
+
+    @Override
+    public void rebuildSearchIndexes() {
+        log.info("Search index rebuild requested");
+        // Placeholder: hook into FTS/indexing pipeline when available.
+    }
+
+    @Override
+    @Transactional
+    public long cleanupLogs(LocalDateTime olderThan) {
+        log.info("Cleaning up logs older than {}", olderThan);
+        try {
+            return systemLogRepository.deleteByTimestampBefore(olderThan);
+        } catch (Exception e) {
+            log.error("Error cleaning logs: {}", e.getMessage());
+            throw e;
+        }
     }
 }

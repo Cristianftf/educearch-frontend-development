@@ -8,5 +8,5 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface VerificationResultRepository extends JpaRepository<VerificationResult, String> {
-    Page<VerificationResult> findByUserId(String userId, Pageable pageable);
+    Page<VerificationResult> findByUser_Id(String userId, Pageable pageable);
 }

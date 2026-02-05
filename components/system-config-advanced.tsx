@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { Loader2, AlertCircle, CheckCircle, Eye, EyeOff, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { adminSystemApi } from "@/lib/admin-system"
+import type { AdminSystemConfiguration } from "@/types"
 
 interface SystemConfig {
   pubmed: {
@@ -69,16 +70,113 @@ const DEFAULT_CONFIG: SystemConfig = {
       communicate: 80,
     },
     feedbackMessages: {
-      excellent: "Excelente desempe√±o",
+      excellent: "Excelente desempeÒo",
       good: "Buen trabajo",
       fair: "Necesitas mejorar",
-      poor: "Requiere atenci√≥n",
+      poor: "Requiere atenciÛn",
     },
   },
 }
 
+const numberOr = (value: unknown, fallback: number) =>
+  typeof value === "number" && !Number.isNaN(value) ? value : fallback
+
+const pickThreshold = (value: unknown, fallback: number) => {
+  if (typeof value === "number") return value
+  if (value && typeof value === "object" && "advanced" in value) {
+    const advanced = (value as { advanced?: number }).advanced
+    return numberOr(advanced, fallback)
+  }
+  return fallback
+}
+
+const toUiConfig = (apiConfig?: AdminSystemConfiguration | null): SystemConfig => {
+  const pubmed = apiConfig?.pubmed ?? {}
+  const rag = apiConfig?.rag ?? {}
+  const pedagogical = apiConfig?.pedagogical ?? {}
+  const thresholds = (pedagogical.competencyThresholds ?? {}) as Record<string, unknown>
+  const feedback = pedagogical.feedbackMessages ?? DEFAULT_CONFIG.pedagogy.feedbackMessages
+  const cacheTTLSeconds = numberOr(pubmed.cacheTTL, DEFAULT_CONFIG.pubmed.cacheHours * 3600)
+
+  return {
+    pubmed: {
+      apiKey: String(pubmed.apiKey ?? ""),
+      rateLimitPerDay: numberOr(pubmed.rateLimitPerDay, DEFAULT_CONFIG.pubmed.rateLimitPerDay),
+      cacheHours: Math.max(1, Math.round(cacheTTLSeconds / 3600)),
+      testStatus: "pending",
+    },
+    models: {
+      ragModel: String(rag.modelProvider ?? DEFAULT_CONFIG.models.ragModel),
+      temperature: numberOr(rag.temperature, DEFAULT_CONFIG.models.temperature),
+      topP: numberOr(rag.topP, DEFAULT_CONFIG.models.topP),
+      contextWindow: numberOr(rag.contextWindow, DEFAULT_CONFIG.models.contextWindow),
+      maxTokens: numberOr(rag.maxTokens, DEFAULT_CONFIG.models.maxTokens),
+    },
+    pedagogy: {
+      competencyThresholds: {
+        access: pickThreshold(thresholds.access, DEFAULT_CONFIG.pedagogy.competencyThresholds.access),
+        process: pickThreshold(thresholds.process, DEFAULT_CONFIG.pedagogy.competencyThresholds.process),
+        communicate: pickThreshold(thresholds.communicate, DEFAULT_CONFIG.pedagogy.competencyThresholds.communicate),
+      },
+      feedbackMessages: {
+        excellent: feedback.excellent ?? DEFAULT_CONFIG.pedagogy.feedbackMessages.excellent,
+        good: feedback.good ?? DEFAULT_CONFIG.pedagogy.feedbackMessages.good,
+        fair: feedback.fair ?? DEFAULT_CONFIG.pedagogy.feedbackMessages.fair,
+        poor: feedback.poor ?? DEFAULT_CONFIG.pedagogy.feedbackMessages.poor,
+      },
+    },
+  }
+}
+
+const toApiConfig = (uiConfig: SystemConfig, base?: AdminSystemConfiguration | null): AdminSystemConfiguration => {
+  const basePubmed = base?.pubmed ?? {}
+  const baseRag = base?.rag ?? {}
+  const basePedagogical = base?.pedagogical ?? {}
+  const baseThresholds = (basePedagogical.competencyThresholds ?? {}) as Record<string, unknown>
+
+  const mergeThreshold = (key: "access" | "process" | "communicate", value: number) => {
+    const existing = baseThresholds[key]
+    if (existing && typeof existing === "object") {
+      return { ...(existing as object), advanced: value }
+    }
+    return value
+  }
+
+  return {
+    ...base,
+    pubmed: {
+      ...basePubmed,
+      apiKey: uiConfig.pubmed.apiKey,
+      cacheTTL: Math.round(uiConfig.pubmed.cacheHours * 3600),
+      rateLimitPerDay: uiConfig.pubmed.rateLimitPerDay,
+    },
+    rag: {
+      ...baseRag,
+      modelProvider: uiConfig.models.ragModel,
+      temperature: uiConfig.models.temperature,
+      topP: uiConfig.models.topP,
+      maxTokens: uiConfig.models.maxTokens,
+      contextWindow: uiConfig.models.contextWindow,
+    },
+    pedagogical: {
+      ...basePedagogical,
+      competencyThresholds: {
+        ...baseThresholds,
+        access: mergeThreshold("access", uiConfig.pedagogy.competencyThresholds.access),
+        process: mergeThreshold("process", uiConfig.pedagogy.competencyThresholds.process),
+        communicate: mergeThreshold("communicate", uiConfig.pedagogy.competencyThresholds.communicate),
+      },
+      feedbackMessages: {
+        ...(basePedagogical.feedbackMessages ?? {}),
+        ...uiConfig.pedagogy.feedbackMessages,
+      },
+    },
+  }
+}
+
 export function SystemConfigAdvanced() {
   const [config, setConfig] = useState<SystemConfig>(DEFAULT_CONFIG)
+  const [apiConfig, setApiConfig] = useState<AdminSystemConfiguration | null>(null)
   const [showApiKey, setShowApiKey] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -91,18 +189,23 @@ export function SystemConfigAdvanced() {
     setError(null)
     try {
       const response = await adminSystemApi.getSettings()
-      setConfig(response.data || DEFAULT_CONFIG)
+      setApiConfig(response)
+      setConfig(toUiConfig(response))
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
-          : "Error al cargar configuraci√≥n"
+          : "Error al cargar configuraciÛn"
       )
       setConfig(DEFAULT_CONFIG)
     } finally {
       setIsLoading(false)
     }
   }, [])
+
+  useEffect(() => {
+    loadConfig()
+  }, [loadConfig])
 
   // Save config to backend
   const handleSave = async () => {
@@ -129,8 +232,10 @@ export function SystemConfigAdvanced() {
         }
       })
 
-      await adminSystemApi.updateSettings(config)
-      setSuccess("‚úÖ Configuraci√≥n guardada exitosamente")
+      const payload = toApiConfig(config, apiConfig)
+      await adminSystemApi.updateSettings(payload)
+      setApiConfig(payload)
+      setSuccess("‚úÖ ConfiguraciÛn guardada exitosamente")
       setTimeout(() => setSuccess(null), 3000)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al guardar")
@@ -155,9 +260,9 @@ export function SystemConfigAdvanced() {
           ...prev,
           pubmed: { ...prev.pubmed, testStatus: "success" },
         }))
-        setSuccess("‚úÖ Conexi√≥n a PubMed verificada")
+        setSuccess("‚úÖ ConexiÛn a PubMed verificada")
       } else {
-        throw new Error("Conexi√≥n fallida")
+        throw new Error("ConexiÛn fallida")
       }
     } catch (err) {
       setConfig((prev) => ({
@@ -165,7 +270,7 @@ export function SystemConfigAdvanced() {
         pubmed: { ...prev.pubmed, testStatus: "failed" },
       }))
       setError(
-        err instanceof Error ? err.message : "Error al probar conexi√≥n"
+        err instanceof Error ? err.message : "Error al probar conexiÛn"
       )
     }
   }
@@ -174,7 +279,7 @@ export function SystemConfigAdvanced() {
     return (
       <div className="flex items-center justify-center p-8">
         <Loader2 className="w-6 h-6 animate-spin text-blue-500 mr-2" />
-        Cargando configuraci√≥n...
+        Cargando configuraciÛn...
       </div>
     )
   }
@@ -199,9 +304,9 @@ export function SystemConfigAdvanced() {
       {/* PubMed Configuration */}
       <Card>
         <CardHeader>
-          <CardTitle>Configuraci√≥n de PubMed API</CardTitle>
+          <CardTitle>ConfiguraciÛn de PubMed API</CardTitle>
           <CardDescription>
-            Gestiona la conexi√≥n a PubMed y l√≠mites de uso
+            Gestiona la conexiÛn a PubMed y lÌmites de uso
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -249,16 +354,16 @@ export function SystemConfigAdvanced() {
               </Button>
             </div>
             <p className="text-xs text-gray-600">
-              {config.pubmed.testStatus === "success" && "‚úÖ Conexi√≥n verificada"}
-              {config.pubmed.testStatus === "failed" && "‚ùå Conexi√≥n fallida - revisa tu API Key"}
-              {config.pubmed.testStatus === "pending" && "Haz click en Probar para verificar la conexi√≥n"}
+              {config.pubmed.testStatus === "success" && "‚úÖ ConexiÛn verificada"}
+              {config.pubmed.testStatus === "failed" && "‚ùå ConexiÛn fallida - revisa tu API Key"}
+              {config.pubmed.testStatus === "pending" && "Haz click en Probar para verificar la conexiÛn"}
             </p>
           </div>
 
           {/* Rate Limit */}
           <div className="space-y-2">
             <Label htmlFor="rate-limit">
-              L√≠mite de Llamadas por D√≠a: <span className="font-semibold">{config.pubmed.rateLimitPerDay.toLocaleString()}</span>
+              LÌmite de Llamadas por DÌa: <span className="font-semibold">{config.pubmed.rateLimitPerDay.toLocaleString()}</span>
             </Label>
             <Slider
               value={[config.pubmed.rateLimitPerDay]}
@@ -274,7 +379,7 @@ export function SystemConfigAdvanced() {
               className="w-full"
             />
             <p className="text-xs text-gray-600">
-              Establece un l√≠mite diario para evitar sobrecuotas
+              Establece un lÌmite diario para evitar sobrecuotas
             </p>
           </div>
 
@@ -297,7 +402,7 @@ export function SystemConfigAdvanced() {
               className="w-full"
             />
             <p className="text-xs text-gray-600">
-              Tiempo que se guardan resultados en cach√© (1-168 horas)
+              Tiempo que se guardan resultados en cachÈ (1-168 horas)
             </p>
           </div>
         </CardContent>
@@ -306,9 +411,9 @@ export function SystemConfigAdvanced() {
       {/* AI Models Configuration */}
       <Card>
         <CardHeader>
-          <CardTitle>Configuraci√≥n de Modelos IA</CardTitle>
+          <CardTitle>ConfiguraciÛn de Modelos IA</CardTitle>
           <CardDescription>
-            Ajusta par√°metros de los modelos de lenguaje
+            Ajusta par·metros de los modelos de lenguaje
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -325,9 +430,9 @@ export function SystemConfigAdvanced() {
                 <SelectValue placeholder="Selecciona modelo" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="gpt-4">GPT-4 (m√°s preciso)</SelectItem>
+                <SelectItem value="gpt-4">GPT-4 (m·s preciso)</SelectItem>
                 <SelectItem value="gpt-4-turbo">GPT-4 Turbo (balanceado)</SelectItem>
-                <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo (r√°pido)</SelectItem>
+                <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo (r·pido)</SelectItem>
                 <SelectItem value="claude-3-opus">Claude 3 Opus</SelectItem>
               </SelectContent>
             </Select>
@@ -352,7 +457,7 @@ export function SystemConfigAdvanced() {
               className="w-full"
             />
             <p className="text-xs text-gray-600">
-              0 = determin√≠stico, 1 = balanceado, 2 = muy creativo
+              0 = determinÌstico, 1 = balanceado, 2 = muy creativo
             </p>
           </div>
 
@@ -398,7 +503,7 @@ export function SystemConfigAdvanced() {
               className="w-full"
             />
             <p className="text-xs text-gray-600">
-              M√°ximo de tokens que el modelo puede procesar
+              M·ximo de tokens que el modelo puede procesar
             </p>
           </div>
 
@@ -421,7 +526,7 @@ export function SystemConfigAdvanced() {
               className="w-full"
             />
             <p className="text-xs text-gray-600">
-              M√°ximo de tokens que generar√° el modelo en respuestas
+              M·ximo de tokens que generar· el modelo en respuestas
             </p>
           </div>
         </CardContent>
@@ -430,7 +535,7 @@ export function SystemConfigAdvanced() {
       {/* Pedagogical Configuration */}
       <Card>
         <CardHeader>
-          <CardTitle>Configuraci√≥n Pedag√≥gica</CardTitle>
+          <CardTitle>ConfiguraciÛn PedagÛgica</CardTitle>
           <CardDescription>
             Define umbrales de competencia y mensajes de feedback
           </CardDescription>
@@ -465,7 +570,7 @@ export function SystemConfigAdvanced() {
                     className="w-full"
                   />
                   <p className="text-xs text-gray-600">
-                    Puntuaci√≥n m√≠nima para considerar esta competencia como dominada
+                    PuntuaciÛn mÌnima para considerar esta competencia como dominada
                   </p>
                 </div>
               )
@@ -514,7 +619,7 @@ export function SystemConfigAdvanced() {
         </Button>
         <Button onClick={handleSave} disabled={isSaving} className="gap-2">
           {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
-          {isSaving ? "Guardando..." : "Guardar Configuraci√≥n"}
+          {isSaving ? "Guardando..." : "Guardar ConfiguraciÛn"}
         </Button>
       </div>
     </div>

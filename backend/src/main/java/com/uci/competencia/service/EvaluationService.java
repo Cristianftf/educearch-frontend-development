@@ -20,6 +20,14 @@ public interface EvaluationService {
     List<Map<String, Object>> getPendingEvaluations(String professorId);
 
     /**
+     * Obtener evaluaciones revisadas para un profesor
+     *
+     * @param professorId ID del profesor
+     * @return Lista de evaluaciones revisadas
+     */
+    List<Map<String, Object>> getReviewedEvaluations(String professorId);
+
+    /**
      * Crear o actualizar una evaluación
      *
      * @param submissionId ID de la submission

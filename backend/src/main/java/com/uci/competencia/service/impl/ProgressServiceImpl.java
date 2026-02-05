@@ -29,18 +29,30 @@ public class ProgressServiceImpl implements ProgressService {
 
         // Crear el DTO de respuesta
         StudentProgressDTO dto = new StudentProgressDTO();
-        dto.setStudentId(Long.valueOf(studentId));
+        dto.setStudentId(studentId);
+        dto.setUserId(studentId);
 
         // Construir mapa de competencias con valores Double
-        Map<String, Double> competencies = new HashMap<>();
-        competencies.put("access", competencyProgress.getAccessScore() != null ? competencyProgress.getAccessScore() : 0.0);
-        competencies.put("process", competencyProgress.getProcessingScore() != null ? competencyProgress.getProcessingScore() : 0.0);
-        competencies.put("communicate", competencyProgress.getCommunicationScore() != null ? competencyProgress.getCommunicationScore() : 0.0);
-        
+        Map<String, StudentProgressDTO.CompetencyProgressDTO> competencies = new HashMap<>();
+        competencies.put(
+            "access",
+            toCompetencyProgress("access", competencyProgress.getAccessScore(), competencyProgress.getLastUpdated())
+        );
+        competencies.put(
+            "process",
+            toCompetencyProgress("process", competencyProgress.getProcessingScore(), competencyProgress.getLastUpdated())
+        );
+        competencies.put(
+            "communicate",
+            toCompetencyProgress("communicate", competencyProgress.getCommunicationScore(), competencyProgress.getLastUpdated())
+        );
+
         dto.setCompetencies(competencies);
 
         // Calcular progreso general
         Double overallProgress = competencies.values().stream()
+            .map(StudentProgressDTO.CompetencyProgressDTO::getScore)
+            .filter(Objects::nonNull)
             .mapToDouble(Double::doubleValue)
             .average()
             .orElse(0.0);
@@ -48,10 +60,18 @@ public class ProgressServiceImpl implements ProgressService {
 
         // Totales de actividades
         Map<String, Integer> activityStats = new HashMap<>();
-        activityStats.put("searches", competencyProgress.getTotalSearches() != null ? competencyProgress.getTotalSearches() : 0);
-        activityStats.put("verifications", competencyProgress.getTotalVerifications() != null ? competencyProgress.getTotalVerifications() : 0);
-        activityStats.put("bibliographies", competencyProgress.getBibliographiesGenerated() != null ? competencyProgress.getBibliographiesGenerated() : 0);
+        int totalSearches = competencyProgress.getTotalSearches() != null ? competencyProgress.getTotalSearches() : 0;
+        int totalVerifications = competencyProgress.getTotalVerifications() != null ? competencyProgress.getTotalVerifications() : 0;
+        int totalBibliographies = competencyProgress.getBibliographiesGenerated() != null ? competencyProgress.getBibliographiesGenerated() : 0;
+
+        activityStats.put("searches", totalSearches);
+        activityStats.put("verifications", totalVerifications);
+        activityStats.put("bibliographies", totalBibliographies);
         dto.setActivityStats(activityStats);
+        dto.setTotalSearches(totalSearches);
+        dto.setTotalVerifications(totalVerifications);
+        dto.setTotalBibliographies(totalBibliographies);
+        dto.setRecentActivities(new ArrayList<>());
 
         // Casos completados (por defecto 0 hasta que se implemente)
         dto.setCasesCompleted(0);
@@ -96,5 +116,19 @@ public class ProgressServiceImpl implements ProgressService {
         progress.setBibliographiesGenerated(0);
         progress.setLastUpdated(LocalDateTime.now());
         return progress;
+    }
+
+    private StudentProgressDTO.CompetencyProgressDTO toCompetencyProgress(
+        String type,
+        Double score,
+        LocalDateTime lastUpdated
+    ) {
+        double normalizedScore = score != null ? score : 0.0;
+        return new StudentProgressDTO.CompetencyProgressDTO(
+            type,
+            normalizedScore,
+            calculateLevel(normalizedScore),
+            lastUpdated != null ? lastUpdated.toString() : null
+        );
     }
 }

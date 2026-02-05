@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { evaluationApi, casesApi } from '@/lib/api'
+import { evaluationApi } from '@/lib/api'
 import type { CaseSubmission, Evaluation, CompetencyType } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -81,8 +81,11 @@ export default function ProfessorEvaluationsPage() {
   useEffect(() => {
     async function loadSubmissions() {
       try {
-        const pending = await evaluationApi.getPending()
-        setSubmissions(pending)
+        const [pending, reviewed] = await Promise.all([
+          evaluationApi.getPending(),
+          evaluationApi.getReviewed(),
+        ])
+        setSubmissions([...pending, ...reviewed])
       } catch (err) {
         console.error('[v0] Error loading submissions:', err)
       } finally {

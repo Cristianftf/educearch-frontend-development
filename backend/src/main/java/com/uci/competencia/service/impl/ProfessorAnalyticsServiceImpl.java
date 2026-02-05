@@ -90,38 +90,21 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
                 try {
                     StudentProgressDTO progress = progressService.getStudentProgress(studentId);
                     if (progress != null && progress.getCompetencies() != null) {
-                        // Obtener scores reales de competencias
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> competencies = (Map<String, Object>) (Map<?, ?>) progress.getCompetencies();
-                        
-                        if (competencies.containsKey("access")) {
-                            Object accessObj = competencies.get("access");
-                            if (accessObj instanceof Map) {
-                                Object score = ((Map<?, ?>) accessObj).get("score");
-                                if (score instanceof Number) {
-                                    accessScores.put(studentId, ((Number) score).doubleValue());
-                                }
-                            }
+                        Map<String, ?> competencies = progress.getCompetencies();
+
+                        Double accessScore = getScore(competencies.get("access"));
+                        if (accessScore != null) {
+                            accessScores.put(studentId, accessScore);
                         }
-                        
-                        if (competencies.containsKey("process")) {
-                            Object processObj = competencies.get("process");
-                            if (processObj instanceof Map) {
-                                Object score = ((Map<?, ?>) processObj).get("score");
-                                if (score instanceof Number) {
-                                    processScores.put(studentId, ((Number) score).doubleValue());
-                                }
-                            }
+
+                        Double processScore = getScore(competencies.get("process"));
+                        if (processScore != null) {
+                            processScores.put(studentId, processScore);
                         }
-                        
-                        if (competencies.containsKey("communicate")) {
-                            Object commObj = competencies.get("communicate");
-                            if (commObj instanceof Map) {
-                                Object score = ((Map<?, ?>) commObj).get("score");
-                                if (score instanceof Number) {
-                                    communicateScores.put(studentId, ((Number) score).doubleValue());
-                                }
-                            }
+
+                        Double communicateScore = getScore(competencies.get("communicate"));
+                        if (communicateScore != null) {
+                            communicateScores.put(studentId, communicateScore);
                         }
                     }
                 } catch (Exception e) {
@@ -178,22 +161,18 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
                     
                     // Calcular promedio real de competencias
                     if (progress != null && progress.getCompetencies() != null) {
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> competencies = (Map<String, Object>) (Map<?, ?>) progress.getCompetencies();
+                        Map<String, ?> competencies = progress.getCompetencies();
                         double total = 0;
                         int count = 0;
-                        
+
                         for (var entry : competencies.entrySet()) {
-                            Object competencyObj = entry.getValue();
-                            if (competencyObj instanceof Map) {
-                                Object score = ((Map<?, ?>) competencyObj).get("score");
-                                if (score instanceof Number) {
-                                    total += ((Number) score).doubleValue();
-                                    count++;
-                                }
+                            Double score = getScore(entry.getValue());
+                            if (score != null) {
+                                total += score;
+                                count++;
                             }
                         }
-                        
+
                         if (count > 0) {
                             avgScore = total / count;
                         }
@@ -234,23 +213,14 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
                     int count = 0;
                     
                     if (progress != null && progress.getCompetencies() != null) {
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> competencies = (Map<String, Object>) (Map<?, ?>) progress.getCompetencies();
-                        
+                        Map<String, ?> competencies = progress.getCompetencies();
+
                         for (var entry : competencies.entrySet()) {
                             String key = entry.getKey();
-                            Object competencyObj = entry.getValue();
-                            
-                            double score = 0.0;
-                            if (competencyObj instanceof Map) {
-                                Object scoreObj = ((Map<?, ?>) competencyObj).get("score");
-                                if (scoreObj instanceof Number) {
-                                    score = ((Number) scoreObj).doubleValue();
-                                }
-                            } else if (competencyObj instanceof Number) {
-                                score = ((Number) competencyObj).doubleValue();
+                            Double score = getScore(entry.getValue());
+                            if (score == null) {
+                                score = 0.0;
                             }
-                            
                             scores.put(key, score);
                             total += score;
                             count++;
@@ -379,7 +349,7 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
                         User user = userRepository.findById(studentId).orElse(null);
                         if (user != null) {
                             double studentAvg = 0;
-                            Map<String, Double> competencies = progress.getCompetencies();
+                            Map<String, ?> competencies = progress.getCompetencies();
                             
                             if (competencies != null) {
                                 double compTotal = 0;
@@ -387,21 +357,21 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
                                 
                                 // Extraer scores de cada competencia
                                 if (competencies.containsKey("access")) {
-                                    double score = competencies.getOrDefault("access", 0.0);
+                                    double score = getScoreOrDefault(competencies.get("access"), 0.0);
                                     accessTotal += score;
                                     compTotal += score;
                                     compCount++;
                                 }
                                 
                                 if (competencies.containsKey("process")) {
-                                    double score = competencies.getOrDefault("process", 0.0);
+                                    double score = getScoreOrDefault(competencies.get("process"), 0.0);
                                     processTotal += score;
                                     compTotal += score;
                                     compCount++;
                                 }
                                 
                                 if (competencies.containsKey("communicate")) {
-                                    double score = competencies.getOrDefault("communicate", 0.0);
+                                    double score = getScoreOrDefault(competencies.get("communicate"), 0.0);
                                     commTotal += score;
                                     compTotal += score;
                                     compCount++;
@@ -468,5 +438,29 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
         }
         
         return performance;
+    }
+
+    private Double getScore(Object competency) {
+        if (competency == null) {
+            return null;
+        }
+        if (competency instanceof StudentProgressDTO.CompetencyProgressDTO) {
+            return ((StudentProgressDTO.CompetencyProgressDTO) competency).getScore();
+        }
+        if (competency instanceof Number) {
+            return ((Number) competency).doubleValue();
+        }
+        if (competency instanceof Map) {
+            Object score = ((Map<?, ?>) competency).get("score");
+            if (score instanceof Number) {
+                return ((Number) score).doubleValue();
+            }
+        }
+        return null;
+    }
+
+    private double getScoreOrDefault(Object competency, double fallback) {
+        Double score = getScore(competency);
+        return score != null ? score : fallback;
     }
 }

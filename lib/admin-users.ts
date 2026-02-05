@@ -20,6 +20,9 @@ export const adminUsersApi = {
   changeRole: (id: string, role: UserRole) =>
     api.put<User>(`/admin/users/${id}/role`, { role }),
 
+  changeStatus: (id: string, active: boolean) =>
+    api.put<void>(`/admin/users/${id}/status`, { active }),
+
   bulkImport: (file: File, updateExisting = false) => {
     const formData = new FormData()
     formData.append('file', file)

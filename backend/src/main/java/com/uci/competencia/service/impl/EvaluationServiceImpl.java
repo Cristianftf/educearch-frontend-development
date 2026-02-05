@@ -56,6 +56,33 @@ public class EvaluationServiceImpl implements EvaluationService {
     }
 
     @Override
+    public List<Map<String, Object>> getReviewedEvaluations(String professorId) {
+        log.info("Getting reviewed evaluations for professor: {}", professorId);
+
+        try {
+            List<Evaluation> evaluations = evaluationRepository.findByProfessorId(professorId);
+
+            List<Map<String, Object>> reviewed = evaluations.stream()
+                .map(evaluation -> caseSubmissionRepository.findById(evaluation.getSubmissionId())
+                    .map(submission -> {
+                        Map<String, Object> map = convertSubmissionToEvaluationMap(submission);
+                        map.put("evaluationId", evaluation.getId());
+                        map.put("status", SubmissionStatus.REVIEWED);
+                        return map;
+                    })
+                    .orElse(null))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
+            log.info("Found {} reviewed evaluations for professor {}", reviewed.size(), professorId);
+            return reviewed;
+        } catch (Exception e) {
+            log.error("Error getting reviewed evaluations for professor {}: {}", professorId, e.getMessage());
+            throw new RuntimeException("Error getting reviewed evaluations: " + e.getMessage());
+        }
+    }
+
+    @Override
     @Transactional
     public Evaluation createEvaluation(String submissionId, String professorId, Map<String, Object> evaluationData) {
         log.info("Creating evaluation for submission: {}, professor: {}", submissionId, professorId);

@@ -36,11 +36,11 @@ import { cn } from "@/lib/utils"
 
 const adminNavItems = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/users", label: "Gesti贸n de Usuarios", icon: Users },
-  { href: "/admin/audit", label: "Auditor铆a", icon: FileText },
+  { href: "/admin/users", label: "Gesti髇 de Usuarios", icon: Users },
+  { href: "/admin/audit", label: "Auditor韆", icon: FileText },
   { href: "/admin/system", label: "Sistema", icon: Server },
   { href: "/admin/health", label: "Salud del Sistema", icon: Activity },
-  { href: "/admin/settings", label: "Configuraci贸n", icon: Settings },
+  { href: "/admin/settings", label: "Configuraci髇", icon: Settings },
 ]
 
 export default function AdminLayout({
@@ -67,7 +67,7 @@ export default function AdminLayout({
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="animate-pulse flex flex-col items-center gap-4">
           <Shield className="h-12 w-12 text-primary" />
-          <p className="text-muted-foreground">Cargando panel de administraci贸n...</p>
+          <p className="text-muted-foreground">Cargando panel de administraci髇...</p>
         </div>
       </div>
     )
@@ -166,10 +166,10 @@ export default function AdminLayout({
               </Button>
               <div className="hidden sm:block">
                 <h1 className="text-lg font-semibold text-foreground">
-                  Panel de Administraci贸n
+                  Panel de Administraci髇
                 </h1>
                 <p className="text-xs text-muted-foreground">
-                  Gesti贸n completa del sistema EDUCEARCH
+                  Gesti髇 completa del sistema EDUCEARCH
                 </p>
               </div>
             </div>
@@ -202,7 +202,7 @@ export default function AdminLayout({
                   <DropdownMenuSeparator />
                   <DropdownMenuItem>
                     <Settings className="mr-2 h-4 w-4" />
-                    Configuraci贸n
+                    Configuraci髇
                   </DropdownMenuItem>
                   <DropdownMenuItem>
                     <Database className="mr-2 h-4 w-4" />
@@ -211,7 +211,7 @@ export default function AdminLayout({
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={logout} className="text-destructive">
                     <LogOut className="mr-2 h-4 w-4" />
-                    Cerrar Sesi贸n
+                    Cerrar Sesi髇
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

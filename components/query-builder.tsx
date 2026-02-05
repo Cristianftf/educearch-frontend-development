@@ -14,7 +14,6 @@ import {
 } from '@dnd-kit/core'
 import {
   SortableContext,
-  arrayMove,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import {
@@ -40,11 +39,12 @@ interface QueryElement {
   value: string
   label: string
   color?: string
+  termId?: string
 }
 
 interface QueryBuilderProps {
   availableTerms: MeshTerm[]
-  onQueryChange: (query: string) => void
+  onQueryChange: (data: { rawQuery: string; terms: MeshTerm[]; operators: BooleanOperator[] }) => void
 }
 
 const BOOLEAN_OPERATORS: QueryElement[] = [
@@ -52,6 +52,7 @@ const BOOLEAN_OPERATORS: QueryElement[] = [
   { id: 'or', type: 'operator', value: 'OR', label: 'O', color: 'bg-green-100 text-green-800' },
   { id: 'not', type: 'operator', value: 'NOT', label: 'NO', color: 'bg-red-100 text-red-800' },
 ]
+type BooleanOperator = 'AND' | 'OR' | 'NOT'
 
 function DraggableChip({ element, isDragging }: { element: QueryElement; isDragging?: boolean }) {
   const {
@@ -103,12 +104,14 @@ function DroppableZone({
   onRemove: (elementId: string) => void
   className?: string
 }) {
+  const { setNodeRef, isOver } = useDroppable({ id })
+
   return (
-    <Card className={`min-h-[120px] ${className}`}>
+    <Card className={`min-h-[120px] ${className} ${isOver ? 'border-primary/50' : ''}`}>
       <CardHeader className="pb-3">
         <CardTitle className="text-sm font-medium">{title}</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2">
+      <CardContent className="space-y-2" ref={setNodeRef}>
         {elements.length === 0 ? (
           <div className="text-center text-muted-foreground text-sm py-4">
             Arrastra elementos aquí
@@ -156,7 +159,8 @@ export default function QueryBuilder({ availableTerms, onQueryChange }: QueryBui
       type: 'term' as const,
       value: t.term,
       label: t.term,
-      color: 'bg-purple-100 text-purple-800'
+      color: 'bg-purple-100 text-purple-800',
+      termId: t.id
     })), ...BOOLEAN_OPERATORS].find(e => e.id === active.id)
 
     if (element) {
@@ -175,7 +179,8 @@ export default function QueryBuilder({ availableTerms, onQueryChange }: QueryBui
       type: 'term' as const,
       value: t.term,
       label: t.term,
-      color: 'bg-purple-100 text-purple-800'
+      color: 'bg-purple-100 text-purple-800',
+      termId: t.id
     })), ...BOOLEAN_OPERATORS].find(e => e.id === active.id)
 
     if (!element) return
@@ -211,19 +216,18 @@ export default function QueryBuilder({ availableTerms, onQueryChange }: QueryBui
   // Update query string whenever elements change
   React.useEffect(() => {
     const query = buildQueryString()
-    onQueryChange(query)
-  }, [buildQueryString, onQueryChange])
+    const terms = queryElements
+      .filter((e) => e.type === 'term')
+      .map((e) => ({
+        id: e.termId || e.id,
+        term: e.value,
+      }))
+    const operators = queryElements
+      .filter((e) => e.type === 'operator')
+      .map((e) => e.value as BooleanOperator)
 
-  const availableElements = [
-    ...availableTerms.slice(0, 10).map(term => ({
-      id: term.id,
-      type: 'term' as const,
-      value: term.term,
-      label: term.term,
-      color: 'bg-purple-100 text-purple-800'
-    })),
-    ...BOOLEAN_OPERATORS
-  ]
+    onQueryChange({ rawQuery: query, terms, operators })
+  }, [buildQueryString, onQueryChange, queryElements])
 
   return (
     <DndContext
@@ -302,4 +306,6 @@ export default function QueryBuilder({ availableTerms, onQueryChange }: QueryBui
           <DraggableChip element={draggedElement} isDragging />
         ) : null}
       </DragOverlay>
-    </D
+    </DndContext>
+  )
+}

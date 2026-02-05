@@ -29,7 +29,7 @@ public class CaseSubmission {
     @CreationTimestamp
     private LocalDateTime submittedAt;
 
-    @Column(length = 5000)
+    @Column(length = 10000)
     private String content;
 
     @ElementCollection

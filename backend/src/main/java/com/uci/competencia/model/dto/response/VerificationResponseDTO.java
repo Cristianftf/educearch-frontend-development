@@ -18,6 +18,7 @@ public class VerificationResponseDTO {
     private String status;  // 'verified' | 'conflicting' | 'misinformation' | 'pending'
     private Double score;  // Puntuación general
     private List<EvidenceDTO> supportingEvidence;
+    private List<EvidenceDTO> contradictingEvidence;
     private List<EvidenceDTO> conflictingEvidence;
     private String explanation;  // Explicación (renombrado de genText)
     private List<String> recommendations;
@@ -45,4 +46,3 @@ public class VerificationResponseDTO {
         private Integer evidenceLevel;
     }
 }
-

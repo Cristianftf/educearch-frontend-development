@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/contexts/auth-context'
 import { professorAnalyticsApi, evaluationApi } from '@/lib/api'
-import type { User, CaseSubmission, StudentProgress, CompetencyType } from '@/types'
+import type { StudentSummary, CaseSubmission, CompetencyType } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -32,7 +32,7 @@ import { StudentsCompetencyHeatmap } from '@/components/students-competency-heat
 interface DashboardData {
   studentCount: number
   averageProgress: Record<string, number>
-  lowProgressStudents: User[]
+  lowProgressStudents: StudentSummary[]
   commonSearchTerms: { term: string; count: number }[]
   problematicTerms: { term: string; errorRate: number }[]
   studentCompetencies?: Array<{
@@ -49,6 +49,11 @@ const competencyLabels: Record<CompetencyType, string> = {
   access: 'Acceso',
   process: 'Procesamiento',
   communicate: 'Comunicación',
+}
+
+const toPercent = (value?: number) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return 0
+  return value <= 1 ? Math.round(value * 100) : Math.round(value)
 }
 
 export default function ProfessorDashboard() {
@@ -393,7 +398,7 @@ export default function ProfessorDashboard() {
                     >
                       <span className="text-sm">{item.term}</span>
                       <Badge variant="destructive" className="text-xs">
-                        {item.errorRate}% errores
+                        {toPercent(item.errorRate)}% errores
                       </Badge>
                     </div>
                   ))}

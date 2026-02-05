@@ -5,7 +5,7 @@ export const adminAuditApi = {
   getLogs: (
     page = 1,
     limit = 100,
-    filters?: { level?: string; userId?: string; dateRange?: [string, string]; search?: string }
+    filters?: { level?: string; userId?: string; search?: string; startDate?: string; endDate?: string }
   ) =>
     api.get<{ 
       logs: AuditLog[]
@@ -16,7 +16,7 @@ export const adminAuditApi = {
       hasMore: boolean
       stats?: { info: number; warn: number; error: number }
     }>(
-      `/admin/audit/logs?page=${page}&limit=${limit}${filters?.level ? `&level=${filters.level}` : ''}${filters?.userId ? `&userId=${filters.userId}` : ''}${filters?.search ? `&search=${filters.search}` : ''}`
+      `/admin/audit/logs?page=${page}&limit=${limit}${filters?.level ? `&level=${filters.level}` : ''}${filters?.userId ? `&userId=${filters.userId}` : ''}${filters?.search ? `&search=${filters.search}` : ''}${filters?.startDate ? `&startDate=${filters.startDate}` : ''}${filters?.endDate ? `&endDate=${filters.endDate}` : ''}`
     ),
 
   exportLogs: (format: 'pdf' | 'excel' | 'json' | 'csv', filters?: { startDate?: string; endDate?: string; level?: string; userId?: string }) =>

@@ -364,7 +364,7 @@ public class ProgressTrackingServiceImpl implements ProgressTrackingService {
             LocalDateTime endDateTime = LocalDateTime.now();
 
             Pageable pageable = PageRequest.of(0, 1000);
-            Page<SearchSession> sessions = searchSessionRepository.findByUserId(studentId, pageable);
+            Page<SearchSession> sessions = searchSessionRepository.findByUser_Id(studentId, pageable);
 
             // Llenar heatmap
             for (SearchSession session : sessions.getContent()) {

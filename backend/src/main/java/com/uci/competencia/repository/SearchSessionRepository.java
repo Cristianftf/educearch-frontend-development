@@ -8,5 +8,6 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface SearchSessionRepository extends JpaRepository<SearchSession, String> {
-    Page<SearchSession> findByUserId(String userId, Pageable pageable);
+    Page<SearchSession> findByUser_Id(String userId, Pageable pageable);
+    java.util.Optional<SearchSession> findByIdAndUser_Id(String id, String userId);
 }

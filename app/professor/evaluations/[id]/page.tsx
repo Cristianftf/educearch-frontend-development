@@ -190,11 +190,29 @@ export default function EvaluationDetailPage() {
 
     setIsSaving(true)
     try {
+      const scores = competencyFeedback.reduce(
+        (acc, item) => {
+          acc[item.competency] = item.score
+          return acc
+        },
+        { access: 0, process: 0, communicate: 0 } as Record<CompetencyType, number>
+      )
+
+      const comments = competencyFeedback.reduce(
+        (acc, item) => {
+          acc[item.competency] = item.comment
+          return acc
+        },
+        { access: '', process: '', communicate: '' } as Record<CompetencyType, string>
+      )
+
       await evaluationApi.submit(submissionId, {
-        rubricScores,
-        competencyFeedback,
-        generalFeedback,
-        totalScore,
+        submissionId,
+        professorId: '',
+        scores,
+        comments,
+        overallScore: totalScore,
+        feedback: generalFeedback,
       })
       router.push('/professor/evaluations')
     } catch (err) {

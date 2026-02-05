@@ -68,7 +68,7 @@ export default function AdminDashboard() {
           <div className="flex-1">
             <p className="font-medium text-green-800">Sistema Operativo</p>
             <p className="text-sm text-green-600">
-              Todos los servicios funcionando correctamente. Ãšltima verificaciÃ³n: hace 2 minutos.
+              Todos los servicios funcionando correctamente. Ãšltima verificación: hace 2 minutos.
             </p>
           </div>
           <Badge variant="outline" className="border-green-300 text-green-700">
@@ -130,7 +130,7 @@ export default function AdminDashboard() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              BÃºsquedas Hoy
+              Búsquedas Hoy
             </CardTitle>
             <Search className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -150,7 +150,7 @@ export default function AdminDashboard() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Activity className="h-5 w-5" />
-              MÃ©tricas del Sistema en Tiempo Real
+              Métricas del Sistema en Tiempo Real
             </CardTitle>
             <CardDescription>
               Monitoreo de recursos y rendimiento
@@ -275,7 +275,7 @@ export default function AdminDashboard() {
                 },
                 {
                   type: "info",
-                  message: "Backup automÃ¡tico completado",
+                  message: "Backup automático completado",
                   time: "Hace 2 horas",
                 },
                 {
@@ -285,8 +285,8 @@ export default function AdminDashboard() {
                 },
                 {
                   type: "success",
-                  message: "ActualizaciÃ³n del modelo RAG completada",
-                  time: "Hace 1 dÃ­a",
+                  message: "Actualización del modelo RAG completada",
+                  time: "Hace 1 día",
                 },
               ].map((alert, index) => (
                 <div
@@ -336,8 +336,8 @@ export default function AdminDashboard() {
                 {[
                   { action: "Nuevo registro", user: "Maria Garcia", time: "Hace 5 min" },
                   { action: "Login exitoso", user: "Carlos Lopez", time: "Hace 12 min" },
-                  { action: "ActualizaciÃ³n perfil", user: "Ana Torres", time: "Hace 25 min" },
-                  { action: "Cambio de contraseÃ±a", user: "Pedro Ruiz", time: "Hace 1 hora" },
+                  { action: "Actualización perfil", user: "Ana Torres", time: "Hace 25 min" },
+                  { action: "Cambio de contraseña", user: "Pedro Ruiz", time: "Hace 1 hora" },
                 ].map((activity, index) => (
                   <div key={index} className="flex items-center justify-between py-2 border-b last:border-0">
                     <div>
@@ -352,7 +352,7 @@ export default function AdminDashboard() {
                 {[
                   { action: "Backup completado", detail: "15.2 GB", time: "Hace 2 horas" },
                   { action: "Cache limpiado", detail: "2.1 GB liberados", time: "Hace 4 horas" },
-                  { action: "Ãndices optimizados", detail: "Base de datos", time: "Hace 6 horas" },
+                  { action: "Índices optimizados", detail: "Base de datos", time: "Hace 6 horas" },
                 ].map((activity, index) => (
                   <div key={index} className="flex items-center justify-between py-2 border-b last:border-0">
                     <div>
@@ -389,7 +389,7 @@ export default function AdminDashboard() {
       {/* Quick Actions */}
       <Card>
         <CardHeader>
-          <CardTitle>Acciones RÃ¡pidas</CardTitle>
+          <CardTitle>Acciones Rápidas</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

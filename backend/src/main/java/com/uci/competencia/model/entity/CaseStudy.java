@@ -24,7 +24,7 @@ public class CaseStudy {
     @Column(nullable = false)
     private String title;
 
-    @Column(length = 2000)
+    @Column(length = 5000)
     private String scenario;
 
     @Enumerated(EnumType.STRING)

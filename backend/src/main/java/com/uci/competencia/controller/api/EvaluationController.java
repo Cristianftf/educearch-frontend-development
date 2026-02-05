@@ -52,6 +52,31 @@ public class EvaluationController {
     }
 
     /**
+     * GET /api/evaluations/reviewed
+     * Obtener evaluaciones revisadas para un profesor
+     */
+    @GetMapping("/reviewed")
+    @PreAuthorize("hasRole('PROFESSOR')")
+    public ResponseEntity<Map<String, Object>> getReviewedEvaluations() {
+        log.info("Getting reviewed evaluations for professor");
+
+        try {
+            String professorId = getProfessorIdFromContext();
+            List<Map<String, Object>> reviewed = evaluationService.getReviewedEvaluations(professorId);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("evaluations", reviewed);
+            response.put("count", reviewed.size());
+            response.put("timestamp", System.currentTimeMillis());
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error getting reviewed evaluations: {}", e.getMessage());
+            return buildErrorResponse("Error getting reviewed evaluations", e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
      * POST /api/evaluations/{submissionId}
      * Crear una nueva evaluación
      */

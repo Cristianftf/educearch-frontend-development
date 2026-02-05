@@ -11,13 +11,28 @@ import java.util.Map;
 @NoArgsConstructor
 @AllArgsConstructor
 public class StudentProgressDTO {
-    private Long studentId;
+    private String studentId;
+    private String userId;
     private Double overallProgress;
-    private Map<String, Double> competencies;
+    private Map<String, CompetencyProgressDTO> competencies;
     private Integer casesCompleted;
     private Integer totalCases;
     private Double averageGrade;
     private Double hoursSpent;
     private Map<String, Integer> activityStats;
     private List<String> recommendations;
+    private Integer totalSearches;
+    private Integer totalVerifications;
+    private Integer totalBibliographies;
+    private List<ActivityDTO> recentActivities;
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class CompetencyProgressDTO {
+        private String type;
+        private Double score;
+        private String level;
+        private String lastUpdated;
+    }
 }

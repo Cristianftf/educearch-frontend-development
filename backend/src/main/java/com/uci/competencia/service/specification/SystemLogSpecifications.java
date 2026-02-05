@@ -111,4 +111,24 @@ public class SystemLogSpecifications {
             return cb.equal(root.get("ipAddress"), ipAddress);
         };
     }
+
+    /**
+     * EspecificaciÃ³n para busqueda libre en campos comunes
+     */
+    public static Specification<SystemLog> containsSearch(String search) {
+        return (root, query, cb) -> {
+            if (search == null || search.isEmpty()) return cb.conjunction();
+            String like = "%" + search.toLowerCase() + "%";
+            return cb.or(
+                cb.like(cb.lower(root.get("userId")), like),
+                cb.like(cb.lower(root.get("userRole")), like),
+                cb.like(cb.lower(root.get("endpoint")), like),
+                cb.like(cb.lower(root.get("errorMessage")), like),
+                cb.like(cb.lower(root.get("requestDetails")), like),
+                cb.like(cb.lower(root.get("responseDetails")), like),
+                cb.like(cb.lower(root.get("userAgent")), like),
+                cb.like(cb.lower(root.get("ipAddress")), like)
+            );
+        };
+    }
 }

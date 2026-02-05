@@ -32,6 +32,16 @@ public interface AdminService {
     Page<User> getUsersByRole(Role role, Pageable pageable);
 
     /**
+     * Obtener usuarios por estado activo/inactivo con paginacion
+     */
+    Page<User> getUsersByStatus(boolean active, Pageable pageable);
+
+    /**
+     * Obtener usuarios por rol y estado activo/inactivo con paginacion
+     */
+    Page<User> getUsersByRoleAndStatus(Role role, boolean active, Pageable pageable);
+
+    /**
      * Obtener usuario por ID
      */
     User getUserById(String id);
@@ -168,6 +178,24 @@ public interface AdminService {
      * Exportar logs de auditoría
      */
     Map<String, Object> exportAuditLogs(String format, Map<String, Object> filters);
+
+    /**
+     * Optimizar base de datos
+     */
+    void optimizeDatabase();
+
+    /**
+     * Regenerar indices de busqueda
+     */
+    void rebuildSearchIndexes();
+
+    /**
+     * Limpiar logs antiguos
+     *
+     * @param olderThan Fecha limite
+     * @return cantidad de logs eliminados
+     */
+    long cleanupLogs(LocalDateTime olderThan);
     
     /**
      * Resultado de importación en lote

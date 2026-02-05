@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { bibliographyApi, searchApi } from '@/lib/api'
-import type { Bibliography, BibliographyFormat, SearchResult, SearchSession } from '@/types'
+import type { Bibliography, BibliographyFormat, SearchResult, SearchQuery } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -43,6 +44,7 @@ import {
   CheckCircle2,
   AlertCircle,
 } from 'lucide-react'
+import { useStudent } from '@/contexts/student-context'
 
 const FORMAT_LABELS: Record<BibliographyFormat, string> = {
   apa: 'APA 7th Edition',
@@ -74,8 +76,10 @@ const FORMAT_EXAMPLES: Record<BibliographyFormat, string> = {
 }
 
 export default function BibliographyPage() {
+  const searchParams = useSearchParams()
   const [selectedArticles, setSelectedArticles] = useState<SearchResult[]>([])
   const [availableArticles, setAvailableArticles] = useState<SearchResult[]>([])
+  const [recentSearches, setRecentSearches] = useState<SearchQuery[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedFormat, setSelectedFormat] = useState<BibliographyFormat>('apa')
   const [bibliographyName, setBibliographyName] = useState('')
@@ -85,27 +89,64 @@ export default function BibliographyPage() {
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isLoadingArticles, setIsLoadingArticles] = useState(false)
+  const [isLoadingFromHistory, setIsLoadingFromHistory] = useState(false)
+  const { addBibliography, setBibliographies, bibliographies } = useStudent()
 
   // Load saved bibliographies and available articles
   useEffect(() => {
     async function loadData() {
       try {
-        const [bibHistory, searchHistory] = await Promise.all([
-          bibliographyApi.getHistory(),
-          searchApi.getHistory(1, 50),
-        ])
-        setSavedBibliographies(bibHistory)
-
-        // Get unique articles from search history
-        const articlesMap = new Map<string, SearchResult>()
-        // Note: In a real app, you'd fetch the actual results from sessions
-        setAvailableArticles([])
+        const searchHistory = await searchApi.getHistory(1, 50)
+        setRecentSearches(searchHistory.searches || [])
       } catch (err) {
         console.error('[v0] Error loading data:', err)
       }
     }
     loadData()
   }, [])
+
+  useEffect(() => {
+    if (bibliographies.length > 0) {
+      setSavedBibliographies(bibliographies)
+    }
+  }, [bibliographies])
+
+  useEffect(() => {
+    const source = searchParams.get('source')
+    if (!source) return
+
+    const getSelection = (key: string) => {
+      try {
+        const raw = localStorage.getItem(key)
+        if (!raw) return null
+        const parsed = JSON.parse(raw) as SearchResult[]
+        if (!Array.isArray(parsed) || parsed.length === 0) return null
+        return parsed
+      } catch {
+        return null
+      }
+    }
+
+    if (source === 'pyramid') {
+      const parsed = getSelection('evidence_pyramid_selection')
+      if (!parsed) return
+      setAvailableArticles(parsed)
+      setSelectedArticles(parsed)
+      if (!bibliographyName) {
+        setBibliographyName('Bibliografía desde pirámide de evidencia')
+      }
+    }
+
+    if (source === 'search') {
+      const parsed = getSelection('search_selection')
+      if (!parsed) return
+      setAvailableArticles(parsed)
+      setSelectedArticles(parsed)
+      if (!bibliographyName) {
+        setBibliographyName('Bibliografía desde búsqueda avanzada')
+      }
+    }
+  }, [searchParams, bibliographyName])
 
   const searchArticles = useCallback(async (term: string) => {
     if (term.length < 2) return
@@ -119,10 +160,32 @@ export default function BibliographyPage() {
         rawQuery: term,
       })
       setAvailableArticles(session.results)
+      setSelectedArticles([])
     } catch (err) {
       console.error('[v0] Search error:', err)
+      setError('No se pudieron cargar artículos. Intenta con otro término.')
     } finally {
       setIsLoadingArticles(false)
+    }
+  }, [])
+
+  const loadFromHistory = useCallback(async (search: SearchQuery) => {
+    setIsLoadingFromHistory(true)
+    setError(null)
+    try {
+      const session = await searchApi.execute({
+        terms: search.terms,
+        operators: search.operators,
+        filters: search.filters,
+        rawQuery: search.rawQuery,
+      })
+      setAvailableArticles(session.results)
+      setSelectedArticles([])
+    } catch (err) {
+      console.error('[v0] History load error:', err)
+      setError('No se pudo cargar la búsqueda seleccionada.')
+    } finally {
+      setIsLoadingFromHistory(false)
     }
   }, [])
 
@@ -169,10 +232,12 @@ export default function BibliographyPage() {
         bibliographyName
       )
       setGeneratedBibliography(bibliography)
+      addBibliography(bibliography)
 
       // Refresh saved bibliographies
       const bibHistory = await bibliographyApi.getHistory()
       setSavedBibliographies(bibHistory)
+      setBibliographies(bibHistory)
     } catch (err) {
       setError('Error al generar la bibliografía. Intenta de nuevo.')
       console.error('[v0] Generation error:', err)
@@ -230,6 +295,15 @@ export default function BibliographyPage() {
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Article Selection */}
         <div className="lg:col-span-2 space-y-6">
+          {(searchParams.get('source') === 'pyramid' || searchParams.get('source') === 'search') && selectedArticles.length > 0 && (
+            <Card className="border-primary/20 bg-primary/5">
+              <CardContent className="py-4">
+                <p className="text-sm text-primary">
+                  Importamos {selectedArticles.length} estudios desde la selección.
+                </p>
+              </CardContent>
+            </Card>
+          )}
           {/* Search for articles */}
           <Card>
             <CardHeader>
@@ -542,9 +616,9 @@ export default function BibliographyPage() {
                           <Badge variant="secondary" className="text-xs">
                             {FORMAT_LABELS[bib.format]}
                           </Badge>
-                          <span className="text-xs text-muted-foreground">
-                            {bib.articles.length} artículos
-                          </span>
+                  <span className="text-xs text-muted-foreground">
+                    {(bib.articleCount ?? bib.articles.length)} artículos
+                  </span>
                         </div>
                       </div>
                     ))}
@@ -554,6 +628,53 @@ export default function BibliographyPage() {
                 <div className="text-center py-8 text-muted-foreground">
                   <History className="h-8 w-8 mx-auto mb-2 opacity-50" />
                   <p className="text-sm">No hay bibliografías guardadas</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Recent Searches */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <History className="h-5 w-5" />
+                Búsquedas recientes
+              </CardTitle>
+              <CardDescription>Usa consultas previas para cargar artículos</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {recentSearches.length > 0 ? (
+                <ScrollArea className="h-[220px]">
+                  <div className="space-y-2">
+                    {recentSearches.slice(0, 8).map((search) => (
+                      <div
+                        key={search.id}
+                        className="p-3 rounded-lg border hover:bg-muted/50 transition-colors"
+                      >
+                        <p className="text-sm font-medium truncate">
+                          {search.rawQuery}
+                        </p>
+                        <div className="flex items-center justify-between mt-2">
+                          <span className="text-xs text-muted-foreground">
+                            {search.resultCount ?? '—'} resultados
+                          </span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => loadFromHistory(search)}
+                            disabled={isLoadingFromHistory}
+                          >
+                            {isLoadingFromHistory ? 'Cargando...' : 'Usar'}
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              ) : (
+                <div className="text-center py-6 text-muted-foreground">
+                  <History className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">No hay búsquedas recientes</p>
                 </div>
               )}
             </CardContent>

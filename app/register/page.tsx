@@ -8,9 +8,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { BookOpen, AlertCircle, Loader2, CheckCircle } from 'lucide-react'
 import { authRegisterApi } from '@/lib/auth-register'
+import type { UserRole } from '@/types'
+import { evaluatePassword, PASSWORD_POLICY_HINT } from '@/lib/password-policy'
 
 export default function RegisterPage() {
   const router = useRouter()
@@ -35,10 +36,6 @@ export default function RegisterPage() {
     setFormData(prev => ({ ...prev, [name]: value }))
   }
 
-  const handleSelectChange = (value: string) => {
-    setFormData(prev => ({ ...prev, role: value }))
-  }
-
   const validateForm = (): boolean => {
     if (!formData.email || !formData.username || !formData.password || !formData.firstName || !formData.lastName) {
       setError('Por favor, complete todos los campos requeridos')
@@ -55,8 +52,9 @@ export default function RegisterPage() {
       return false
     }
 
-    if (formData.password.length < 6) {
-      setError('La contraseña debe tener al menos 6 caracteres')
+    const policy = evaluatePassword(formData.password)
+    if (!policy.isValid) {
+      setError(PASSWORD_POLICY_HINT)
       return false
     }
 
@@ -83,7 +81,7 @@ export default function RegisterPage() {
         email: formData.email,
         name: `${formData.firstName} ${formData.lastName}`.trim(),
         password: formData.password,
-        role: formData.role as any,
+        role: formData.role as UserRole,
         username: formData.username,
         faculty: formData.faculty || undefined,
         department: formData.department || undefined,
@@ -238,22 +236,6 @@ export default function RegisterPage() {
                     className="h-10"
                   />
                 </div>
-
-                {/* Role Selection */}
-                <div className="space-y-2">
-                  <Label htmlFor="role">Tipo de usuario *</Label>
-                  <Select value={formData.role} onValueChange={handleSelectChange}>
-                    <SelectTrigger className="h-10">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="student">Estudiante</SelectItem>
-                      <SelectItem value="professor">Profesor</SelectItem>
-                      <SelectItem value="admin">Administrador</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
                 {/* Faculty and Department */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
@@ -295,6 +277,9 @@ export default function RegisterPage() {
                     disabled={isLoading}
                     className="h-10"
                   />
+                  <p className="text-xs text-muted-foreground">
+                    {PASSWORD_POLICY_HINT}
+                  </p>
                 </div>
 
                 {/* Confirm Password */}

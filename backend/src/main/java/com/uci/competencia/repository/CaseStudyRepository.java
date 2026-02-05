@@ -15,8 +15,6 @@ public interface CaseStudyRepository extends JpaRepository<CaseStudy, String> {
 
     List<CaseStudy> findByStatus(CaseStatus status);
 
-    Optional<CaseStudy> findById(Long id);
-
     List<CaseStudy> findByCreatedBy(String professorId);
 
     @Query("SELECT c FROM CaseStudy c WHERE :studentId MEMBER OF c.assignedStudents")

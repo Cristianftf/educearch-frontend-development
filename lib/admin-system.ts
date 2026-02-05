@@ -1,13 +1,13 @@
-import type { SystemHealth, SystemSettings, Alert } from '@/types'
+import type { SystemHealth, AdminSystemConfiguration, Alert } from '@/types'
 import { api } from './api-client'
 
 export const adminSystemApi = {
   getHealth: () => api.get<SystemHealth>('/admin/health'),
 
-  getSettings: () => api.get<SystemSettings>('/admin/settings'),
+  getSettings: () => api.get<AdminSystemConfiguration>('/admin/settings'),
 
-  updateSettings: (settings: Partial<SystemSettings>) =>
-    api.put<SystemSettings>('/admin/settings', settings),
+  updateSettings: (settings: AdminSystemConfiguration) =>
+    api.put<void>('/admin/settings', settings),
 
   testPubmedConnection: () =>
     api.post<{ success: boolean; message: string; timestamp: string }>('/admin/test-pubmed'),
@@ -30,4 +30,19 @@ export const adminSystemApi = {
 
   restoreBackup: (backupId: string) =>
     api.post<{ backupId: string; status: string; message: string }>(`/admin/backups/${backupId}/restore`),
+
+  clearCache: (cacheNames: string[] = ['all']) =>
+    api.post<{ status: string; cleared: string[]; timestamp: string }>('/admin/cache/clear', { cacheNames }),
+
+  optimizeDatabase: () =>
+    api.post<{ status: string; message: string; timestamp: string }>('/admin/db/optimize'),
+
+  cleanupLogs: (olderThanDays = 30) =>
+    api.post<{ status: string; deleted: number; olderThanDays: number; timestamp: string }>(
+      '/admin/logs/cleanup',
+      { olderThanDays }
+    ),
+
+  rebuildSearchIndexes: () =>
+    api.post<{ status: string; message: string; timestamp: string }>('/admin/search/reindex'),
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { adminAuditApi } from "@/lib/api"
 import type { AuditLog } from "@/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AuditReportGenerator } from "@/components/audit-report-generator"
+import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -43,19 +44,37 @@ export default function AdminAuditPage() {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [error, setError] = useState<string | null>(null)
+  const [dateError, setDateError] = useState<string | null>(null)
+  const [showDateRange, setShowDateRange] = useState(false)
+  const [startDate, setStartDate] = useState("")
+  const [endDate, setEndDate] = useState("")
+  const pageSize = 20
 
   const loadLogs = useCallback(async () => {
     try {
+      setError(null)
+      setDateError(null)
+      if (startDate && endDate && startDate > endDate) {
+        setDateError("La fecha de inicio debe ser anterior a la fecha de fin.")
+        setIsLoading(false)
+        setIsRefreshing(false)
+        return
+      }
       const response = await adminAuditApi.getLogs(
         page,
-        20,
+        pageSize,
         {
           level: levelFilter !== "all" ? levelFilter : undefined,
           search: searchQuery || undefined,
+          startDate: startDate || undefined,
+          endDate: endDate || undefined,
         }
       )
       setLogs(response.logs)
-      setTotalPages(Math.ceil(response.total / 20))
+      setTotal(response.total)
+      setTotalPages(Math.max(1, Math.ceil(response.total / pageSize)))
       setStats({
         total: response.total,
         info: response.stats?.info || 0,
@@ -63,16 +82,21 @@ export default function AdminAuditPage() {
         error: response.stats?.error || 0,
       })
     } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cargar logs")
       console.error("[v0] Error loading audit logs:", err)
     } finally {
       setIsLoading(false)
       setIsRefreshing(false)
     }
-  }, [page, levelFilter, searchQuery])
+  }, [page, pageSize, levelFilter, searchQuery, startDate, endDate])
 
   useEffect(() => {
     loadLogs()
   }, [loadLogs])
+
+  useEffect(() => {
+    setPage(1)
+  }, [searchQuery, levelFilter, startDate, endDate])
 
   // WebSocket for real-time logs
   // TODO: Implement subscribeToLogs in adminAuditApi
@@ -91,14 +115,16 @@ export default function AdminAuditPage() {
   //   }
   // }, [])
 
-  const filteredLogs = logs.filter((log) => {
-    const matchesSearch =
-      log.user.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.details.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesLevel = levelFilter === "all" || log.level === levelFilter
-    return matchesSearch && matchesLevel
-  })
+  const filteredLogs = useMemo(() => {
+    return logs.filter((log) => {
+      const matchesSearch =
+        log.user.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        log.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        log.details.toLowerCase().includes(searchQuery.toLowerCase())
+      const matchesLevel = levelFilter === "all" || log.level === levelFilter
+      return matchesSearch && matchesLevel
+    })
+  }, [logs, searchQuery, levelFilter])
 
   const getLevelIcon = (level: string) => {
     switch (level) {
@@ -136,7 +162,7 @@ export default function AdminAuditPage() {
 
   const handleRefresh = () => {
     setIsRefreshing(true)
-    setTimeout(() => setIsRefreshing(false), 1500)
+    loadLogs()
   }
 
   return (
@@ -145,7 +171,7 @@ export default function AdminAuditPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">
-            AuditorÃ­a del Sistema
+            Auditoría del Sistema
           </h1>
           <p className="text-muted-foreground">
             Monitorea todas las actividades y eventos del sistema
@@ -168,7 +194,7 @@ export default function AdminAuditPage() {
               <Activity className="h-5 w-5 text-blue-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold">12,458</p>
+              <p className="text-2xl font-bold">{stats.total.toLocaleString()}</p>
               <p className="text-sm text-muted-foreground">Total eventos hoy</p>
             </div>
           </CardContent>
@@ -179,7 +205,7 @@ export default function AdminAuditPage() {
               <CheckCircle className="h-5 w-5 text-green-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold">11,892</p>
+              <p className="text-2xl font-bold">{stats.info.toLocaleString()}</p>
               <p className="text-sm text-muted-foreground">Eventos INFO</p>
             </div>
           </CardContent>
@@ -190,7 +216,7 @@ export default function AdminAuditPage() {
               <AlertTriangle className="h-5 w-5 text-amber-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold">523</p>
+              <p className="text-2xl font-bold">{stats.warn.toLocaleString()}</p>
               <p className="text-sm text-muted-foreground">Advertencias</p>
             </div>
           </CardContent>
@@ -201,7 +227,7 @@ export default function AdminAuditPage() {
               <XCircle className="h-5 w-5 text-red-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold">43</p>
+              <p className="text-2xl font-bold">{stats.error.toLocaleString()}</p>
               <p className="text-sm text-muted-foreground">Errores</p>
             </div>
           </CardContent>
@@ -233,12 +259,39 @@ export default function AdminAuditPage() {
                   <SelectItem value="ERROR">ERROR</SelectItem>
                 </SelectContent>
               </Select>
-              <Button variant="outline">
+              <Button variant="outline" onClick={() => setShowDateRange((prev) => !prev)}>
                 <Calendar className="mr-2 h-4 w-4" />
                 Rango de fechas
               </Button>
             </div>
           </div>
+          {showDateRange && (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label htmlFor="audit-start-date" className="text-xs">Desde</Label>
+                <Input
+                  id="audit-start-date"
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="audit-end-date" className="text-xs">Hasta</Label>
+                <Input
+                  id="audit-end-date"
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
+              </div>
+              {dateError && (
+                <div className="sm:col-span-2 text-xs text-destructive">
+                  {dateError}
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -250,10 +303,15 @@ export default function AdminAuditPage() {
             Registro de Eventos
           </CardTitle>
           <CardDescription>
-            {filteredLogs.length} eventos encontrados
+            {total} eventos encontrados
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {error && (
+            <div className="mb-4 text-sm text-destructive">
+              {error}
+            </div>
+          )}
           <div className="space-y-2">
             {filteredLogs.map((log) => (
               <div
@@ -328,13 +386,25 @@ export default function AdminAuditPage() {
           {/* Pagination */}
           <div className="flex items-center justify-between mt-4 pt-4 border-t">
             <p className="text-sm text-muted-foreground">
-              Mostrando 1-8 de 12,458 eventos
+              {filteredLogs.length === 0
+                ? "Mostrando 0 eventos"
+                : `Mostrando ${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, total)} de ${total} eventos`}
             </p>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" disabled>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1 || isLoading}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
                 Anterior
               </Button>
-              <Button variant="outline" size="sm">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages || isLoading}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
                 Siguiente
               </Button>
             </div>
@@ -345,7 +415,7 @@ export default function AdminAuditPage() {
       {/* Reports Section */}
       <Card>
         <CardHeader>
-          <CardTitle>Reportes AutomÃ¡ticos</CardTitle>
+          <CardTitle>Reportes Automáticos</CardTitle>
           <CardDescription>
             Genera reportes detallados de actividad del sistema
           </CardDescription>
@@ -355,7 +425,7 @@ export default function AdminAuditPage() {
             <Button variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 bg-transparent">
               <FileText className="h-5 w-5" />
               <span className="font-medium">Reporte Diario</span>
-              <span className="text-xs text-muted-foreground">Actividad Ãºltimas 24h</span>
+              <span className="text-xs text-muted-foreground">Actividad últimas 24h</span>
             </Button>
             <Button variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 bg-transparent">
               <FileText className="h-5 w-5" />
@@ -365,7 +435,7 @@ export default function AdminAuditPage() {
             <Button variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 bg-transparent">
               <FileText className="h-5 w-5" />
               <span className="font-medium">Reporte Mensual</span>
-              <span className="text-xs text-muted-foreground">EstadÃ­sticas del mes</span>
+              <span className="text-xs text-muted-foreground">Estadísticas del mes</span>
             </Button>
           </div>
         </CardContent>

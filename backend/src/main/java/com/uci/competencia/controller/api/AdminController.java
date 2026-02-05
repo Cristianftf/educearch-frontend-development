@@ -54,10 +54,21 @@ public class AdminController {
         Pageable pageable = PageRequest.of(page - 1, limit);
         Page<User> userPage;
 
-        // Apply filters
-        if (role != null && !role.isEmpty()) {
+        boolean hasRole = role != null && !role.isEmpty();
+        boolean hasStatus = status != null && !status.isEmpty();
+
+        if (hasStatus && "pending".equalsIgnoreCase(status)) {
+            userPage = Page.empty(pageable);
+        } else if (hasRole && hasStatus) {
+            Role userRole = Role.valueOf(role.toUpperCase());
+            boolean active = "active".equalsIgnoreCase(status);
+            userPage = adminService.getUsersByRoleAndStatus(userRole, active, pageable);
+        } else if (hasRole) {
             Role userRole = Role.valueOf(role.toUpperCase());
             userPage = adminService.getUsersByRole(userRole, pageable);
+        } else if (hasStatus) {
+            boolean active = "active".equalsIgnoreCase(status);
+            userPage = adminService.getUsersByStatus(active, pageable);
         } else {
             userPage = adminService.getAllUsers(pageable);
         }
@@ -132,6 +143,20 @@ public class AdminController {
         return ResponseEntity.ok(userDTO);
     }
 
+    @PutMapping("/users/{id}/status")
+    public ResponseEntity<Void> changeUserStatus(@PathVariable String id, @RequestBody Map<String, Object> request) {
+        Object activeObj = request.get("active");
+        if (activeObj == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        boolean active = Boolean.parseBoolean(activeObj.toString());
+
+        log.info("Changing status for user {} to {}", id, active ? "active" : "inactive");
+
+        adminService.toggleUserStatus(id, active);
+        return ResponseEntity.ok().build();
+    }
+
     @PostMapping("/users/import")
     public ResponseEntity<AdminService.BatchImportResult> importUsers(@RequestParam("file") MultipartFile file,
                                                                         @RequestParam(defaultValue = "false") boolean updateExisting) {
@@ -195,6 +220,68 @@ public class AdminController {
         }
     }
 
+    @PostMapping("/users/import-csv")
+    public ResponseEntity<AdminService.BatchImportResult> importUsersCsv(@RequestBody Map<String, Object> request) {
+        log.info("Importing users from CSV payload");
+
+        try {
+            Object usersObj = request.get("users");
+            if (!(usersObj instanceof List)) {
+                return ResponseEntity.badRequest().build();
+            }
+
+            boolean updateExisting = Boolean.parseBoolean(request.getOrDefault("updateExisting", "false").toString());
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> users = (List<Map<String, Object>>) usersObj;
+
+            List<UserBatchImportDTO.UserImportRecord> records = new ArrayList<>();
+            for (Map<String, Object> user : users) {
+                String email = Objects.toString(user.get("email"), "").trim();
+                if (email.isEmpty()) {
+                    continue;
+                }
+
+                String name = Objects.toString(user.get("name"), "").trim();
+                String firstName = Objects.toString(user.get("firstName"), "").trim();
+                String lastName = Objects.toString(user.get("lastName"), "").trim();
+                if (!name.isEmpty() && (firstName.isEmpty() && lastName.isEmpty())) {
+                    String[] parts = name.split("\\s+");
+                    firstName = parts.length > 0 ? parts[0] : "";
+                    lastName = parts.length > 1 ? String.join(" ", Arrays.copyOfRange(parts, 1, parts.length)) : "";
+                }
+
+                UserBatchImportDTO.UserImportRecord record = UserBatchImportDTO.UserImportRecord.builder()
+                    .email(email)
+                    .firstName(firstName)
+                    .lastName(lastName)
+                    .role(Objects.toString(user.get("role"), "STUDENT").toUpperCase())
+                    .faculty(Objects.toString(user.get("faculty"), null))
+                    .passwordHash(Objects.toString(user.get("password"), Objects.toString(user.get("passwordHash"), "")))
+                    .build();
+
+                records.add(record);
+            }
+
+            UserBatchImportDTO importDTO = UserBatchImportDTO.builder()
+                .users(records)
+                .sourceType("CSV")
+                .updateExisting(updateExisting)
+                .build();
+
+            AdminService.BatchImportResult result = adminService.importUsersBatch(importDTO);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Error importing users from CSV payload: {}", e.getMessage(), e);
+            AdminService.BatchImportResult errorResult = new AdminService.BatchImportResult();
+            errorResult.created = 0;
+            errorResult.updated = 0;
+            errorResult.failed = 1;
+            errorResult.errors = List.of("Error durante la importacion: " + e.getMessage());
+            errorResult.warnings = List.of();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResult);
+        }
+    }
+
     @GetMapping("/audit/logs")
     public ResponseEntity<Map<String, Object>> getAuditLogs(
             @RequestParam(defaultValue = "1") int page,
@@ -202,13 +289,14 @@ public class AdminController {
             @RequestParam(required = false) String level,
             @RequestParam(required = false) String userId,
             @RequestParam(required = false) String action,
+            @RequestParam(required = false) String search,
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate,
             @RequestParam(defaultValue = "timestamp") String orderBy,
             @RequestParam(defaultValue = "DESC") String order) {
 
-        log.info("Getting audit logs - page: {}, limit: {}, level: {}, userId: {}, action: {}, startDate: {}, endDate: {}", 
-            page, limit, level, userId, action, startDate, endDate);
+        log.info("Getting audit logs - page: {}, limit: {}, level: {}, userId: {}, action: {}, search: {}, startDate: {}, endDate: {}", 
+            page, limit, level, userId, action, search, startDate, endDate);
 
         try {
             // Validar límites
@@ -244,6 +332,10 @@ public class AdminController {
                 } catch (IllegalArgumentException e) {
                     log.warn("Invalid action type: {}", action);
                 }
+            }
+
+            if (search != null && !search.isEmpty()) {
+                spec = spec.and(SystemLogSpecifications.containsSearch(search));
             }
 
             // Filtro por rango de tiempo
@@ -532,6 +624,138 @@ public class AdminController {
             log.error("Error exporting audit logs: {}", e.getMessage());
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("error", "Error al exportar logs");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+
+    @PostMapping("/audit/export")
+    public ResponseEntity<Map<String, Object>> exportAuditLogsPost(@RequestBody Map<String, Object> request) {
+        String format = Objects.toString(request.getOrDefault("format", "json"), "json");
+        String startDate = Objects.toString(request.getOrDefault("startDate", null), null);
+        String endDate = Objects.toString(request.getOrDefault("endDate", null), null);
+        String level = Objects.toString(request.getOrDefault("level", null), null);
+        String userId = Objects.toString(request.getOrDefault("userId", request.getOrDefault("user", null)), null);
+
+        log.info("Exporting audit logs (POST) - format: {}, startDate: {}, endDate: {}", format, startDate, endDate);
+
+        try {
+            if (!format.matches("pdf|excel|json|csv")) {
+                Map<String, Object> errorResponse = new HashMap<>();
+                errorResponse.put("error", "Formato no valido");
+                errorResponse.put("message", "Use: pdf, excel, json o csv");
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
+            }
+
+            Map<String, Object> filters = new HashMap<>();
+            if (startDate != null && !startDate.isEmpty()) filters.put("startDate", startDate);
+            if (endDate != null && !endDate.isEmpty()) filters.put("endDate", endDate);
+            if (level != null && !level.isEmpty()) filters.put("level", level);
+            if (userId != null && !userId.isEmpty()) filters.put("userId", userId);
+
+            Map<String, Object> export = adminService.exportAuditLogs(format, filters);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("id", export.getOrDefault("id", "export_" + System.currentTimeMillis()));
+            response.put("fileName", export.getOrDefault("fileName", "audit_logs." + format));
+            response.put("downloadUrl", export.getOrDefault("downloadUrl", "/downloads/" + export.getOrDefault("id", "export")));
+            response.put("size", export.getOrDefault("size", 0));
+            response.put("format", format);
+            response.put("createdAt", LocalDateTime.now());
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error exporting audit logs (POST): {}", e.getMessage());
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Error al exportar logs");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+
+    // ======================== MAINTENANCE ENDPOINTS ========================
+
+    @PostMapping("/cache/clear")
+    public ResponseEntity<Map<String, Object>> clearCache(@RequestBody Map<String, Object> request) {
+        log.info("Clearing cache with request: {}", request);
+        try {
+            Object names = request.getOrDefault("cacheNames", List.of("all"));
+            List<String> cacheNames;
+            if (names instanceof List) {
+                cacheNames = ((List<?>) names).stream().map(String::valueOf).collect(Collectors.toList());
+            } else {
+                cacheNames = List.of(String.valueOf(names));
+            }
+            adminService.clearCache(cacheNames);
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "OK");
+            response.put("cleared", cacheNames);
+            response.put("timestamp", LocalDateTime.now());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error clearing cache: {}", e.getMessage());
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Error al limpiar cache");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+
+    @PostMapping("/db/optimize")
+    public ResponseEntity<Map<String, Object>> optimizeDatabase() {
+        log.info("Optimizing database");
+        try {
+            adminService.optimizeDatabase();
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "OK");
+            response.put("message", "Optimizacion iniciada");
+            response.put("timestamp", LocalDateTime.now());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error optimizing database: {}", e.getMessage());
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Error al optimizar base de datos");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+
+    @PostMapping("/logs/cleanup")
+    public ResponseEntity<Map<String, Object>> cleanupLogs(@RequestBody Map<String, Object> request) {
+        log.info("Cleaning logs with request: {}", request);
+        try {
+            int olderThanDays = Integer.parseInt(request.getOrDefault("olderThanDays", 30).toString());
+            LocalDateTime cutoff = LocalDateTime.now().minusDays(Math.max(1, olderThanDays));
+            long deleted = adminService.cleanupLogs(cutoff);
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "OK");
+            response.put("deleted", deleted);
+            response.put("olderThanDays", olderThanDays);
+            response.put("timestamp", LocalDateTime.now());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error cleaning logs: {}", e.getMessage());
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Error al limpiar logs");
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+
+    @PostMapping("/search/reindex")
+    public ResponseEntity<Map<String, Object>> rebuildSearchIndexes() {
+        log.info("Rebuilding search indexes");
+        try {
+            adminService.rebuildSearchIndexes();
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "OK");
+            response.put("message", "Reindexacion iniciada");
+            response.put("timestamp", LocalDateTime.now());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error rebuilding search indexes: {}", e.getMessage());
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Error al regenerar indices");
             errorResponse.put("message", e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
         }

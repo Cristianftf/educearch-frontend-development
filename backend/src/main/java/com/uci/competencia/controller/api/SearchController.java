@@ -1,7 +1,11 @@
 package com.uci.competencia.controller.api;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.uci.competencia.model.dto.request.SearchRequestDTO;
 import com.uci.competencia.model.dto.response.SearchResponseDTO;
+import com.uci.competencia.model.entity.SearchSession;
+import com.uci.competencia.repository.SearchSessionRepository;
 import com.uci.competencia.service.SearchService;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +30,12 @@ public class SearchController {
     @Autowired
     private SearchService searchService;
 
+    @Autowired
+    private SearchSessionRepository searchSessionRepository;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
     @PostMapping("/execute")
     @PreAuthorize("hasAnyRole('STUDENT', 'PROFESSOR')")
     public ResponseEntity<SearchResponseDTO> executeSearch(@Valid @RequestBody SearchRequestDTO request) {
@@ -35,9 +45,18 @@ public class SearchController {
     }
 
     @GetMapping("/mesh/suggestions")
-    public ResponseEntity<String> getMeshSuggestions(@RequestParam String term) {
+    public ResponseEntity<List<Map<String, String>>> getMeshSuggestions(@RequestParam String term) {
         log.info("Getting MeSH suggestions for term: {}", term);
-        return ResponseEntity.ok("MeSH suggestions");
+        // Placeholder response until PubMed integration is implemented
+        List<Map<String, String>> suggestions = new ArrayList<>();
+        if (term != null && !term.isBlank()) {
+            Map<String, String> entry = new HashMap<>();
+            entry.put("id", term.toUpperCase());
+            entry.put("term", term);
+            entry.put("description", "Suggested MeSH term");
+            suggestions.add(entry);
+        }
+        return ResponseEntity.ok(suggestions);
     }
 
     @GetMapping("/results/{searchId}/evidence-pyramid")
@@ -58,32 +77,19 @@ public class SearchController {
         String userId = getCurrentUserId();
         log.info("Getting search history for user: {}, page: {}, limit: {}", userId, page, limit);
 
-        // Obtener historial desde la base de datos usando searchRepository
-        // Implementado: Consulta SearchSession por userId con paginación
-        List<Map<String, Object>> searches = new ArrayList<>();
+        if (page < 1) page = 1;
+        if (limit < 1 || limit > 100) limit = 10;
 
-        Map<String, Object> mockSearch1 = new HashMap<>();
-        mockSearch1.put("id", "search-1");
-        mockSearch1.put("terms", List.of(Map.of("id", "D0001", "term", "hypertension", "description", "High blood pressure")));
-        mockSearch1.put("rawQuery", "[hypertension]");
-        mockSearch1.put("createdAt", "2024-01-15T10:30:00Z");
-        mockSearch1.put("resultCount", 25);
-        mockSearch1.put("isFavorite", true);
+        var pageable = org.springframework.data.domain.PageRequest.of(page - 1, limit);
+        var sessions = searchSessionRepository.findByUser_Id(userId, pageable);
 
-        Map<String, Object> mockSearch2 = new HashMap<>();
-        mockSearch2.put("id", "search-2");
-        mockSearch2.put("terms", List.of(Map.of("id", "D0002", "term", "diabetes", "description", "Diabetes mellitus")));
-        mockSearch2.put("rawQuery", "[diabetes]");
-        mockSearch2.put("createdAt", "2024-01-14T15:45:00Z");
-        mockSearch2.put("resultCount", 18);
-        mockSearch2.put("isFavorite", false);
-
-        searches.add(mockSearch1);
-        searches.add(mockSearch2);
+        List<Map<String, Object>> searches = sessions.getContent().stream()
+            .map(this::mapSessionToSearchQuery)
+            .toList();
 
         Map<String, Object> response = new HashMap<>();
         response.put("searches", searches);
-        response.put("total", searches.size());
+        response.put("total", sessions.getTotalElements());
 
         return ResponseEntity.ok(response);
     }
@@ -100,14 +106,34 @@ public class SearchController {
         String userId = getCurrentUserId();
         log.info("Updating search {} for user: {}", searchId, userId);
 
-        // Actualización en base de datos: SearchSession.isFavorite y updatedAt
-        // Implementado: searchRepository.save()
-        Map<String, Object> response = new HashMap<>();
-        response.put("id", searchId);
-        response.put("isFavorite", updates.get("isFavorite"));
-        response.put("updatedAt", "2024-01-15T10:30:00Z");
+        return searchSessionRepository.findByIdAndUser_Id(searchId, userId)
+            .map(session -> {
+                Object favorite = updates.get("isFavorite");
+                if (favorite instanceof Boolean) {
+                    session.setIsFavorite((Boolean) favorite);
+                }
+                SearchSession saved = searchSessionRepository.save(session);
+                return ResponseEntity.ok(mapSessionToSearchQuery(saved));
+            })
+            .orElse(ResponseEntity.notFound().build());
+    }
 
-        return ResponseEntity.ok(response);
+    /**
+     * Eliminar una bÃºsqueda del historial
+     * DELETE /api/search/{searchId}
+     */
+    @DeleteMapping("/{searchId}")
+    @PreAuthorize("hasAnyRole('STUDENT', 'PROFESSOR')")
+    public ResponseEntity<Void> deleteSearch(@PathVariable String searchId) {
+        String userId = getCurrentUserId();
+        log.info("Deleting search {} for user: {}", searchId, userId);
+
+        var session = searchSessionRepository.findByIdAndUser_Id(searchId, userId);
+        if (session.isEmpty()) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.NOT_FOUND).build();
+        }
+        searchSessionRepository.delete(session.get());
+        return ResponseEntity.noContent().build();
     }
 
     /**
@@ -131,16 +157,143 @@ public class SearchController {
         String userId = getCurrentUserId();
         log.info("Getting search session {} for user: {}", sessionId, userId);
 
-        // Mock response - en una implementación real se obtendría de searchRepository
-        Map<String, Object> response = new HashMap<>();
-        response.put("id", sessionId);
-        response.put("userId", userId);
-        response.put("terms", List.of(Map.of("id", "D0001", "term", "hypertension", "description", "High blood pressure")));
-        response.put("rawQuery", "[hypertension]");
-        response.put("createdAt", "2024-01-15T10:30:00Z");
-        response.put("resultCount", 25);
-        response.put("isFavorite", false);
+        return searchSessionRepository.findByIdAndUser_Id(sessionId, userId)
+            .map(session -> {
+                Map<String, Object> query = mapSessionToSearchQuery(session);
+                Map<String, Object> response = new HashMap<>();
+                response.put("id", session.getId());
+                response.put("query", query);
+                response.put("results", List.of());
+                response.put("totalResults", session.getResultsCount() != null ? session.getResultsCount() : 0);
+                String executedAt = session.getCompletedAt() != null
+                    ? session.getCompletedAt().toString()
+                    : session.getStartedAt() != null ? session.getStartedAt().toString() : null;
+                response.put("executedAt", executedAt);
+                return ResponseEntity.ok(response);
+            })
+            .orElse(ResponseEntity.notFound().build());
+    }
 
-        return ResponseEntity.ok(response);
+    private Map<String, Object> mapSessionToSearchQuery(SearchSession session) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("id", session.getId());
+        response.put("rawQuery", session.getOriginalQuery());
+        response.put("createdAt", session.getStartedAt() != null ? session.getStartedAt().toString() : null);
+        response.put("resultCount", session.getResultsCount());
+        response.put("isFavorite", session.getIsFavorite() != null ? session.getIsFavorite() : false);
+        response.put("operators", List.of());
+        response.put("filters", Map.of());
+        response.put("terms", List.of());
+
+        if (session.getFiltersApplied() != null && !session.getFiltersApplied().isBlank()) {
+            try {
+                Map<String, Object> stored = objectMapper.readValue(
+                    session.getFiltersApplied(),
+                    new TypeReference<Map<String, Object>>() {}
+                );
+                Map<String, Object> query = asMap(stored.get("query"));
+                Map<String, Object> filters = asMap(stored.get("filters"));
+
+                List<String> terms = asStringList(query.get("terms"));
+                List<String> meshTerms = asStringList(query.get("meshTerms"));
+                List<Map<String, Object>> termObjects = new ArrayList<>();
+                for (int i = 0; i < terms.size(); i++) {
+                    String term = terms.get(i);
+                    String id = i < meshTerms.size() ? meshTerms.get(i) : term.toUpperCase();
+                    termObjects.add(Map.of(
+                        "id", id,
+                        "term", term,
+                        "description", ""
+                    ));
+                }
+
+                if (termObjects.isEmpty() && session.getOriginalQuery() != null && !session.getOriginalQuery().isBlank()) {
+                    termObjects.add(Map.of(
+                        "id", session.getOriginalQuery().toUpperCase(),
+                        "term", session.getOriginalQuery(),
+                        "description", ""
+                    ));
+                }
+
+                response.put("terms", termObjects);
+                response.put("operators", asStringList(query.get("operators")));
+                response.put("filters", mapFilters(filters));
+                response.put("rawQuery", session.getOriginalQuery() != null && !session.getOriginalQuery().isBlank()
+                    ? session.getOriginalQuery()
+                    : String.join(" ", terms));
+            } catch (Exception e) {
+                log.warn("Error parsing stored search session filters", e);
+            }
+        }
+
+        if (((List<?>) response.get("terms")).isEmpty() && session.getOriginalQuery() != null && !session.getOriginalQuery().isBlank()) {
+            response.put("terms", List.of(Map.of(
+                "id", session.getOriginalQuery().toUpperCase(),
+                "term", session.getOriginalQuery(),
+                "description", ""
+            )));
+        }
+
+        return response;
+    }
+
+    private Map<String, Object> asMap(Object value) {
+        if (value instanceof Map) {
+            Map<?, ?> raw = (Map<?, ?>) value;
+            Map<String, Object> mapped = new HashMap<>();
+            for (Map.Entry<?, ?> entry : raw.entrySet()) {
+                mapped.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+            return mapped;
+        }
+        return Map.of();
+    }
+
+    private List<String> asStringList(Object value) {
+        if (value instanceof List) {
+            List<?> list = (List<?>) value;
+            List<String> result = new ArrayList<>();
+            for (Object item : list) {
+                if (item != null) {
+                    result.add(item.toString());
+                }
+            }
+            return result;
+        }
+        return List.of();
+    }
+
+    private Map<String, Object> mapFilters(Map<String, Object> filters) {
+        Map<String, Object> mapped = new HashMap<>();
+        Integer yearFrom = asInteger(filters.get("yearFrom"));
+        Integer yearTo = asInteger(filters.get("yearTo"));
+        if (yearFrom != null || yearTo != null) {
+            mapped.put("yearRange", new Integer[] { yearFrom, yearTo });
+        }
+        List<String> studyTypes = asStringList(filters.get("studyTypes"));
+        if (!studyTypes.isEmpty()) {
+            mapped.put("studyTypes", studyTypes);
+        }
+        String language = filters.get("language") != null ? filters.get("language").toString() : null;
+        if (language != null && !language.isBlank()) {
+            mapped.put("languages", List.of(language));
+        }
+        return mapped;
+    }
+
+    private Integer asInteger(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        if (value instanceof String) {
+            try {
+                return Integer.parseInt((String) value);
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 }
+
+

@@ -14,11 +14,11 @@ import lombok.NoArgsConstructor;
 @Builder
 public class ExportBibliographyDTO {
     
-    private Long caseStudyId;
+    private String caseStudyId;
     
     private String format; // PDF, DOCX, BibTeX, RIS
     
     private String citationStyle; // APA, MLA, Chicago, Harvard
     
-    private Long userId;
+    private String userId;
 }

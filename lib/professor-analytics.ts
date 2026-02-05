@@ -1,4 +1,4 @@
-import type { User, StudentProgress } from '@/types'
+import type { StudentProgress, StudentSummary } from '@/types'
 import { api } from './api-client'
 
 export const professorAnalyticsApi = {
@@ -6,7 +6,7 @@ export const professorAnalyticsApi = {
     api.get<{
       studentCount: number
       averageProgress: Record<string, number>
-      lowProgressStudents: User[]
+      lowProgressStudents: StudentSummary[]
       commonSearchTerms: { term: string; count: number }[]
       problematicTerms: { term: string; errorRate: number }[]
     }>('/professor/analytics/overview'),

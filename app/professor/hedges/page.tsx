@@ -68,6 +68,27 @@ const mockHedges: SearchHedge[] = [
   },
 ]
 
+const normalizeHedge = (hedge: Partial<SearchHedge>): SearchHedge => ({
+  id: hedge.id ?? "",
+  name: hedge.name ?? "",
+  category: hedge.category ?? "General",
+  query: hedge.query ?? "",
+  description: hedge.description ?? "",
+  estimatedResults: Number.isFinite(hedge.estimatedResults as number)
+    ? (hedge.estimatedResults as number)
+    : 0,
+  precision: typeof hedge.precision === "number" ? hedge.precision : 0,
+  recall: typeof hedge.recall === "number" ? hedge.recall : 0,
+  createdAt: hedge.createdAt ?? "",
+  isTemplate: Boolean(hedge.isTemplate),
+})
+
+const formatDate = (value?: string) => {
+  if (!value) return "Sin fecha"
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? "Sin fecha" : date.toLocaleDateString("es-ES")
+}
+
 export default function ProfessorHedgesPage() {
   const [hedges, setHedges] = useState<SearchHedge[]>([])
   const [categories, setCategories] = useState<string[]>([])
@@ -104,7 +125,7 @@ export default function ProfessorHedgesPage() {
       setError(null)
 
       const hedgesData = await hedgesApi.getAll()
-      setHedges(hedgesData as SearchHedge[])
+      setHedges((hedgesData as SearchHedge[]).map(normalizeHedge))
 
       const categoriesData = await hedgesApi.getCategories()
       setCategories(categoriesData as string[])
@@ -140,7 +161,7 @@ export default function ProfessorHedgesPage() {
       } as any
 
       const created = await hedgesApi.create(newHedge)
-      setHedges([...hedges, created as SearchHedge])
+      setHedges([...hedges, normalizeHedge(created as SearchHedge)])
       setIsCreateDialogOpen(false)
       resetForm()
     } catch (err) {
@@ -164,7 +185,11 @@ export default function ProfessorHedgesPage() {
         ...formData,
       } as any)
 
-      setHedges(hedges.map(h => h.id === editingHedge.id ? (updated as SearchHedge) : h))
+      setHedges(
+        hedges.map((h) =>
+          h.id === editingHedge.id ? normalizeHedge(updated as SearchHedge) : h
+        )
+      )
       setIsEditDialogOpen(false)
       resetForm()
       setEditingHedge(null)
@@ -238,11 +263,20 @@ export default function ProfessorHedgesPage() {
       setTestResult(result)
       validateQuery(formData.query)
 
+      const resultCount =
+        (result as any).count ??
+        (result as any).resultCount ??
+        0
+      const estimatedPrecision =
+        (result as any).estimatedPrecision ?? formData.precision
+      const estimatedRecall =
+        (result as any).estimatedRecall ?? formData.recall
+
       setFormData(prev => ({
         ...prev,
-        estimatedResults: result.resultCount || 0,
-        precision: result.estimatedPrecision || 0.85,
-        recall: result.estimatedRecall || 0.78,
+        estimatedResults: resultCount,
+        precision: estimatedPrecision,
+        recall: estimatedRecall,
       }))
     } catch (err) {
       console.error("Error testing query:", err)
@@ -371,15 +405,21 @@ export default function ProfessorHedgesPage() {
                   <div className="grid grid-cols-3 gap-2 text-xs">
                     <div>
                       <span className="text-muted-foreground">Resultados:</span>
-                      <p className="font-semibold">{testResult.resultCount || 0}</p>
+                      <p className="font-semibold">
+                        {testResult.count ?? testResult.resultCount ?? 0}
+                      </p>
                     </div>
                     <div>
                       <span className="text-muted-foreground">Precisión:</span>
-                      <p className="font-semibold">{(testResult.estimatedPrecision * 100 || 85).toFixed(0)}%</p>
+                      <p className="font-semibold">
+                        {(((testResult.estimatedPrecision ?? formData.precision) * 100) || 0).toFixed(0)}%
+                      </p>
                     </div>
                     <div>
                       <span className="text-muted-foreground">Recall:</span>
-                      <p className="font-semibold">{(testResult.estimatedRecall * 100 || 78).toFixed(0)}%</p>
+                      <p className="font-semibold">
+                        {(((testResult.estimatedRecall ?? formData.recall) * 100) || 0).toFixed(0)}%
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -496,26 +536,26 @@ export default function ProfessorHedgesPage() {
                   <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded">
                     <p className="text-xs text-muted-foreground">Resultados</p>
                     <p className="text-lg font-bold text-blue-600 dark:text-blue-400">
-                      {hedge.estimatedResults.toLocaleString()}
+                      {(Number.isFinite(hedge.estimatedResults) ? hedge.estimatedResults : 0).toLocaleString()}
                     </p>
                   </div>
                   <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded">
                     <p className="text-xs text-muted-foreground">Precisión</p>
                     <p className="text-lg font-bold text-green-600 dark:text-green-400">
-                      {(hedge.precision * 100).toFixed(0)}%
+                      {Math.round((hedge.precision ?? 0) * 100)}%
                     </p>
                   </div>
                   <div className="bg-orange-50 dark:bg-orange-900/20 p-3 rounded">
                     <p className="text-xs text-muted-foreground">Recall</p>
                     <p className="text-lg font-bold text-orange-600 dark:text-orange-400">
-                      {(hedge.recall * 100).toFixed(0)}%
+                      {Math.round((hedge.recall ?? 0) * 100)}%
                     </p>
                   </div>
                 </div>
 
                 <div className="pt-2">
                   <p className="text-xs text-muted-foreground">
-                    Creado: {new Date(hedge.createdAt).toLocaleDateString('es-ES')}
+                    Creado: {formatDate(hedge.createdAt)}
                   </p>
                 </div>
               </CardContent>
@@ -615,15 +655,21 @@ export default function ProfessorHedgesPage() {
                           <div className="grid grid-cols-3 gap-2 text-xs">
                             <div>
                               <span className="text-muted-foreground">Resultados:</span>
-                              <p className="font-semibold">{testResult.resultCount || 0}</p>
+                              <p className="font-semibold">
+                                {testResult.count ?? testResult.resultCount ?? 0}
+                              </p>
                             </div>
                             <div>
                               <span className="text-muted-foreground">Precisión:</span>
-                              <p className="font-semibold">{(testResult.estimatedPrecision * 100 || 85).toFixed(0)}%</p>
+                              <p className="font-semibold">
+                                {(((testResult.estimatedPrecision ?? formData.precision) * 100) || 0).toFixed(0)}%
+                              </p>
                             </div>
                             <div>
                               <span className="text-muted-foreground">Recall:</span>
-                              <p className="font-semibold">{(testResult.estimatedRecall * 100 || 78).toFixed(0)}%</p>
+                              <p className="font-semibold">
+                                {(((testResult.estimatedRecall ?? formData.recall) * 100) || 0).toFixed(0)}%
+                              </p>
                             </div>
                           </div>
                         </div>

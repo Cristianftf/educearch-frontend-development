@@ -5,6 +5,7 @@ import React from "react"
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/contexts/auth-context'
+import { useStudent } from '@/contexts/student-context'
 import { progressApi } from '@/lib/api'
 import type { StudentProgress, Activity, CompetencyType } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -91,6 +92,7 @@ function getActivityIcon(type: Activity['type']) {
 
 export default function StudentDashboard() {
   const { user } = useAuth()
+  const { recentActivities } = useStudent()
   const [progress, setProgress] = useState<StudentProgress | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -246,9 +248,9 @@ export default function StudentDashboard() {
           </div>
         </CardHeader>
         <CardContent>
-          {progress?.recentActivities && progress.recentActivities.length > 0 ? (
+          {((progress?.recentActivities && progress.recentActivities.length > 0) || recentActivities.length > 0) ? (
             <div className="space-y-4">
-              {progress.recentActivities
+              {(progress?.recentActivities?.length ? progress.recentActivities : recentActivities)
                 .filter((activity) => activityFilter === 'all' || activity.type === activityFilter)
                 .slice(0, 5)
                 .map((activity) => {

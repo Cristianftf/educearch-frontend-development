@@ -2,8 +2,7 @@
 
 import React from "react"
 
-import { useState, useCallback, useEffect } from 'react'
-import { verifyApi } from '@/lib/api'
+import { useState, useCallback } from 'react'
 import type { VerificationResult, VerificationStatus } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -38,6 +37,7 @@ import {
   Lightbulb,
 } from 'lucide-react'
 import { VerificationRecommendations } from '@/components/verification-recommendations'
+import { useStudentVerify } from '@/hooks/use-student-verify'
 
 const statusConfig: Record<
   VerificationStatus,
@@ -73,23 +73,15 @@ export default function VerifyPage() {
   const [inputMode, setInputMode] = useState<'text' | 'url'>('text')
   const [claimText, setClaimText] = useState('')
   const [claimUrl, setClaimUrl] = useState('')
-  const [isVerifying, setIsVerifying] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<VerificationResult | null>(null)
-  const [history, setHistory] = useState<VerificationResult[]>([])
-
-  // Load verification history
-  useEffect(() => {
-    async function loadHistory() {
-      try {
-        const { verifications } = await verifyApi.getHistory(1, 10)
-        setHistory(verifications)
-      } catch (err) {
-        console.error('[v0] Error loading verification history:', err)
-      }
-    }
-    loadHistory()
-  }, [])
+  const {
+    verifyClaim,
+    verificationHistory,
+    loadHistory,
+    isVerifying,
+    error: verifyError,
+  } = useStudentVerify()
 
   const handleVerify = useCallback(async () => {
     const claim = inputMode === 'text' ? claimText : claimUrl
@@ -104,29 +96,26 @@ export default function VerifyPage() {
       return
     }
 
-    setIsVerifying(true)
     setError(null)
     setResult(null)
 
     try {
-      const verificationResult = await verifyApi.verifyClaim(
+      const verificationResult = await verifyClaim(
         inputMode === 'text' ? claim : '',
         inputMode === 'url' ? claim : undefined
       )
-      setResult(verificationResult)
-
-      // Refresh history
-      const { verifications } = await verifyApi.getHistory(1, 10)
-      setHistory(verifications)
+      if (verificationResult) {
+        setResult(verificationResult)
+        await loadHistory(1, 10)
+      }
     } catch (err) {
-      setError('Error al verificar. Intenta de nuevo más tarde.')
+      setError('Error al verificar. Intenta de nuevo m�s tarde.')
       console.error('[v0] Verification error:', err)
-    } finally {
-      setIsVerifying(false)
     }
-  }, [inputMode, claimText, claimUrl])
-
+  }, [inputMode, claimText, claimUrl, verifyClaim, loadHistory])
   const wordCount = claimText.split(/\s+/).filter(Boolean).length
+
+  const safeResult = result ? { ...result, supportingEvidence: Array.isArray(result.supportingEvidence) ? result.supportingEvidence : [], contradictingEvidence: Array.isArray(result.contradictingEvidence) ? result.contradictingEvidence : [], recommendations: Array.isArray(result.recommendations) ? result.recommendations : [] } : null;
 
   return (
     <div className="space-y-6">
@@ -196,10 +185,10 @@ export default function VerifyPage() {
                 </TabsContent>
               </Tabs>
 
-              {error && (
+              {(error || verifyError) && (
                 <div className="flex items-center gap-2 text-destructive text-sm p-3 bg-destructive/10 rounded-lg">
                   <AlertCircle className="h-4 w-4" />
-                  {error}
+                  {error || verifyError}
                 </div>
               )}
 
@@ -228,7 +217,7 @@ export default function VerifyPage() {
           </Card>
 
           {/* Results Section */}
-          {result && (
+          {safeResult && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">Resultado de la verificación</CardTitle>
@@ -238,14 +227,15 @@ export default function VerifyPage() {
                 <div className="flex justify-center">
                   <div className="flex flex-col items-center gap-4 p-6">
                     <div
-                      className={`p-6 rounded-full ${statusConfig[result.status].bgColor}`}
+                      className={`p-6 rounded-full ${statusConfig[safeResult.status].bgColor}`}
                     >
                       {(() => {
-                        const StatusIcon = statusConfig[result.status].icon
-                        return (
+                        const StatusIcon = statusConfig[safeResult.status].icon
+
+  return (
                           <StatusIcon
-                            className={`h-16 w-16 ${statusConfig[result.status].color} ${
-                              result.status === 'pending' ? 'animate-spin' : ''
+                            className={`h-16 w-16 ${statusConfig[safeResult.status].color} ${
+                              safeResult.status === 'pending' ? 'animate-spin' : ''
                             }`}
                           />
                         )
@@ -253,13 +243,13 @@ export default function VerifyPage() {
                     </div>
                     <div className="text-center">
                       <h3
-                        className={`text-xl font-semibold ${statusConfig[result.status].color}`}
+                        className={`text-xl font-semibold ${statusConfig[safeResult.status].color}`}
                       >
-                        {statusConfig[result.status].label}
+                        {statusConfig[safeResult.status].label}
                       </h3>
                       <div className="flex items-center justify-center gap-2 mt-2">
                         <span className="text-muted-foreground">Score de veracidad:</span>
-                        <span className="text-2xl font-bold">{result.score}%</span>
+                        <span className="text-2xl font-bold">{safeResult.score}%</span>
                       </div>
                     </div>
                   </div>
@@ -267,7 +257,7 @@ export default function VerifyPage() {
 
                 {/* Score Progress */}
                 <div className="space-y-2">
-                  <Progress value={result.score} className="h-3" />
+                  <Progress value={safeResult.score} className="h-3" />
                   <div className="flex justify-between text-xs text-muted-foreground">
                     <span>Baja confiabilidad</span>
                     <span>Alta confiabilidad</span>
@@ -277,7 +267,7 @@ export default function VerifyPage() {
                 {/* Claim */}
                 <div className="p-4 rounded-lg bg-muted">
                   <Label className="text-xs text-muted-foreground">Claim analizado</Label>
-                  <p className="mt-1 text-sm">{result.claim}</p>
+                  <p className="mt-1 text-sm">{safeResult.claim}</p>
                 </div>
 
                 {/* Evidence Breakdown */}
@@ -287,13 +277,13 @@ export default function VerifyPage() {
                     <CardHeader className="pb-2">
                       <CardTitle className="text-base flex items-center gap-2 text-success">
                         <CheckCircle2 className="h-4 w-4" />
-                        Evidencia a favor ({result.supportingEvidence.length})
+                        Evidencia a favor ({safeResult.supportingEvidence.length})
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
                       <ScrollArea className="h-[200px]">
                         <div className="space-y-3">
-                          {result.supportingEvidence.map((evidence, idx) => (
+                          {safeResult.supportingEvidence.map((evidence, idx) => (
                             <div
                               key={evidence.articleId}
                               className="p-3 rounded-lg bg-success/5 border border-success/20"
@@ -311,7 +301,7 @@ export default function VerifyPage() {
                               </div>
                             </div>
                           ))}
-                          {result.supportingEvidence.length === 0 && (
+                          {safeResult.supportingEvidence.length === 0 && (
                             <p className="text-sm text-muted-foreground text-center py-4">
                               No se encontró evidencia a favor
                             </p>
@@ -326,13 +316,13 @@ export default function VerifyPage() {
                     <CardHeader className="pb-2">
                       <CardTitle className="text-base flex items-center gap-2 text-destructive">
                         <XCircle className="h-4 w-4" />
-                        Evidencia en contra ({result.contradictingEvidence.length})
+                        Evidencia en contra ({safeResult.contradictingEvidence.length})
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
                       <ScrollArea className="h-[200px]">
                         <div className="space-y-3">
-                          {result.contradictingEvidence.map((evidence) => (
+                          {safeResult.contradictingEvidence.map((evidence) => (
                             <div
                               key={evidence.articleId}
                               className="p-3 rounded-lg bg-destructive/5 border border-destructive/20"
@@ -350,7 +340,7 @@ export default function VerifyPage() {
                               </div>
                             </div>
                           ))}
-                          {result.contradictingEvidence.length === 0 && (
+                          {safeResult.contradictingEvidence.length === 0 && (
                             <p className="text-sm text-muted-foreground text-center py-4">
                               No se encontró evidencia en contra
                             </p>
@@ -373,17 +363,17 @@ export default function VerifyPage() {
                     <AccordionContent>
                       <div className="space-y-4 pt-2">
                         <p className="text-sm text-muted-foreground leading-relaxed">
-                          {result.explanation}
+                          {safeResult.explanation}
                         </p>
 
-                        {result.recommendations.length > 0 && (
+                        {safeResult.recommendations.length > 0 && (
                           <div className="space-y-2">
                             <h4 className="text-sm font-medium flex items-center gap-2">
                               <Lightbulb className="h-4 w-4 text-warning" />
                               Para profundizar
                             </h4>
                             <ul className="space-y-1">
-                              {result.recommendations.map((rec, idx) => (
+                              {safeResult.recommendations.map((rec, idx) => (
                                 <li
                                   key={idx}
                                   className="text-sm text-muted-foreground flex items-start gap-2"
@@ -402,7 +392,7 @@ export default function VerifyPage() {
 
                 {/* Verification Recommendations Component */}
                 <VerificationRecommendations
-                  result={result}
+                  result={safeResult}
                   onSearchClick={(term) => {
                     setClaimText(term)
                     window.location.href = '/student/search'
@@ -448,10 +438,10 @@ export default function VerifyPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {history.length > 0 ? (
+              {verificationHistory.length > 0 ? (
                 <ScrollArea className="h-[300px]">
                   <div className="space-y-3">
-                    {history.map((item) => {
+                    {verificationHistory.map((item) => {
                       const StatusIcon = statusConfig[item.status].icon
                       return (
                         <button

@@ -10,13 +10,14 @@ interface UseStudentVerifyReturn {
   verificationHistory: VerificationResult[]
   
   verifyClaim: (claim: string, sourceUrl?: string) => Promise<VerificationResult | null>
+  loadHistory: (page?: number, limit?: number) => Promise<void>
   clearHistory: () => void
   clearError: () => void
   getRecommendations: (verificationId: string) => Promise<string[]>
 }
 
 export function useStudentVerify(): UseStudentVerifyReturn {
-  const { addActivity, addVerification, verificationHistory, clearVerificationHistory } = useStudent()
+  const { addActivity, addVerification, verificationHistory, setVerificationHistory, clearVerificationHistory } = useStudent()
   const [isVerifying, setIsVerifying] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastResult, setLastResult] = useState<VerificationResult | null>(null)
@@ -90,6 +91,15 @@ export function useStudentVerify(): UseStudentVerifyReturn {
     [addActivity, addVerification]
   )
 
+  const loadHistory = useCallback(async (page = 1, limit = 10) => {
+    try {
+      const { verifications } = await verifyApi.getHistory(page, limit)
+      setVerificationHistory(verifications)
+    } catch (err) {
+      console.error('[useStudentVerify loadHistory]:', err)
+    }
+  }, [setVerificationHistory])
+
   // Función de fallback para verificación simplificada
   const fetchSimplifiedVerification = useCallback(async (claim: string, _sourceUrl?: string) => {
     // Simular una verificación básica (esto debería ser un endpoint real)
@@ -135,6 +145,7 @@ export function useStudentVerify(): UseStudentVerifyReturn {
     lastResult,
     verificationHistory,
     verifyClaim,
+    loadHistory,
     clearHistory: clearVerificationHistory,
     clearError,
     getRecommendations,

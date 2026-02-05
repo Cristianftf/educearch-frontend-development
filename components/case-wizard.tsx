@@ -134,8 +134,18 @@ export function CaseWizard({ isOpen, onClose, onSubmit }: CaseWizardProps) {
 
     setIsSubmitting(true)
     try {
+      const guidingQuestions = formData.guidingQuestions
+        .filter((q) => q.trim())
+        .map((question, index) => ({
+          id: `${Date.now()}-${index}`,
+          question,
+          competency: 'access' as const,
+          points: 10,
+        }))
+
       await onSubmit({
         ...formData,
+        guidingQuestions,
         status: 'draft',
       })
       onClose()

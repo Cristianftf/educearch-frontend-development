@@ -1,22 +1,20 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
+import { adminSystemApi } from "@/lib/admin-system"
 import {
-  Activity,
   Server,
   Database,
   Cpu,
   HardDrive,
-  Wifi,
   RefreshCw,
   CheckCircle,
   AlertTriangle,
   XCircle,
-  Clock,
   Zap,
   Globe,
   MemoryStick,
@@ -46,19 +44,31 @@ export default function AdminHealthPage() {
   const [cpuUsage, setCpuUsage] = useState(45)
   const [memoryUsage, setMemoryUsage] = useState(62)
   const [diskUsage, setDiskUsage] = useState(38)
+  const [health, setHealth] = useState<any | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  // Simulated real-time updates
+  const loadHealth = async () => {
+    setError(null)
+    try {
+      const response = await adminSystemApi.getHealth()
+      setHealth(response)
+      if (typeof response?.cpu === "number") setCpuUsage(response.cpu)
+      if (typeof response?.memory === "number") setMemoryUsage(response.memory)
+      if (typeof response?.disk === "number") setDiskUsage(response.disk)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cargar salud del sistema")
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
   useEffect(() => {
-    const interval = setInterval(() => {
-      setCpuUsage((prev) => Math.min(100, Math.max(20, prev + (Math.random() - 0.5) * 10)))
-      setMemoryUsage((prev) => Math.min(100, Math.max(40, prev + (Math.random() - 0.5) * 5)))
-    }, 3000)
-    return () => clearInterval(interval)
+    loadHealth()
   }, [])
 
   const handleRefresh = () => {
     setIsRefreshing(true)
-    setTimeout(() => setIsRefreshing(false), 1500)
+    loadHealth()
   }
 
   const getStatusIcon = (status: string) => {
@@ -83,6 +93,14 @@ export default function AdminHealthPage() {
     return <Badge className={variants[status]}>{status.toUpperCase()}</Badge>
   }
 
+  const overallStatus = useMemo(() => {
+    if (health?.status) {
+      return String(health.status).toUpperCase() === "UP" ? "online" : "warning"
+    }
+    return "online"
+  }, [health])
+
+  const overallOk = overallStatus === "online"
   const onlineServices = services.filter((s) => s.status === "online").length
   const totalServices = services.length
 
@@ -104,21 +122,27 @@ export default function AdminHealthPage() {
         </Button>
       </div>
 
+      {error && (
+        <div className="text-sm text-destructive">
+          {error}
+        </div>
+      )}
+
       {/* Overall Status */}
-      <Card className={onlineServices === totalServices ? "border-green-200 bg-green-50/50" : "border-amber-200 bg-amber-50/50"}>
+      <Card className={overallOk ? "border-green-200 bg-green-50/50" : "border-amber-200 bg-amber-50/50"}>
         <CardContent className="flex items-center gap-4 py-4">
-          <div className={`h-12 w-12 rounded-full flex items-center justify-center ${onlineServices === totalServices ? "bg-green-100" : "bg-amber-100"}`}>
-            {onlineServices === totalServices ? (
+          <div className={`h-12 w-12 rounded-full flex items-center justify-center ${overallOk ? "bg-green-100" : "bg-amber-100"}`}>
+            {overallOk ? (
               <CheckCircle className="h-6 w-6 text-green-600" />
             ) : (
               <AlertTriangle className="h-6 w-6 text-amber-600" />
             )}
           </div>
           <div className="flex-1">
-            <p className={`font-medium ${onlineServices === totalServices ? "text-green-800" : "text-amber-800"}`}>
-              {onlineServices === totalServices ? "Sistema Operativo" : "Sistema con Advertencias"}
+            <p className={`font-medium ${overallOk ? "text-green-800" : "text-amber-800"}`}>
+              {overallOk ? "Sistema Operativo" : "Sistema con Advertencias"}
             </p>
-            <p className={`text-sm ${onlineServices === totalServices ? "text-green-600" : "text-amber-600"}`}>
+            <p className={`text-sm ${overallOk ? "text-green-600" : "text-amber-600"}`}>
               {onlineServices} de {totalServices} servicios funcionando correctamente
             </p>
           </div>
@@ -147,7 +171,7 @@ export default function AdminHealthPage() {
                 </Badge>
               </div>
               <Progress value={cpuUsage} className="h-2" />
-              <p className="text-xs text-muted-foreground">8 nÃºcleos disponibles</p>
+              <p className="text-xs text-muted-foreground">8 núcleos disponibles</p>
             </div>
           </CardContent>
         </Card>
@@ -200,7 +224,7 @@ export default function AdminHealthPage() {
             <Zap className="h-5 w-5" />
             Tiempos de Respuesta
           </CardTitle>
-          <CardDescription>Percentiles de latencia en las Ãºltimas 24 horas</CardDescription>
+          <CardDescription>Percentiles de latencia en las últimas 24 horas</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-6 md:grid-cols-4">
@@ -253,7 +277,7 @@ export default function AdminHealthPage() {
                   <div>
                     <p className="font-medium">{service.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      Ãšltima verificaciÃ³n: {service.lastCheck}
+                      Ãšltima verificación: {service.lastCheck}
                     </p>
                   </div>
                 </div>
@@ -286,7 +310,7 @@ export default function AdminHealthPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="font-medium">Llamadas realizadas hoy</p>
-              <p className="text-sm text-muted-foreground">LÃ­mite diario: 10,000</p>
+              <p className="text-sm text-muted-foreground">Límite diario: 10,000</p>
             </div>
             <div className="text-right">
               <p className="text-2xl font-bold">7,850</p>
@@ -297,7 +321,7 @@ export default function AdminHealthPage() {
           <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
             <AlertTriangle className="h-4 w-4 text-amber-600" />
             <p className="text-sm text-amber-700">
-              Se recomienda aumentar el lÃ­mite o activar el modo de cachÃ© agresivo.
+              Se recomienda aumentar el límite o activar el modo de caché agresivo.
             </p>
           </div>
         </CardContent>

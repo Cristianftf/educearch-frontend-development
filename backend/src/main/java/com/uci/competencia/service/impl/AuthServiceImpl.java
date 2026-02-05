@@ -13,6 +13,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
+
 @Service
 @Slf4j
 public class AuthServiceImpl implements AuthService {
@@ -35,10 +37,18 @@ public class AuthServiceImpl implements AuthService {
                 return new InvalidCredentialsException("Invalid email or password");
             });
 
+        if (!user.isActive()) {
+            log.warn("Inactive user login attempt: {}", loginRequest.getEmail());
+            throw new InvalidCredentialsException("Invalid email or password");
+        }
+
         if (!passwordEncoder.matches(loginRequest.getPassword(), user.getPasswordHash())) {
             log.warn("Invalid password attempt for user: {}", loginRequest.getEmail());
             throw new InvalidCredentialsException("Invalid email or password");
         }
+
+        user.setLastLogin(LocalDateTime.now());
+        userRepository.save(user);
 
         log.info("Successful login for user: {}", loginRequest.getEmail());
         String token = tokenProvider.generateTokenFromUsername(
@@ -46,9 +56,14 @@ public class AuthServiceImpl implements AuthService {
             user.getRole().toString()
         );
 
+        String refreshToken = tokenProvider.generateRefreshTokenFromUsername(
+            user.getEmail(),
+            user.getRole().toString()
+        );
+
         LoginResponseDTO response = new LoginResponseDTO();
         response.setToken(token);
-        response.setRefreshToken(token);
+        response.setRefreshToken(refreshToken);
         response.setUserId(user.getId());
         response.setUsername(user.getUsername());
         response.setEmail(user.getEmail());
@@ -71,9 +86,14 @@ public class AuthServiceImpl implements AuthService {
                 user.getRole().toString()
             );
 
+            String newRefreshToken = tokenProvider.generateRefreshTokenFromUsername(
+                user.getEmail(),
+                user.getRole().toString()
+            );
+
             LoginResponseDTO response = new LoginResponseDTO();
             response.setToken(token);
-            response.setRefreshToken(token);
+            response.setRefreshToken(newRefreshToken);
             response.setUserId(user.getId());
             response.setUsername(user.getUsername());
             response.setEmail(user.getEmail());
@@ -86,7 +106,7 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public void logout(String token) {
-        // Implementar invalidación de token en Redis
+        // Implement token invalidation in Redis
         log.info("User logged out");
     }
 }

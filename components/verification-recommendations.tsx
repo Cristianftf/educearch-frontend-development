@@ -14,6 +14,9 @@ interface VerificationRecommendationsProps {
 
 // Extracted recommended terms based on the claim - in production this would come from backend
 const generateRecommendations = (result: VerificationResult): string[] => {
+  if (Array.isArray(result.recommendations) && result.recommendations.length > 0) {
+    return result.recommendations.slice(0, 5)
+  }
   const recommendations: string[] = []
 
   // Sample recommendation logic

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -34,6 +34,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CSVUserImporter } from "@/components/csv-user-importer"
+import { adminUsersApi } from "@/lib/api"
 import {
   Users,
   Search,
@@ -56,7 +57,7 @@ import {
   ChevronRight,
 } from "lucide-react"
 
-type User = {
+type UserRow = {
   id: string
   name: string
   email: string
@@ -68,10 +69,17 @@ type User = {
   avatar?: string
 }
 
-const mockUsers: User[] = [
+type UserFormState = {
+  name: string
+  email: string
+  role: "student" | "professor" | "admin"
+  faculty: string
+}
+
+/* const mockUsers: UserRow[] = [
   {
     id: "1",
-    name: "MarÃ­a GarcÃ­a LÃ³pez",
+    name: "María García López",
     email: "maria.garcia@estudiante.uci.cu",
     role: "student",
     status: "active",
@@ -81,7 +89,7 @@ const mockUsers: User[] = [
   },
   {
     id: "2",
-    name: "Dr. Carlos RodrÃ­guez",
+    name: "Dr. Carlos Rodríguez",
     email: "carlos.rodriguez@uci.cu",
     role: "professor",
     status: "active",
@@ -91,27 +99,27 @@ const mockUsers: User[] = [
   },
   {
     id: "3",
-    name: "Ana Torres PÃ©rez",
+    name: "Ana Torres Pérez",
     email: "ana.torres@estudiante.uci.cu",
     role: "student",
     status: "inactive",
-    faculty: "EnfermerÃ­a",
-    lastLogin: "Hace 5 dÃ­as",
+    faculty: "Enfermería",
+    lastLogin: "Hace 5 días",
     createdAt: "2024-02-20",
   },
   {
     id: "4",
-    name: "Dr. Pedro MartÃ­nez",
+    name: "Dr. Pedro Martínez",
     email: "pedro.martinez@uci.cu",
     role: "professor",
     status: "active",
-    faculty: "EstomatologÃ­a",
+    faculty: "Estomatología",
     lastLogin: "Hace 1 hora",
     createdAt: "2023-08-15",
   },
   {
     id: "5",
-    name: "Laura SÃ¡nchez",
+    name: "Laura Sánchez",
     email: "laura.sanchez@estudiante.uci.cu",
     role: "student",
     status: "pending",
@@ -119,7 +127,44 @@ const mockUsers: User[] = [
     lastLogin: "Nunca",
     createdAt: "2024-03-10",
   },
-]
+ ] */
+
+const PAGE_SIZE = 20
+
+const toUserRow = (user: any): UserRow => {
+  const name =
+    user?.name ||
+    [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+    user?.email ||
+    "Sin nombre"
+  const status: UserRow["status"] =
+    typeof user?.status === "string"
+      ? user.status
+      : typeof user?.isActive === "boolean"
+        ? user.isActive
+          ? "active"
+          : "inactive"
+        : "pending"
+
+  const roleValue = String(user?.role ?? "student").toLowerCase()
+  const role: UserRow["role"] = roleValue.includes("admin")
+    ? "admin"
+    : roleValue.includes("professor")
+      ? "professor"
+      : "student"
+
+  return {
+    id: String(user?.id ?? ""),
+    name,
+    email: String(user?.email ?? ""),
+    role,
+    status,
+    faculty: String(user?.faculty ?? ""),
+    lastLogin: String(user?.lastLogin ?? "Nunca"),
+    createdAt: String(user?.createdAt ?? ""),
+    avatar: user?.avatar,
+  }
+}
 
 export default function AdminUsersPage() {
   const [searchQuery, setSearchQuery] = useState("")
@@ -127,17 +172,220 @@ export default function AdminUsersPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [editingUser, setEditingUser] = useState<UserRow | null>(null)
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
+  const [users, setUsers] = useState<UserRow[]>([])
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+  const [isLoading, setIsLoading] = useState(false)
+  const [isMutating, setIsMutating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
 
-  const filteredUsers = mockUsers.filter((user) => {
-    const matchesSearch =
-      user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesRole = roleFilter === "all" || user.role === roleFilter
-    const matchesStatus = statusFilter === "all" || user.status === statusFilter
-    return matchesSearch && matchesRole && matchesStatus
+  const [formState, setFormState] = useState<UserFormState>({
+    name: "",
+    email: "",
+    role: "student",
+    faculty: "",
   })
+
+  const loadUsers = useCallback(async () => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const response = await adminUsersApi.getAll(currentPage, PAGE_SIZE, {
+        role: roleFilter !== "all" ? (roleFilter as any) : undefined,
+        status:
+          statusFilter !== "all" && statusFilter !== "pending"
+            ? statusFilter
+            : undefined,
+      })
+      const normalized = response.users.map(toUserRow)
+      setUsers(normalized)
+      setTotal(response.total)
+      setTotalPages(response.totalPages || Math.max(1, Math.ceil(response.total / PAGE_SIZE)))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cargar usuarios")
+      setUsers([])
+      setTotal(0)
+      setTotalPages(1)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [currentPage, roleFilter, statusFilter])
+
+  const resetForm = () => {
+    setFormState({ name: "", email: "", role: "student", faculty: "" })
+    setEditingUser(null)
+  }
+
+  const splitName = (fullName: string) => {
+    const parts = fullName.trim().split(/\s+/)
+    if (parts.length === 0) return { firstName: "", lastName: "" }
+    if (parts.length === 1) return { firstName: parts[0], lastName: "" }
+    return { firstName: parts[0], lastName: parts.slice(1).join(" ") }
+  }
+
+  const handleCreateUser = async () => {
+    setError(null)
+    setInfo(null)
+    setIsMutating(true)
+    try {
+      if (!formState.name || !formState.email) {
+        throw new Error("Nombre y correo son requeridos")
+      }
+      const { firstName, lastName } = splitName(formState.name)
+      await adminUsersApi.create({
+        email: formState.email,
+        role: formState.role,
+        faculty: formState.faculty,
+        firstName,
+        lastName,
+        isActive: true,
+      } as any)
+      setIsCreateDialogOpen(false)
+      resetForm()
+      await loadUsers()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al crear usuario")
+    } finally {
+      setIsMutating(false)
+    }
+  }
+
+  const handleOpenEdit = (user: UserRow) => {
+    setEditingUser(user)
+    setFormState({
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      faculty: user.faculty || "",
+    })
+    setIsEditDialogOpen(true)
+  }
+
+  const handleUpdateUser = async () => {
+    if (!editingUser) return
+    setError(null)
+    setInfo(null)
+    setIsMutating(true)
+    try {
+      const { firstName, lastName } = splitName(formState.name)
+      await adminUsersApi.update(editingUser.id, {
+        email: formState.email,
+        role: formState.role,
+        faculty: formState.faculty,
+        firstName,
+        lastName,
+        isActive: editingUser.status === "active",
+      } as any)
+      setIsEditDialogOpen(false)
+      resetForm()
+      await loadUsers()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al actualizar usuario")
+    } finally {
+      setIsMutating(false)
+    }
+  }
+
+  const handleToggleStatus = async (user: UserRow, active: boolean) => {
+    setError(null)
+    setInfo(null)
+    setIsMutating(true)
+    try {
+      await adminUsersApi.changeStatus(user.id, active)
+      await loadUsers()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cambiar estado")
+    } finally {
+      setIsMutating(false)
+    }
+  }
+
+  const handleDeleteUser = async (user: UserRow) => {
+    const confirmed = window.confirm(`Eliminar al usuario ${user.name}?`)
+    if (!confirmed) return
+    setError(null)
+    setInfo(null)
+    setIsMutating(true)
+    try {
+      await adminUsersApi.delete(user.id)
+      await loadUsers()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al eliminar usuario")
+    } finally {
+      setIsMutating(false)
+    }
+  }
+
+  const handleBulkStatus = async (active: boolean) => {
+    setError(null)
+    setInfo(null)
+    setIsMutating(true)
+    try {
+      await Promise.all(selectedUsers.map((id) => adminUsersApi.changeStatus(id, active)))
+      setSelectedUsers([])
+      await loadUsers()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al actualizar usuarios")
+    } finally {
+      setIsMutating(false)
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    const confirmed = window.confirm(`Eliminar ${selectedUsers.length} usuario(s)?`)
+    if (!confirmed) return
+    setError(null)
+    setInfo(null)
+    setIsMutating(true)
+    try {
+      await Promise.all(selectedUsers.map((id) => adminUsersApi.delete(id)))
+      setSelectedUsers([])
+      await loadUsers()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al eliminar usuarios")
+    } finally {
+      setIsMutating(false)
+    }
+  }
+
+  const handleBulkEmail = () => {
+    setInfo("Funcionalidad de correo masivo no disponible en backend.")
+  }
+
+  useEffect(() => {
+    loadUsers()
+  }, [loadUsers])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [roleFilter, statusFilter, searchQuery])
+
+  useEffect(() => {
+    setSelectedUsers((prev) => prev.filter((id) => users.some((u) => u.id === id)))
+  }, [users])
+
+  const filteredUsers = useMemo(() => {
+    return users.filter((user) => {
+      const matchesSearch =
+        user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        user.email.toLowerCase().includes(searchQuery.toLowerCase())
+      const matchesRole = roleFilter === "all" || user.role === roleFilter
+      const matchesStatus = statusFilter === "all" || user.status === statusFilter
+      return matchesSearch && matchesRole && matchesStatus
+    })
+  }, [users, searchQuery, roleFilter, statusFilter])
+
+  const pages = useMemo(() => {
+    const maxPages = 5
+    const start = Math.max(1, Math.min(currentPage - 2, totalPages - maxPages + 1))
+    const end = Math.min(totalPages, start + maxPages - 1)
+    return Array.from({ length: end - start + 1 }, (_, i) => start + i)
+  }, [currentPage, totalPages])
 
   const toggleUserSelection = (userId: string) => {
     setSelectedUsers((prev) =>
@@ -188,13 +436,33 @@ export default function AdminUsersPage() {
     return <Badge className={className}>{label}</Badge>
   }
 
+  const totalOnPage = filteredUsers.length
+  const displayTotal = searchQuery ? filteredUsers.length : total
+  const stats = useMemo(() => {
+    return filteredUsers.reduce(
+      (acc, user) => {
+        acc[user.role] += 1
+        acc[user.status] += 1
+        return acc
+      },
+      {
+        student: 0,
+        professor: 0,
+        admin: 0,
+        active: 0,
+        inactive: 0,
+        pending: 0,
+      }
+    )
+  }, [filteredUsers])
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">
-            GestiÃ³n de Usuarios
+            Gestión de Usuarios
           </h1>
           <p className="text-muted-foreground">
             Administra todos los usuarios del sistema EDUCEARCH
@@ -218,7 +486,15 @@ export default function AdminUsersPage() {
               <CSVUserImporter />
             </DialogContent>
           </Dialog>
-          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+          <Dialog
+            open={isCreateDialogOpen}
+            onOpenChange={(open) => {
+              setIsCreateDialogOpen(open)
+              if (open) {
+                resetForm()
+              }
+            }}
+          >
             <DialogTrigger asChild>
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
@@ -235,15 +511,29 @@ export default function AdminUsersPage() {
               <div className="space-y-4 py-4">
                 <div className="space-y-2">
                   <Label htmlFor="name">Nombre Completo</Label>
-                  <Input id="name" placeholder="Nombre y apellidos" />
+                  <Input
+                    id="name"
+                    placeholder="Nombre y apellidos"
+                    value={formState.name}
+                    onChange={(e) => setFormState((prev) => ({ ...prev, name: e.target.value }))}
+                  />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="email">Correo ElectrÃ³nico</Label>
-                  <Input id="email" type="email" placeholder="correo@uci.cu" />
+                  <Label htmlFor="email">Correo Electrónico</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="correo@uci.cu"
+                    value={formState.email}
+                    onChange={(e) => setFormState((prev) => ({ ...prev, email: e.target.value }))}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="role">Rol</Label>
-                  <Select>
+                  <Select
+                    value={formState.role}
+                    onValueChange={(value: any) => setFormState((prev) => ({ ...prev, role: value }))}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Seleccionar rol" />
                     </SelectTrigger>
@@ -256,15 +546,18 @@ export default function AdminUsersPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="faculty">Facultad</Label>
-                  <Select>
+                  <Select
+                    value={formState.faculty}
+                    onValueChange={(value: any) => setFormState((prev) => ({ ...prev, faculty: value }))}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Seleccionar facultad" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="medicina">Medicina</SelectItem>
-                      <SelectItem value="enfermeria">EnfermerÃ­a</SelectItem>
-                      <SelectItem value="estomatologia">EstomatologÃ­a</SelectItem>
-                      <SelectItem value="tecnologia">TecnologÃ­a de la Salud</SelectItem>
+                      <SelectItem value="enfermeria">Enfermería</SelectItem>
+                      <SelectItem value="estomatologia">Estomatología</SelectItem>
+                      <SelectItem value="tecnologia">Tecnología de la Salud</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -273,8 +566,80 @@ export default function AdminUsersPage() {
                 <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
                   Cancelar
                 </Button>
-                <Button onClick={() => setIsCreateDialogOpen(false)}>
-                  Crear Usuario
+                <Button onClick={handleCreateUser} disabled={isMutating}>
+                  {isMutating ? "Creando..." : "Crear Usuario"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Editar Usuario</DialogTitle>
+                <DialogDescription>
+                  Actualiza los datos del usuario seleccionado.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-name">Nombre Completo</Label>
+                  <Input
+                    id="edit-name"
+                    placeholder="Nombre y apellidos"
+                    value={formState.name}
+                    onChange={(e) => setFormState((prev) => ({ ...prev, name: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-email">Correo Electrónico</Label>
+                  <Input
+                    id="edit-email"
+                    type="email"
+                    placeholder="correo@uci.cu"
+                    value={formState.email}
+                    onChange={(e) => setFormState((prev) => ({ ...prev, email: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-role">Rol</Label>
+                  <Select
+                    value={formState.role}
+                    onValueChange={(value: any) => setFormState((prev) => ({ ...prev, role: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Seleccionar rol" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="student">Estudiante</SelectItem>
+                      <SelectItem value="professor">Profesor</SelectItem>
+                      <SelectItem value="admin">Administrador</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-faculty">Facultad</Label>
+                  <Select
+                    value={formState.faculty}
+                    onValueChange={(value: any) => setFormState((prev) => ({ ...prev, faculty: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Seleccionar facultad" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="medicina">Medicina</SelectItem>
+                      <SelectItem value="enfermeria">Enfermería</SelectItem>
+                      <SelectItem value="estomatologia">Estomatología</SelectItem>
+                      <SelectItem value="tecnologia">Tecnología de la Salud</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleUpdateUser} disabled={isMutating}>
+                  {isMutating ? "Guardando..." : "Guardar Cambios"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -290,7 +655,7 @@ export default function AdminUsersPage() {
               <GraduationCap className="h-5 w-5 text-blue-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold">1,156</p>
+              <p className="text-2xl font-bold">{stats.student}</p>
               <p className="text-sm text-muted-foreground">Estudiantes</p>
             </div>
           </CardContent>
@@ -301,7 +666,7 @@ export default function AdminUsersPage() {
               <BookOpen className="h-5 w-5 text-purple-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold">98</p>
+              <p className="text-2xl font-bold">{stats.professor}</p>
               <p className="text-sm text-muted-foreground">Profesores</p>
             </div>
           </CardContent>
@@ -312,7 +677,7 @@ export default function AdminUsersPage() {
               <Shield className="h-5 w-5 text-red-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold">5</p>
+              <p className="text-2xl font-bold">{stats.admin}</p>
               <p className="text-sm text-muted-foreground">Administradores</p>
             </div>
           </CardContent>
@@ -323,7 +688,7 @@ export default function AdminUsersPage() {
               <Clock className="h-5 w-5 text-amber-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold">25</p>
+              <p className="text-2xl font-bold">{stats.pending}</p>
               <p className="text-sm text-muted-foreground">Pendientes</p>
             </div>
           </CardContent>
@@ -380,19 +745,19 @@ export default function AdminUsersPage() {
                 {selectedUsers.length} usuario(s) seleccionado(s)
               </p>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" onClick={() => handleBulkStatus(true)} disabled={isMutating}>
                   <UserCheck className="mr-2 h-4 w-4" />
                   Activar
                 </Button>
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" onClick={() => handleBulkStatus(false)} disabled={isMutating}>
                   <UserX className="mr-2 h-4 w-4" />
                   Desactivar
                 </Button>
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" onClick={handleBulkEmail}>
                   <Mail className="mr-2 h-4 w-4" />
                   Enviar correo
                 </Button>
-                <Button variant="destructive" size="sm">
+                <Button variant="destructive" size="sm" onClick={handleBulkDelete} disabled={isMutating}>
                   <Trash2 className="mr-2 h-4 w-4" />
                   Eliminar
                 </Button>
@@ -407,10 +772,25 @@ export default function AdminUsersPage() {
         <CardHeader>
           <CardTitle>Lista de Usuarios</CardTitle>
           <CardDescription>
-            {filteredUsers.length} usuarios encontrados
+            {displayTotal} usuarios encontrados
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {error && (
+            <div className="mb-4 text-sm text-destructive">
+              {error}
+            </div>
+          )}
+          {info && (
+            <div className="mb-4 text-sm text-muted-foreground">
+              {info}
+            </div>
+          )}
+          {isLoading && (
+            <div className="mb-4 text-sm text-muted-foreground">
+              Cargando usuarios...
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -483,15 +863,15 @@ export default function AdminUsersPage() {
                         <DropdownMenuContent align="end">
                           <DropdownMenuLabel>Acciones</DropdownMenuLabel>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleOpenEdit(user)}>
                             <Edit className="mr-2 h-4 w-4" />
                             Editar
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleBulkEmail()}>
                             <Mail className="mr-2 h-4 w-4" />
                             Enviar correo
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleToggleStatus(user, user.status !== "active")}>
                             {user.status === "active" ? (
                               <>
                                 <UserX className="mr-2 h-4 w-4" />
@@ -505,7 +885,7 @@ export default function AdminUsersPage() {
                             )}
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem className="text-destructive">
+                          <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteUser(user)}>
                             <Trash2 className="mr-2 h-4 w-4" />
                             Eliminar
                           </DropdownMenuItem>
@@ -521,22 +901,37 @@ export default function AdminUsersPage() {
           {/* Pagination */}
           <div className="flex items-center justify-between mt-4 pt-4 border-t">
             <p className="text-sm text-muted-foreground">
-              Mostrando 1-5 de {filteredUsers.length} usuarios
+              {totalOnPage === 0
+                ? "Mostrando 0 usuarios"
+                : `Mostrando ${(currentPage - 1) * PAGE_SIZE + 1}-${Math.min(currentPage * PAGE_SIZE, displayTotal)} de ${displayTotal} usuarios`}
             </p>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" disabled>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={currentPage <= 1 || isLoading}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              >
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <Button variant="outline" size="sm" className="bg-primary text-primary-foreground">
-                1
-              </Button>
-              <Button variant="outline" size="sm">
-                2
-              </Button>
-              <Button variant="outline" size="sm">
-                3
-              </Button>
-              <Button variant="outline" size="sm">
+              {pages.map((page) => (
+                <Button
+                  key={page}
+                  variant="outline"
+                  size="sm"
+                  className={page === currentPage ? "bg-primary text-primary-foreground" : ""}
+                  onClick={() => setCurrentPage(page)}
+                  disabled={isLoading}
+                >
+                  {page}
+                </Button>
+              ))}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={currentPage >= totalPages || isLoading}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              >
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </div>

@@ -17,4 +17,5 @@ public interface SystemLogRepository extends JpaRepository<SystemLog, String>, J
     Page<SystemLog> findByLevel(LogLevel level, Pageable pageable);
     Page<SystemLog> findByAction(ActionType action, Pageable pageable);
     Page<SystemLog> findByTimestampBetween(LocalDateTime from, LocalDateTime to, Pageable pageable);
+    long deleteByTimestampBefore(LocalDateTime timestamp);
 }

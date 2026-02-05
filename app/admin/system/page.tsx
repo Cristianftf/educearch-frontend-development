@@ -1,20 +1,20 @@
 "use client"
 
+import { useEffect, useMemo, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
+import { adminSystemApi } from "@/lib/admin-system"
 import {
   Server,
   Database,
   HardDrive,
   Download,
-  Upload,
   RefreshCw,
   Trash2,
   Clock,
   CheckCircle,
-  AlertTriangle,
   Calendar,
   FileArchive,
   Shield,
@@ -23,31 +23,170 @@ import {
 
 type Backup = {
   id: string
-  date: string
-  size: string
+  createdAt: string
+  size: number
+  status: string
   type: "automatic" | "manual"
-  status: "completed" | "in-progress" | "failed"
 }
 
-const recentBackups: Backup[] = [
-  { id: "1", date: "2024-01-25 10:00", size: "15.2 GB", type: "automatic", status: "completed" },
-  { id: "2", date: "2024-01-24 10:00", size: "15.1 GB", type: "automatic", status: "completed" },
-  { id: "3", date: "2024-01-23 10:00", size: "14.9 GB", type: "automatic", status: "completed" },
-  { id: "4", date: "2024-01-22 15:30", size: "14.8 GB", type: "manual", status: "completed" },
-  { id: "5", date: "2024-01-22 10:00", size: "14.8 GB", type: "automatic", status: "completed" },
-]
-
 export default function AdminSystemPage() {
+  const [backups, setBackups] = useState<Backup[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [isCreating, setIsCreating] = useState(false)
+  const [isRestoring, setIsRestoring] = useState(false)
+  const [isClearingCache, setIsClearingCache] = useState(false)
+  const [isOptimizingDb, setIsOptimizingDb] = useState(false)
+  const [isCleaningLogs, setIsCleaningLogs] = useState(false)
+  const [isReindexing, setIsReindexing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const loadBackups = async () => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const response = await adminSystemApi.getBackups()
+      const normalized = response.backups.map((backup) => ({
+        id: backup.id,
+        createdAt: backup.createdAt,
+        size: backup.size,
+        status: backup.status,
+        type: "automatic",
+      }))
+      setBackups(normalized)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cargar backups")
+      setBackups([])
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadBackups()
+  }, [])
+
+  const handleCreateBackup = async () => {
+    setIsCreating(true)
+    setError(null)
+    try {
+      await adminSystemApi.createBackup({ includeUsers: true, includeLogs: true })
+      await loadBackups()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al crear backup")
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
+  const latestCompletedBackup = useMemo(() => {
+    return backups.find((b) => String(b.status).toUpperCase() === "COMPLETED")
+  }, [backups])
+
+  const handleRestoreLatest = async () => {
+    if (!latestCompletedBackup) return
+    setIsRestoring(true)
+    setError(null)
+    try {
+      await adminSystemApi.restoreBackup(latestCompletedBackup.id)
+      await loadBackups()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al restaurar backup")
+    } finally {
+      setIsRestoring(false)
+    }
+  }
+
+  const handleClearCache = async () => {
+    setIsClearingCache(true)
+    setError(null)
+    try {
+      await adminSystemApi.clearCache(["all"])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al limpiar cache")
+    } finally {
+      setIsClearingCache(false)
+    }
+  }
+
+  const handleOptimizeDb = async () => {
+    setIsOptimizingDb(true)
+    setError(null)
+    try {
+      await adminSystemApi.optimizeDatabase()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al optimizar base de datos")
+    } finally {
+      setIsOptimizingDb(false)
+    }
+  }
+
+  const handleCleanupLogs = async () => {
+    setIsCleaningLogs(true)
+    setError(null)
+    try {
+      await adminSystemApi.cleanupLogs(30)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al limpiar logs")
+    } finally {
+      setIsCleaningLogs(false)
+    }
+  }
+
+  const handleReindexSearch = async () => {
+    setIsReindexing(true)
+    setError(null)
+    try {
+      await adminSystemApi.rebuildSearchIndexes()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al regenerar indices")
+    } finally {
+      setIsReindexing(false)
+    }
+  }
+
+  const backupsStorageUsage = useMemo(() => {
+    const totalBytes = backups.reduce((sum, b) => sum + (b.size || 0), 0)
+    const totalGb = totalBytes / (1024 * 1024 * 1024)
+    return Math.min(100, Math.round((totalGb / 100) * 100))
+  }, [backups])
+
+  const formatBytes = (bytes: number) => {
+    if (!bytes) return "0 B"
+    const k = 1024
+    const sizes = ["B", "KB", "MB", "GB", "TB"]
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return `${Math.round((bytes / Math.pow(k, i)) * 10) / 10} ${sizes[i]}`
+  }
+
+  const formatDate = (value: string) => {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return date.toLocaleString("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  }
+
+  const normalizeStatus = (status: string) => {
+    const upper = String(status).toUpperCase()
+    if (upper.includes("IN_PROGRESS") || upper.includes("RUNNING")) return "in-progress"
+    if (upper.includes("FAIL")) return "failed"
+    return "completed"
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">
-            Gesti√≥n del Sistema
+            GestiÛn del Sistema
           </h1>
           <p className="text-muted-foreground">
-            Administra backups, cach√© y mantenimiento del sistema
+            Administra backups, cachÈ y mantenimiento del sistema
           </p>
         </div>
       </div>
@@ -72,7 +211,7 @@ export default function AdminSystemPage() {
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Uptime</span>
-              <span className="text-green-600">45 d√≠as, 12 horas</span>
+              <span className="text-green-600">45 dÌas, 12 horas</span>
             </div>
           </CardContent>
         </Card>
@@ -90,7 +229,7 @@ export default function AdminSystemPage() {
               <span>PostgreSQL 15.2</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Tama√±o</span>
+              <span className="text-muted-foreground">TamaÒo</span>
               <span>12.4 GB</span>
             </div>
             <div className="flex justify-between text-sm">
@@ -104,7 +243,7 @@ export default function AdminSystemPage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-base">
               <HardDrive className="h-4 w-4" />
-              Cach√© Redis
+              CachÈ Redis
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -138,26 +277,35 @@ export default function AdminSystemPage() {
               </CardDescription>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline">
+              <Button
+                variant="outline"
+                onClick={handleRestoreLatest}
+                disabled={!latestCompletedBackup || isRestoring}
+              >
                 <RotateCcw className="mr-2 h-4 w-4" />
-                Restaurar
+                {isRestoring ? "Restaurando..." : "Restaurar"}
               </Button>
-              <Button>
+              <Button onClick={handleCreateBackup} disabled={isCreating}>
                 <Download className="mr-2 h-4 w-4" />
-                Crear Backup
+                {isCreating ? "Creando..." : "Crear Backup"}
               </Button>
             </div>
           </div>
         </CardHeader>
         <CardContent>
+          {error && (
+            <div className="mb-4 text-sm text-destructive">
+              {error}
+            </div>
+          )}
           {/* Backup Status */}
           <div className="mb-6 p-4 rounded-lg bg-green-50 border border-green-200">
             <div className="flex items-center gap-3">
               <CheckCircle className="h-5 w-5 text-green-600" />
               <div>
-                <p className="font-medium text-green-800">Backups autom√°ticos activos</p>
+                <p className="font-medium text-green-800">Backups autom·ticos activos</p>
                 <p className="text-sm text-green-600">
-                  Pr√≥ximo backup programado: Hoy a las 22:00
+                  PrÛximo backup programado: Hoy a las 22:00
                 </p>
               </div>
             </div>
@@ -167,9 +315,11 @@ export default function AdminSystemPage() {
           <div className="mb-6">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium">Almacenamiento de backups</span>
-              <span className="text-sm text-muted-foreground">75.5 GB / 100 GB</span>
+              <span className="text-sm text-muted-foreground">
+                {formatBytes(backups.reduce((sum, b) => sum + (b.size || 0), 0))} / 100 GB
+              </span>
             </div>
-            <Progress value={75.5} className="h-2" />
+            <Progress value={backupsStorageUsage} className="h-2" />
           </div>
 
           {/* Backups List */}
@@ -177,29 +327,29 @@ export default function AdminSystemPage() {
             <div className="grid grid-cols-5 gap-4 px-4 py-2 text-sm font-medium text-muted-foreground border-b">
               <span>Fecha</span>
               <span>Tipo</span>
-              <span>Tama√±o</span>
+              <span>TamaÒo</span>
               <span>Estado</span>
               <span className="text-right">Acciones</span>
             </div>
-            {recentBackups.map((backup) => (
+            {backups.map((backup) => (
               <div
                 key={backup.id}
                 className="grid grid-cols-5 gap-4 px-4 py-3 items-center rounded-lg hover:bg-muted/50"
               >
                 <span className="text-sm flex items-center gap-2">
                   <Calendar className="h-4 w-4 text-muted-foreground" />
-                  {backup.date}
+                  {formatDate(backup.createdAt)}
                 </span>
                 <span>
-                  <Badge variant={backup.type === "automatic" ? "secondary" : "outline"}>
-                    {backup.type === "automatic" ? "Autom√°tico" : "Manual"}
+                  <Badge variant="secondary">
+                    Sistema
                   </Badge>
                 </span>
-                <span className="text-sm">{backup.size}</span>
+                <span className="text-sm">{formatBytes(backup.size)}</span>
                 <span>
-                  {backup.status === "completed" ? (
+                  {normalizeStatus(backup.status) === "completed" ? (
                     <Badge className="bg-green-100 text-green-700">Completado</Badge>
-                  ) : backup.status === "in-progress" ? (
+                  ) : normalizeStatus(backup.status) === "in-progress" ? (
                     <Badge className="bg-blue-100 text-blue-700">En progreso</Badge>
                   ) : (
                     <Badge className="bg-red-100 text-red-700">Fallido</Badge>
@@ -215,6 +365,11 @@ export default function AdminSystemPage() {
                 </div>
               </div>
             ))}
+            {backups.length === 0 && !isLoading && (
+              <div className="px-4 py-6 text-sm text-muted-foreground">
+                No hay backups disponibles.
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -227,21 +382,21 @@ export default function AdminSystemPage() {
             Acciones de Mantenimiento
           </CardTitle>
           <CardDescription>
-            Tareas de optimizaci√≥n y limpieza del sistema
+            Tareas de optimizaciÛn y limpieza del sistema
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="flex items-center justify-between p-4 rounded-lg border">
               <div>
-                <p className="font-medium">Limpiar Cach√©</p>
+                <p className="font-medium">Limpiar CachÈ</p>
                 <p className="text-sm text-muted-foreground">
-                  Elimina datos en cach√© obsoletos
+                  Elimina datos en cachÈ obsoletos
                 </p>
               </div>
-              <Button variant="outline">
+              <Button variant="outline" onClick={handleClearCache} disabled={isClearingCache}>
                 <Trash2 className="mr-2 h-4 w-4" />
-                Ejecutar
+                {isClearingCache ? "Ejecutando..." : "Ejecutar"}
               </Button>
             </div>
 
@@ -252,9 +407,9 @@ export default function AdminSystemPage() {
                   Ejecuta VACUUM y reindex
                 </p>
               </div>
-              <Button variant="outline">
+              <Button variant="outline" onClick={handleOptimizeDb} disabled={isOptimizingDb}>
                 <RefreshCw className="mr-2 h-4 w-4" />
-                Ejecutar
+                {isOptimizingDb ? "Ejecutando..." : "Ejecutar"}
               </Button>
             </div>
 
@@ -262,25 +417,25 @@ export default function AdminSystemPage() {
               <div>
                 <p className="font-medium">Limpiar Logs Antiguos</p>
                 <p className="text-sm text-muted-foreground">
-                  Elimina logs de m√°s de 30 d√≠as
+                  Elimina logs de m·s de 30 dÌas
                 </p>
               </div>
-              <Button variant="outline">
+              <Button variant="outline" onClick={handleCleanupLogs} disabled={isCleaningLogs}>
                 <Trash2 className="mr-2 h-4 w-4" />
-                Ejecutar
+                {isCleaningLogs ? "Ejecutando..." : "Ejecutar"}
               </Button>
             </div>
 
             <div className="flex items-center justify-between p-4 rounded-lg border">
               <div>
-                <p className="font-medium">Regenerar √çndices de B√∫squeda</p>
+                <p className="font-medium">Regenerar Õndices de B˙squeda</p>
                 <p className="text-sm text-muted-foreground">
-                  Reconstruye √≠ndices FTS
+                  Reconstruye Ìndices FTS
                 </p>
               </div>
-              <Button variant="outline">
+              <Button variant="outline" onClick={handleReindexSearch} disabled={isReindexing}>
                 <RefreshCw className="mr-2 h-4 w-4" />
-                Ejecutar
+                {isReindexing ? "Ejecutando..." : "Ejecutar"}
               </Button>
             </div>
           </div>
@@ -298,11 +453,11 @@ export default function AdminSystemPage() {
         <CardContent>
           <div className="space-y-3">
             {[
-              { name: "Backup diario", schedule: "Todos los d√≠as a las 22:00", status: "active" },
-              { name: "Limpieza de cach√©", schedule: "Cada 6 horas", status: "active" },
-              { name: "Sincronizaci√≥n MeSH", schedule: "Cada domingo a las 03:00", status: "active" },
+              { name: "Backup diario", schedule: "Todos los dÌas a las 22:00", status: "active" },
+              { name: "Limpieza de cachÈ", schedule: "Cada 6 horas", status: "active" },
+              { name: "SincronizaciÛn MeSH", schedule: "Cada domingo a las 03:00", status: "active" },
               { name: "Reporte semanal", schedule: "Cada lunes a las 08:00", status: "active" },
-              { name: "Verificaci√≥n de integridad", schedule: "Cada d√≠a a las 04:00", status: "active" },
+              { name: "VerificaciÛn de integridad", schedule: "Cada dÌa a las 04:00", status: "active" },
             ].map((task, index) => (
               <div
                 key={index}

@@ -17,22 +17,26 @@ interface StudentContextType {
 
   // Actividades
   recentActivities: Activity[]
+  setRecentActivities: (activities: Activity[]) => void
   addActivity: (activity: Activity) => void
   clearActivities: () => void
 
   // Búsquedas guardadas
   savedSearches: SearchQuery[]
+  setSavedSearches: (searches: SearchQuery[]) => void
   addSavedSearch: (search: SearchQuery) => void
   removeSavedSearch: (searchId: string) => void
   toggleSearchFavorite: (searchId: string) => void
 
   // Verificaciones
   verificationHistory: VerificationResult[]
+  setVerificationHistory: (items: VerificationResult[]) => void
   addVerification: (verification: VerificationResult) => void
   clearVerificationHistory: () => void
 
   // Bibliografías
   bibliographies: Bibliography[]
+  setBibliographies: (items: Bibliography[]) => void
   addBibliography: (bibliography: Bibliography) => void
   removeBibliography: (bibliographyId: string) => void
 
@@ -127,16 +131,20 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     competencies,
     updateCompetency,
     recentActivities,
+    setRecentActivities,
     addActivity,
     clearActivities,
     savedSearches,
+    setSavedSearches,
     addSavedSearch,
     removeSavedSearch,
     toggleSearchFavorite,
     verificationHistory,
+    setVerificationHistory,
     addVerification,
     clearVerificationHistory,
     bibliographies,
+    setBibliographies,
     addBibliography,
     removeBibliography,
     currentCompetencyFocus,

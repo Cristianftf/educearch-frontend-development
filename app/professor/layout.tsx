@@ -24,6 +24,7 @@ import {
   FolderKanban,
   ClipboardCheck,
   Layers,
+  Users,
   BarChart3,
   Menu,
   X,
@@ -38,6 +39,7 @@ const navigation = [
   { name: 'Casos de Estudio', href: '/professor/cases', icon: FolderKanban },
   { name: 'Evaluaciones', href: '/professor/evaluations', icon: ClipboardCheck },
   { name: 'Search Hedges', href: '/professor/hedges', icon: Layers },
+  { name: 'Estudiantes', href: '/professor/students', icon: Users },
   { name: 'Analíticas', href: '/professor/analytics', icon: BarChart3 },
   { name: 'Búsqueda', href: '/professor/search', icon: Search },
 ]

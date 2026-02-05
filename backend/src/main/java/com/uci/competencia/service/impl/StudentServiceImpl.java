@@ -42,12 +42,13 @@ public class StudentServiceImpl implements StudentService {
     public StudentProgressDTO getStudentProgress(String studentId) {
         // Implementación temporal - devolver datos de ejemplo
         StudentProgressDTO progress = new StudentProgressDTO();
-        progress.setStudentId(Long.parseLong(studentId));
+        progress.setStudentId(studentId);
+        progress.setUserId(studentId);
         progress.setOverallProgress(75.0);
         progress.setCompetencies(java.util.Map.of(
-            "access", 80.0,
-            "process", 70.0,
-            "communicate", 65.0
+            "access", new StudentProgressDTO.CompetencyProgressDTO("access", 80.0, "advanced", null),
+            "process", new StudentProgressDTO.CompetencyProgressDTO("process", 70.0, "intermediate", null),
+            "communicate", new StudentProgressDTO.CompetencyProgressDTO("communicate", 65.0, "intermediate", null)
         ));
         progress.setCasesCompleted(5);
         progress.setTotalCases(10);
@@ -58,6 +59,10 @@ public class StudentServiceImpl implements StudentService {
             "verifications", 15,
             "bibliographies", 8
         ));
+        progress.setTotalSearches(25);
+        progress.setTotalVerifications(15);
+        progress.setTotalBibliographies(8);
+        progress.setRecentActivities(java.util.List.of());
         progress.setRecommendations(java.util.List.of(
             "Practicar más verificaciones",
             "Mejorar en comunicación de información"

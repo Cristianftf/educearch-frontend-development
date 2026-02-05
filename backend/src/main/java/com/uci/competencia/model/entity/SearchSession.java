@@ -33,6 +33,8 @@ public class SearchSession {
     
     private Boolean isPractice = false;
     private Double efficiencyScore;
+
+    private Boolean isFavorite = false;
     
     @Lob
     private String feedback;

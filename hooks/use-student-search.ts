@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useStudent } from '@/contexts/student-context'
 import { searchApi } from '@/lib/api'
 import type { SearchQuery, SearchSession, MeshTerm } from '@/types'
@@ -9,7 +9,8 @@ interface UseStudentSearchReturn {
   currentSession: SearchSession | null
   searchHistory: SearchQuery[]
   
-  executeSearch: (query: SearchQuery) => Promise<void>
+  loadHistory: (page?: number, limit?: number) => Promise<void>
+  executeSearch: (query: SearchQuery) => Promise<SearchSession | null>
   saveSearch: (searchId: string, isFavorite: boolean) => Promise<void>
   deleteSearch: (searchId: string) => Promise<void>
   reuseSearch: (searchId: string) => Promise<SearchQuery | undefined>
@@ -18,11 +19,31 @@ interface UseStudentSearchReturn {
 }
 
 export function useStudentSearch(): UseStudentSearchReturn {
-  const { addActivity, savedSearches, addSavedSearch, toggleSearchFavorite } = useStudent()
+  const { addActivity, savedSearches, setSavedSearches, addSavedSearch, toggleSearchFavorite } = useStudent()
   const [isSearching, setIsSearching] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [currentSession, setCurrentSession] = useState<SearchSession | null>(null)
   const [searchHistory, setSearchHistory] = useState<SearchQuery[]>(savedSearches)
+
+  const loadHistory = useCallback(async (page = 1, limit = 10) => {
+    try {
+      const { searches } = await searchApi.getHistory(page, limit)
+      setSearchHistory(searches)
+      setSavedSearches(searches)
+    } catch (err) {
+      console.error('[useStudentSearch loadHistory]:', err)
+    }
+  }, [setSavedSearches])
+
+  useEffect(() => {
+    if (savedSearches.length > 0) {
+      setSearchHistory(savedSearches)
+    }
+  }, [savedSearches])
+
+  useEffect(() => {
+    setSearchHistory(savedSearches)
+  }, [savedSearches])
 
   const executeSearch = useCallback(
     async (query: SearchQuery) => {
@@ -44,10 +65,13 @@ export function useStudentSearch(): UseStudentSearchReturn {
 
         // Auto-guardar búsqueda
         addSavedSearch(query)
+        setSearchHistory((prev) => [query, ...prev])
+        return session
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error al ejecutar búsqueda'
         setError(errorMessage)
         console.error('[useStudentSearch]:', err)
+        return null
       } finally {
         setIsSearching(false)
       }
@@ -72,11 +96,12 @@ export function useStudentSearch(): UseStudentSearchReturn {
     try {
       await searchApi.deleteSearch(searchId)
       setSearchHistory((prev) => prev.filter((s) => s.id !== searchId))
+      setSavedSearches((prev) => prev.filter((s) => s.id !== searchId))
     } catch (err) {
       setError('No se pudo eliminar la búsqueda')
       console.error('[useStudentSearch deleteSearch]:', err)
     }
-  }, [])
+  }, [setSavedSearches])
 
   const reuseSearch = useCallback(async (searchId: string) => {
     const search = searchHistory.find((s) => s.id === searchId)
@@ -104,6 +129,7 @@ export function useStudentSearch(): UseStudentSearchReturn {
     error,
     currentSession,
     searchHistory,
+    loadHistory,
     executeSearch,
     saveSearch,
     deleteSearch,

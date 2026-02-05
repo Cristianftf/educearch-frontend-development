@@ -119,7 +119,7 @@ export default function ProfessorStudentsPage() {
     loadStudents()
   }, [])
 
-  const filteredStudents = mockStudents
+  const filteredStudents = students
     .filter((student) => {
       const matchesSearch =
         student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||

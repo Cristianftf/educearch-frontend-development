@@ -45,11 +45,18 @@ class ApiClient {
       ...options,
       headers,
     })
-
     if (!response.ok) {
       if (response.status === 401) {
-        // Handle unauthorized - redirect to login
-        window.location.href = '/login'
+        const isAuthEndpoint =
+          endpoint.startsWith('/auth/login') ||
+          endpoint.startsWith('/auth/register') ||
+          endpoint.startsWith('/auth/forgot-password') ||
+          endpoint.startsWith('/auth/reset-password')
+
+        if (!isAuthEndpoint) {
+          // Handle unauthorized - redirect to login
+          window.location.href = '/login'
+        }
       }
       throw new Error(`API Error: ${response.status} ${response.statusText}`)
     }

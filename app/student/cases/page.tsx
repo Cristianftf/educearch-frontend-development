@@ -35,6 +35,7 @@ import {
   Target,
   MessageSquare,
 } from 'lucide-react'
+import { useAuth } from '@/contexts/auth-context'
 
 const difficultyConfig: Record<
   CaseDifficulty,
@@ -73,6 +74,7 @@ function getDaysRemaining(dueDate: string): number {
 }
 
 export default function CasesPage() {
+  const { user } = useAuth()
   const [cases, setCases] = useState<CaseStudy[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -101,13 +103,16 @@ export default function CasesPage() {
 
     setIsSubmitting(true)
     try {
-      await casesApi.submit(selectedCase.id, {
+      const submission: Partial<CaseSubmission> = {
         caseId: selectedCase.id,
-        studentId: '', // Will be set by backend
         content: submissionContent,
         selectedArticles: [],
         bibliography: '',
-      })
+      }
+      if (user?.id) {
+        submission.studentId = user.id
+      }
+      await casesApi.submit(selectedCase.id, submission as CaseSubmission)
 
       // Refresh cases
       const assignedCases = await casesApi.getAssigned()
@@ -119,7 +124,7 @@ export default function CasesPage() {
     } finally {
       setIsSubmitting(false)
     }
-  }, [selectedCase, submissionContent])
+  }, [selectedCase, submissionContent, user])
 
   const pendingCases = cases.filter((c) => c.status === 'active')
   const completedCases = cases.filter((c) => c.status === 'archived')
@@ -277,7 +282,14 @@ export default function CasesPage() {
                         )}
                       </div>
 
-                      <Button variant="ghost" className="w-full mt-4 justify-between">
+                      <Button
+                        variant="ghost"
+                        className="w-full mt-4 justify-between"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedCase(caseStudy)
+                        }}
+                      >
                         Ver caso completo
                         <ChevronRight className="h-4 w-4" />
                       </Button>
@@ -324,10 +336,17 @@ export default function CasesPage() {
                       {caseStudy.scenario}
                     </p>
 
-                    <Button variant="ghost" className="w-full mt-4 justify-between">
-                      Ver mi entrega
-                      <Eye className="h-4 w-4" />
-                    </Button>
+                    <Button
+                    variant="ghost"
+                    className="w-full mt-4 justify-between"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setSelectedCase(caseStudy)
+                    }}
+                  >
+                    Ver mi entrega
+                    <Eye className="h-4 w-4" />
+                  </Button>
                   </CardContent>
                 </Card>
               ))}
@@ -403,8 +422,16 @@ export default function CasesPage() {
                           {idx + 1}.
                         </span>
                         <span className="text-sm">Artículo ID: {articleId}</span>
-                        <Button variant="outline" size="sm" className="ml-auto bg-transparent">
-                          Ver artículo
+                        <Button variant="outline" size="sm" className="ml-auto bg-transparent" asChild>
+                          <a
+                            href={`https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(
+                              articleId
+                            )}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            Ver artículo
+                          </a>
                         </Button>
                       </div>
                     ))}
@@ -418,11 +445,29 @@ export default function CasesPage() {
                     Preguntas guía
                   </h4>
                   <ol className="space-y-2 list-decimal list-inside">
-                    {selectedCase.guidingQuestions.map((question, idx) => (
-                      <li key={idx} className="text-sm text-muted-foreground pl-2">
-                        {question}
-                      </li>
-                    ))}
+                    {selectedCase.guidingQuestions.map((question, idx) => {
+                      const isString = typeof (question as any) === 'string'
+                      let questionText = isString ? (question as string) : question.question
+                      if (isString && questionText.trim().startsWith('{')) {
+                        try {
+                          const parsed = JSON.parse(questionText)
+                          if (parsed?.question) {
+                            questionText = parsed.question
+                          }
+                        } catch {
+                          // keep original string
+                        }
+                      }
+                      const key =
+                        isString
+                          ? `${idx}-${questionText}`
+                          : question.id
+                      return (
+                        <li key={key} className="text-sm text-muted-foreground pl-2">
+                          {questionText}
+                        </li>
+                      )
+                    })}
                   </ol>
                 </div>
 
@@ -434,15 +479,17 @@ export default function CasesPage() {
                   </h4>
                   <div className="space-y-2">
                     {selectedCase.rubric.map((item, idx) => (
-                      <div key={idx} className="p-3 rounded-lg border">
+                      <div key={item.id || idx} className="p-3 rounded-lg border">
                         <div className="flex items-center justify-between">
                           <span className="text-sm font-medium capitalize">
                             {item.competency}
                           </span>
-                          <Badge variant="outline">{item.maxScore} pts</Badge>
+                          <Badge variant="outline">
+                            {'maxPoints' in item ? item.maxPoints : (item as any).maxScore} pts
+                          </Badge>
                         </div>
                         <p className="text-sm text-muted-foreground mt-1">
-                          {item.criterion}
+                          {'criteria' in item ? item.criteria : (item as any).criterion}
                         </p>
                       </div>
                     ))}

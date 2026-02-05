@@ -7,6 +7,10 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/auth-context'
 import { StudentProvider } from '@/contexts/student-context'
+import { useStudentSearch } from '@/hooks/use-student-search'
+import { useStudentVerify } from '@/hooks/use-student-verify'
+import { bibliographyApi } from '@/lib/api'
+import { useStudent } from '@/contexts/student-context'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -18,6 +22,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   BookOpen,
   Search,
@@ -40,6 +51,23 @@ const navigation = [
   { name: 'Casos Asignados', href: '/student/cases', icon: FolderOpen },
 ]
 
+function StudentDataProvider({ children }: { children: React.ReactNode }) {
+  const { loadHistory: loadSearchHistory } = useStudentSearch()
+  const { loadHistory: loadVerifyHistory } = useStudentVerify()
+  const { setBibliographies } = useStudent()
+
+  React.useEffect(() => {
+    loadSearchHistory(1, 10).catch(() => {})
+    loadVerifyHistory(1, 10).catch(() => {})
+    bibliographyApi
+      .getHistory()
+      .then(setBibliographies)
+      .catch(() => {})
+  }, [loadSearchHistory, loadVerifyHistory, setBibliographies])
+
+  return <>{children}</>
+}
+
 export default function StudentLayout({
   children,
 }: {
@@ -48,6 +76,7 @@ export default function StudentLayout({
   const { user, logout } = useAuth()
   const pathname = usePathname()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
 
   const getInitials = (name: string) => {
     return name
@@ -60,6 +89,7 @@ export default function StudentLayout({
 
   return (
     <StudentProvider>
+    <StudentDataProvider>
     <div className="min-h-screen bg-background">
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && (
@@ -173,7 +203,7 @@ export default function StudentLayout({
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setProfileOpen(true)}>
                 <User className="mr-2 h-4 w-4" />
                 Mi Perfil
               </DropdownMenuItem>
@@ -190,6 +220,31 @@ export default function StudentLayout({
         <main className="p-4 sm:p-6 lg:p-8">{children}</main>
       </div>
     </div>
+    <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Mi Perfil</DialogTitle>
+          <DialogDescription>
+            InformaciÃ³n bÃ¡sica de tu cuenta.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 text-sm">
+          <div>
+            <span className="text-muted-foreground">Nombre: </span>
+            <span className="font-medium">{user?.name || 'Usuario'}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Correo: </span>
+            <span className="font-medium">{user?.email || 'No disponible'}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Rol: </span>
+            <span className="font-medium">Estudiante</span>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </StudentDataProvider>
     </StudentProvider>
   )
 }

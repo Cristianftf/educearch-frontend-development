@@ -3,7 +3,11 @@ import { api } from './api-client'
 
 export const verifyApi = {
   verifyClaim: (claim: string, url?: string, options?: RequestInit) =>
-    api.post<VerificationResult>('/verify/claim', { claim, url }, options),
+    api.post<VerificationResult>(
+      '/verify/claim',
+      { claimText: claim, sourceUrl: url },
+      options
+    ),
 
   getHistory: (page = 1, limit = 10) =>
     api.get<{ verifications: VerificationResult[]; total: number }>(

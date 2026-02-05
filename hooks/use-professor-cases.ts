@@ -1,7 +1,15 @@
-import { useCallback, useState, useEffect } from 'react'
+import { useCallback, useState } from 'react'
 import { useProfessor } from '@/contexts/professor-context'
 import { casesApi, evaluationApi } from '@/lib/api'
-import type { CaseStudy, CaseStatus, CaseSubmission, CaseSubmission as Submission } from '@/types'
+import type { CaseStudy, CaseStatus, CaseSubmission } from '@/types'
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
+
+const buildApiUrl = (path: string) => {
+  const base = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL
+  const suffix = path.startsWith('/') ? path : `/${path}`
+  return `${base}${suffix}`
+}
 
 interface UseProfessorCasesReturn {
   cases: CaseStudy[]
@@ -65,7 +73,7 @@ export function useProfessorCases(): UseProfessorCasesReturn {
 
       try {
         const updated = await casesApi.update(id, updates)
-        updateCaseContext(id, updates)
+        updateCaseContext(id, updated)
         return updated
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error al actualizar caso'
@@ -100,8 +108,8 @@ export function useProfessorCases(): UseProfessorCasesReturn {
       setError(null)
 
       try {
-        await casesApi.update(id, { status })
-        updateCaseContext(id, { status })
+        const updated = await casesApi.update(id, { status })
+        updateCaseContext(id, updated)
         return true
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error al cambiar estado'
@@ -117,8 +125,8 @@ export function useProfessorCases(): UseProfessorCasesReturn {
     setError(null)
 
     try {
-      await casesApi.assign(caseId, studentIds)
-      updateCaseContext(caseId, { assignedStudents: studentIds })
+      const updated = await casesApi.assign(caseId, studentIds)
+      updateCaseContext(caseId, updated)
       return true
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Error al asignar caso'
@@ -155,7 +163,7 @@ export function useProfessorCases(): UseProfessorCasesReturn {
       const nextSubmission = pendingSubmissions[currentIndex + 1]
 
       // Prefetch submission details in background
-      fetch(`/api/evaluations/submission/${nextSubmission.id}`, {
+      fetch(buildApiUrl(`/submissions/${nextSubmission.id}`), {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
@@ -169,7 +177,7 @@ export function useProfessorCases(): UseProfessorCasesReturn {
       // Prefetch case details if not already loaded
       const caseDetails = cases.find(c => c.id === nextSubmission.caseId)
       if (!caseDetails) {
-        fetch(`/api/cases/${nextSubmission.caseId}`, {
+        fetch(buildApiUrl(`/cases/${nextSubmission.caseId}`), {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
@@ -188,7 +196,7 @@ export function useProfessorCases(): UseProfessorCasesReturn {
   const prefetchCaseDetails = useCallback(async (caseId: string) => {
     try {
       // Prefetch case details
-      fetch(`/api/cases/${caseId}`, {
+      fetch(buildApiUrl(`/cases/${caseId}`), {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
@@ -200,7 +208,7 @@ export function useProfessorCases(): UseProfessorCasesReturn {
       })
 
       // Prefetch submissions for this case
-      fetch(`/api/cases/${caseId}/submissions`, {
+      fetch(buildApiUrl(`/cases/${caseId}/submissions`), {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,

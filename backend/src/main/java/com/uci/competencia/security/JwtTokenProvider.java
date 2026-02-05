@@ -5,11 +5,10 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
+import jakarta.annotation.PostConstruct;
 import java.util.Date;
 import java.util.stream.Collectors;
 
@@ -17,19 +16,26 @@ import java.util.stream.Collectors;
 @Slf4j
 public class JwtTokenProvider {
 
-    @Value("${jwt.secret:mySecretKeyThatIsAtLeast32CharactersLong}")
+    @Value("${app.jwt.secret:your-secret-key-change-in-production}")
     private String jwtSecret;
 
-    @Value("${jwt.expiration:86400000}")
+    @Value("${app.jwt.expiration:3600000}")
     private long jwtExpirationInMs;
 
-    @Value("${jwt.refresh-expiration:604800000}")
+    @Value("${app.jwt.refresh-expiration:604800000}")
     private long refreshTokenExpirationInMs;
 
-    public String generateToken(Authentication authentication) {
+    @PostConstruct
+    private void validateSecret() {
+        if (jwtSecret == null || jwtSecret.length() < 32) {
+            throw new IllegalStateException("JWT secret must be at least 32 characters long");
+        }
+    }
+
+    public String generateToken(org.springframework.security.core.Authentication authentication) {
         SecretKey key = Keys.hmacShaKeyFor(jwtSecret.getBytes());
         String authorities = authentication.getAuthorities().stream()
-            .map(GrantedAuthority::getAuthority)
+            .map(org.springframework.security.core.GrantedAuthority::getAuthority)
             .collect(Collectors.joining(","));
 
         return Jwts.builder()
@@ -48,6 +54,17 @@ public class JwtTokenProvider {
             .claim("authorities", roles)
             .issuedAt(new Date())
             .expiration(new Date(System.currentTimeMillis() + jwtExpirationInMs))
+            .signWith(key)
+            .compact();
+    }
+
+    public String generateRefreshTokenFromUsername(String username, String roles) {
+        SecretKey key = Keys.hmacShaKeyFor(jwtSecret.getBytes());
+        return Jwts.builder()
+            .subject(username)
+            .claim("authorities", roles)
+            .issuedAt(new Date())
+            .expiration(new Date(System.currentTimeMillis() + refreshTokenExpirationInMs))
             .signWith(key)
             .compact();
     }

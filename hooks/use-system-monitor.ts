@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from 'react'
+import { useEffect, useCallback, useRef, useState } from 'react'
 import { useAdmin } from '@/contexts/admin-context'
 import { adminSystemApi, adminAuditApi } from '@/lib/api'
 import type { SystemHealth, AuditLog } from '@/types'
@@ -20,7 +20,7 @@ export function useSystemMonitor(): UseSystemMonitorReturn {
   const { isMonitoring, startMonitoring: startCtx, stopMonitoring: stopCtx, setSystemHealth, setAuditLogs, auditLogs } = useAdmin()
   const [error, setError] = useState<string | null>(null)
   const [health, setHealth] = useState<SystemHealth | null>(null)
-  const [monitoringInterval, setMonitoringInterval] = useState<NodeJS.Timeout | null>(null)
+  const monitoringIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchHealth = useCallback(async () => {
     try {
@@ -55,21 +55,25 @@ export function useSystemMonitor(): UseSystemMonitorReturn {
     fetchLogs()
 
     // Setup polling
-    const interval_id = setInterval(() => {
+    if (monitoringIntervalRef.current) {
+      clearInterval(monitoringIntervalRef.current)
+    }
+
+    const intervalId = setInterval(() => {
       fetchHealth()
       fetchLogs()
     }, interval)
 
-    setMonitoringInterval(interval_id)
+    monitoringIntervalRef.current = intervalId
   }, [startCtx, fetchHealth, fetchLogs])
 
   const stopMonitoring = useCallback(() => {
     stopCtx()
-    if (monitoringInterval) {
-      clearInterval(monitoringInterval)
-      setMonitoringInterval(null)
+    if (monitoringIntervalRef.current) {
+      clearInterval(monitoringIntervalRef.current)
+      monitoringIntervalRef.current = null
     }
-  }, [stopCtx, monitoringInterval])
+  }, [stopCtx])
 
   const clearError = useCallback(() => {
     setError(null)
@@ -78,11 +82,11 @@ export function useSystemMonitor(): UseSystemMonitorReturn {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (monitoringInterval) {
-        clearInterval(monitoringInterval)
+      if (monitoringIntervalRef.current) {
+        clearInterval(monitoringIntervalRef.current)
       }
     }
-  }, [monitoringInterval])
+  }, [])
 
   return {
     isMonitoring,

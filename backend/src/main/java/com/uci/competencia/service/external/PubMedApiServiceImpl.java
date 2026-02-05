@@ -8,10 +8,10 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class PubMedApiServiceImpl implements PubMedApiService {
 
-    @Value("${pubmed.api.base-url}")
+    @Value("${app.pubmed.api.base-url}")
     private String pubmedBaseUrl;
 
-    @Value("${pubmed.api.api-key}")
+    @Value("${app.pubmed.api.key}")
     private String pubmedApiKey;
 
     @Override

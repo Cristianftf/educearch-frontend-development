@@ -32,6 +32,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" suppressHydrationWarning>
+      <head>
+        <meta charSet="utf-8" />
+        <meta httpEquiv="Content-Type" content="text/html; charset=utf-8" />
+      </head>
       <body className="font-sans antialiased">
         <AuthProvider>
           {children}

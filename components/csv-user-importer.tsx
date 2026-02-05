@@ -24,12 +24,12 @@ interface CSVRow {
   email: string
   role: "student" | "professor" | "admin"
   faculty?: string
-  status?: "active" | "inactive"
+  status?: "active" | "inactive" | "pending"
 }
 
 interface ImportedUser extends CSVRow {
   rowNumber: number
-  status: "valid" | "error" | "warning"
+  importStatus: "valid" | "error" | "warning"
   message?: string
 }
 
@@ -45,10 +45,10 @@ const EXPECTED_HEADERS = ["name", "email", "role", "faculty", "status"]
 const ALLOWED_ROLES = ["student", "professor", "admin"]
 const ALLOWED_FACULTIES = [
   "Medicina",
-  "Enfermer√≠a",
-  "Estomatolog√≠a",
-  "Tecnolog√≠a",
-  "Administraci√≥n",
+  "EnfermerÌa",
+  "EstomatologÌa",
+  "TecnologÌa",
+  "AdministraciÛn",
 ]
 
 export function CSVUserImporter() {
@@ -102,7 +102,7 @@ export function CSVUserImporter() {
               email: values[emailIndex] || "",
               role: (values[roleIndex] || "").toLowerCase() as any,
               faculty: facultyIndex !== -1 ? values[facultyIndex] : undefined,
-              status: statusIndex !== -1 ? (values[statusIndex] as any) : undefined,
+              status: statusIndex !== -1 ? (values[statusIndex] || "").toLowerCase() as any : undefined,
             }
             rows.push(row)
           }
@@ -125,12 +125,12 @@ export function CSVUserImporter() {
         const imported: ImportedUser = {
           ...row,
           rowNumber: index + 2, // +2 because index 0 is headers, +1 for display
-          status: "valid",
+          importStatus: "valid",
         }
 
         // Validate name
         if (!row.name || row.name.length < 3) {
-          imported.status = "error"
+          imported.importStatus = "error"
           imported.message = "Nombre debe tener al menos 3 caracteres"
           return imported
         }
@@ -138,14 +138,14 @@ export function CSVUserImporter() {
         // Validate email
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
         if (!emailRegex.test(row.email)) {
-          imported.status = "error"
-          imported.message = "Email inv√°lido"
+          imported.importStatus = "error"
+          imported.message = "Email inv·lido"
           return imported
         }
 
         // Validate role
         if (!ALLOWED_ROLES.includes(row.role)) {
-          imported.status = "error"
+          imported.importStatus = "error"
           imported.message = `Rol debe ser: ${ALLOWED_ROLES.join(", ")}`
           return imported
         }
@@ -156,15 +156,15 @@ export function CSVUserImporter() {
           !ALLOWED_FACULTIES.includes(row.faculty) &&
           row.role !== "admin"
         ) {
-          imported.status = "warning"
-          imported.message = `Facultad no est√°ndar: ${row.faculty}`
+          imported.importStatus = "warning"
+          imported.message = `Facultad no est·ndar: ${row.faculty}`
         }
 
         // Validate status if provided
         if (row.status && !["active", "inactive", "pending"].includes(row.status)) {
-          imported.status = "warning"
-          imported.message = `Estado ser√° configurado como "pending"`
-          imported.status = "active"
+          imported.importStatus = "warning"
+          imported.message = `Estado ser· configurado como "pending"`
+          imported.status = "pending"
         }
 
         return imported
@@ -179,7 +179,7 @@ export function CSVUserImporter() {
   // Handle file selection
   const handleFileSelect = async (file: File) => {
     if (file.type !== "text/csv" && !file.name.endsWith(".csv")) {
-      setPreviewError("Por favor selecciona un archivo CSV v√°lido")
+      setPreviewError("Por favor selecciona un archivo CSV v·lido")
       return
     }
 
@@ -228,10 +228,10 @@ export function CSVUserImporter() {
 
   // Import users to backend
   const handleImport = async () => {
-    const validUsers = importedUsers.filter((u) => u.status === "valid")
+    const validUsers = importedUsers.filter((u) => u.importStatus === "valid")
 
     if (validUsers.length === 0) {
-      setPreviewError("No hay usuarios v√°lidos para importar")
+      setPreviewError("No hay usuarios v·lidos para importar")
       return
     }
 
@@ -266,8 +266,8 @@ export function CSVUserImporter() {
   const downloadTemplate = () => {
     const template =
       "name,email,role,faculty,status\n" +
-      "Juan P√©rez,juan.perez@estudiante.uci.cu,student,Medicina,active\n" +
-      "Dr. Mar√≠a L√≥pez,maria.lopez@uci.cu,professor,Medicina,active\n" +
+      "Juan PÈrez,juan.perez@estudiante.uci.cu,student,Medicina,active\n" +
+      "Dr. MarÌa LÛpez,maria.lopez@uci.cu,professor,Medicina,active\n" +
       "Admin Sistema,admin@uci.cu,admin,,active"
 
     const blob = new Blob([template], { type: "text/csv;charset=utf-8;" })
@@ -284,7 +284,7 @@ export function CSVUserImporter() {
         <CardHeader>
           <CardTitle>Importar Usuarios desde CSV</CardTitle>
           <CardDescription>
-            Carga un archivo CSV con usuarios. Solo se importar√°n filas v√°lidas.
+            Carga un archivo CSV con usuarios. Solo se importar·n filas v·lidas.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -341,7 +341,7 @@ export function CSVUserImporter() {
                 <div className="flex flex-col items-center gap-2">
                   <Upload className={`w-8 h-8 ${dragActive ? "text-blue-500" : "text-gray-400"}`} />
                   <div className="text-base font-medium">
-                    {csvFile ? csvFile.name : "Arrastra tu archivo CSV aqu√≠"}
+                    {csvFile ? csvFile.name : "Arrastra tu archivo CSV aquÌ"}
                   </div>
                   <div className="text-sm text-gray-500">
                     o haz click para seleccionar un archivo
@@ -356,7 +356,7 @@ export function CSVUserImporter() {
                   <div className="space-y-1 text-sm">
                     <p>Columnas requeridas: <strong>name, email, role</strong></p>
                     <p>Columnas opcionales: faculty, status</p>
-                    <p>Roles v√°lidos: student, professor, admin</p>
+                    <p>Roles v·lidos: student, professor, admin</p>
                   </div>
                 </AlertDescription>
               </Alert>
@@ -386,19 +386,19 @@ export function CSVUserImporter() {
                 </Card>
                 <Card className="p-3 border-green-200 bg-green-50">
                   <div className="text-2xl font-bold text-green-700">
-                    {importedUsers.filter((u) => u.status === "valid").length}
+                    {importedUsers.filter((u) => u.importStatus === "valid").length}
                   </div>
-                  <div className="text-xs text-green-700">V√°lidas</div>
+                  <div className="text-xs text-green-700">V·lidas</div>
                 </Card>
                 <Card className="p-3 border-yellow-200 bg-yellow-50">
                   <div className="text-2xl font-bold text-yellow-700">
-                    {importedUsers.filter((u) => u.status === "warning").length}
+                    {importedUsers.filter((u) => u.importStatus === "warning").length}
                   </div>
                   <div className="text-xs text-yellow-700">Advertencias</div>
                 </Card>
                 <Card className="p-3 border-red-200 bg-red-50">
                   <div className="text-2xl font-bold text-red-700">
-                    {importedUsers.filter((u) => u.status === "error").length}
+                    {importedUsers.filter((u) => u.importStatus === "error").length}
                   </div>
                   <div className="text-xs text-red-700">Errores</div>
                 </Card>
@@ -422,9 +422,9 @@ export function CSVUserImporter() {
                       <TableRow
                         key={user.rowNumber}
                         className={
-                          user.status === "error"
+                          user.importStatus === "error"
                             ? "bg-red-50"
-                            : user.status === "warning"
+                            : user.importStatus === "warning"
                               ? "bg-yellow-50"
                               : ""
                         }
@@ -443,18 +443,18 @@ export function CSVUserImporter() {
                           {user.faculty || "-"}
                         </TableCell>
                         <TableCell>
-                          {user.status === "valid" && (
+                          {user.importStatus === "valid" && (
                             <Badge className="bg-green-100 text-green-800 gap-1">
                               <CheckCircle className="w-3 h-3" />
                               OK
                             </Badge>
                           )}
-                          {user.status === "warning" && (
+                          {user.importStatus === "warning" && (
                             <Badge className="bg-yellow-100 text-yellow-800">
                               ‚ö†Ô∏è Aviso
                             </Badge>
                           )}
-                          {user.status === "error" && (
+                          {user.importStatus === "error" && (
                             <Badge className="bg-red-100 text-red-800 gap-1 cursor-help" title={user.message}>
                               <X className="w-3 h-3" />
                               Error
@@ -501,13 +501,13 @@ export function CSVUserImporter() {
                   onClick={handleImport}
                   disabled={
                     isLoading ||
-                    importedUsers.filter((u) => u.status === "valid").length === 0
+                    importedUsers.filter((u) => u.importStatus === "valid").length === 0
                   }
                   className="gap-2"
                 >
                   {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-                  Importar {importedUsers.filter((u) => u.status === "valid").length} usuario
-                  {importedUsers.filter((u) => u.status === "valid").length !== 1 ? "s" : ""}
+                  Importar {importedUsers.filter((u) => u.importStatus === "valid").length} usuario
+                  {importedUsers.filter((u) => u.importStatus === "valid").length !== 1 ? "s" : ""}
                 </Button>
               </div>
             </TabsContent>
@@ -572,7 +572,7 @@ export function CSVUserImporter() {
                           ))}
                           {importStats.errors.length > 5 && (
                             <p className="text-sm italic">
-                              +{importStats.errors.length - 5} errores m√°s
+                              +{importStats.errors.length - 5} errores m·s
                             </p>
                           )}
                         </div>

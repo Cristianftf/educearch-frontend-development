@@ -28,7 +28,12 @@ public class VerificationController {
     @PostMapping("/claim")
     @PreAuthorize("hasAnyRole('STUDENT', 'PROFESSOR')")
     public ResponseEntity<VerificationResponseDTO> verifyClaim(@Valid @RequestBody VerificationRequestDTO request) {
-        log.info("Verifying claim: {}", request.getClaimText());
+        String claim = request.getClaimText();
+        String sourceUrl = request.getSourceUrl();
+        if ((claim == null || claim.isBlank()) && (sourceUrl == null || sourceUrl.isBlank())) {
+            return ResponseEntity.badRequest().build();
+        }
+        log.info("Verifying claim: {}", claim != null ? claim : sourceUrl);
         VerificationResponseDTO response = verificationService.verifyClaim(request);
         return ResponseEntity.accepted().body(response);
     }

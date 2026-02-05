@@ -65,12 +65,46 @@ public class CaseServiceImpl implements CaseService {
             .orElseThrow(() -> new RuntimeException("Case not found: " + id));
 
         // Update fields
-        existing.setTitle(caseStudyDTO.getTitle());
-        existing.setScenario(caseStudyDTO.getScenario());
-        existing.setRequiredArticles(caseStudyDTO.getRequiredArticles());
-        existing.setOptionalArticles(caseStudyDTO.getOptionalArticles());
-        existing.setGuidingQuestions(caseStudyDTO.getGuidingQuestions());
-        existing.setDueDate(caseStudyDTO.getDueDate());
+        if (caseStudyDTO.getTitle() != null) {
+            existing.setTitle(caseStudyDTO.getTitle());
+        }
+        if (caseStudyDTO.getScenario() != null) {
+            existing.setScenario(caseStudyDTO.getScenario());
+        }
+        if (caseStudyDTO.getDifficulty() != null) {
+            try {
+                existing.setDifficulty(CaseDifficulty.valueOf(caseStudyDTO.getDifficulty().toUpperCase()));
+            } catch (IllegalArgumentException e) {
+                log.warn("Invalid difficulty {}, keeping existing", caseStudyDTO.getDifficulty());
+            }
+        }
+        if (caseStudyDTO.getStatus() != null) {
+            try {
+                existing.setStatus(CaseStatus.valueOf(caseStudyDTO.getStatus().toUpperCase()));
+            } catch (IllegalArgumentException e) {
+                log.warn("Invalid status {}, keeping existing", caseStudyDTO.getStatus());
+            }
+        }
+        if (caseStudyDTO.getRequiredArticles() != null) {
+            existing.setRequiredArticles(caseStudyDTO.getRequiredArticles());
+        }
+        if (caseStudyDTO.getOptionalArticles() != null) {
+            existing.setOptionalArticles(caseStudyDTO.getOptionalArticles());
+        }
+        if (caseStudyDTO.getGuidingQuestions() != null) {
+            existing.setGuidingQuestions(caseStudyDTO.getGuidingQuestions());
+        }
+        if (caseStudyDTO.getRubric() != null) {
+            existing.setRubric(caseStudyDTO.getRubric().stream()
+                .map(this::convertRubricToJson)
+                .collect(Collectors.toList()));
+        }
+        if (caseStudyDTO.getAssignedStudents() != null) {
+            existing.setAssignedStudents(caseStudyDTO.getAssignedStudents());
+        }
+        if (caseStudyDTO.getDueDate() != null) {
+            existing.setDueDate(caseStudyDTO.getDueDate());
+        }
 
         CaseStudy saved = caseStudyRepository.save(existing);
         return convertToDTO(saved);
@@ -231,6 +265,7 @@ public class CaseServiceImpl implements CaseService {
         if (caseStudy.getRubric() != null && !caseStudy.getRubric().isEmpty()) {
             dto.setRubric(caseStudy.getRubric().stream()
                 .map(this::parseRubricJson)
+                .filter(java.util.Objects::nonNull)
                 .collect(Collectors.toList()));
         } else {
             dto.setRubric(List.of());
