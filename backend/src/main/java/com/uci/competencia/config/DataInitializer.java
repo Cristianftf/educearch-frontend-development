@@ -6,12 +6,12 @@ import com.uci.competencia.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
-import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
 @Component
-@Profile("dev")
+@ConditionalOnProperty(prefix = "app.seed", name = "enabled", havingValue = "true", matchIfMissing = true)
 @RequiredArgsConstructor
 @Slf4j
 public class DataInitializer implements CommandLineRunner {
@@ -71,21 +71,32 @@ public class DataInitializer implements CommandLineRunner {
         String faculty,
         String department
     ) {
-        if (userRepository.findByEmail(email).isPresent()) {
-            return;
+        User user = userRepository.findByEmail(email).orElse(null);
+        boolean isNew = user == null;
+        if (isNew) {
+            user = new User();
+            user.setUsername(username);
+            user.setEmail(email);
         }
 
-        User user = new User();
-        user.setUsername(username);
-        user.setEmail(email);
-        user.setPasswordHash(passwordEncoder.encode(rawPassword));
+        boolean passwordMatches =
+            user.getPasswordHash() != null && passwordEncoder.matches(rawPassword, user.getPasswordHash());
+        if (!passwordMatches) {
+            user.setPasswordHash(passwordEncoder.encode(rawPassword));
+        }
+
         user.setFirstName(firstName);
         user.setLastName(lastName);
         user.setRole(role);
         user.setFaculty(faculty);
         user.setDepartment(department);
         user.setActive(true);
+
         userRepository.save(user);
-        log.info("Created test user: {} / {}", email, rawPassword);
+        if (isNew) {
+            log.info("Created test user: {} / {}", email, rawPassword);
+        } else {
+            log.info("Updated test user: {} / {}", email, rawPassword);
+        }
     }
 }
