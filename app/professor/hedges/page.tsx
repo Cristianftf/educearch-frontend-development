@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -38,19 +38,15 @@ import {
   Loader2,
 } from "lucide-react"
 import { hedgesApi } from "@/lib/api"
-import { useState as useStateCompat } from "react"
+import type { SearchHedge } from "@/types"
 
-type SearchHedge = {
-  id: string
-  name: string
-  category: string
-  query: string
-  description: string
-  estimatedResults: number
-  precision: number
-  recall: number
-  createdAt: string
-  isTemplate: boolean
+type HedgeTestResult = {
+  query?: string
+  resultCount?: number
+  estimatedPrecision?: number
+  estimatedRecall?: number
+  status?: string
+  message?: string
 }
 
 const mockHedges: SearchHedge[] = [
@@ -59,7 +55,7 @@ const mockHedges: SearchHedge[] = [
     name: "Diabetes Mellitus Tipo 2 - Tratamiento",
     category: "Enfermedades Metabólicas",
     query: '("Diabetes Mellitus, Type 2"[MeSH] OR "Type 2 Diabetes"[tiab]) AND ("Drug Therapy"[MeSH] OR "Treatment Outcome"[MeSH]) AND ("2019"[PDAT] : "2024"[PDAT])',
-    description: "Hedge para búsqueda de tratamientos farmacológicos en DM2",
+    description: "Hedge para Búsqueda de tratamientos farmacológicos en DM2",
     estimatedResults: 1250,
     precision: 0.85,
     recall: 0.78,
@@ -69,18 +65,19 @@ const mockHedges: SearchHedge[] = [
 ]
 
 const normalizeHedge = (hedge: Partial<SearchHedge>): SearchHedge => ({
-  id: hedge.id ?? "",
-  name: hedge.name ?? "",
-  category: hedge.category ?? "General",
-  query: hedge.query ?? "",
-  description: hedge.description ?? "",
+  id: hedge.id ? "",
+  name: hedge.name ? "",
+  category: hedge.category ? "General",
+  query: hedge.query ? "",
+  description: hedge.description ? "",
   estimatedResults: Number.isFinite(hedge.estimatedResults as number)
     ? (hedge.estimatedResults as number)
     : 0,
   precision: typeof hedge.precision === "number" ? hedge.precision : 0,
   recall: typeof hedge.recall === "number" ? hedge.recall : 0,
-  createdAt: hedge.createdAt ?? "",
+  createdAt: hedge.createdAt ? "",
   isTemplate: Boolean(hedge.isTemplate),
+  createdBy: hedge.createdBy ? "",
 })
 
 const formatDate = (value?: string) => {
@@ -112,23 +109,21 @@ export default function ProfessorHedgesPage() {
     recall: 0.8,
   })
   const [queryValidation, setQueryValidation] = useState<"valid" | "invalid" | null>(null)
-  const [testResult, setTestResult] = useState<any>(null)
+  const [testResult, setTestResult] = useState<HedgeTestResult | null>(null)
   const [isTesting, setIsTesting] = useState(false)
 
-  useEffect(() => {
-    loadHedgesAndCategories()
-  }, [])
+  useEffect(() => {\n    void loadHedgesAndCategories()\n  }, [loadHedgesAndCategories])
 
-  const loadHedgesAndCategories = async () => {
+  const loadHedgesAndCategories = useCallback(async () => {
     try {
       setIsLoading(true)
       setError(null)
 
       const hedgesData = await hedgesApi.getAll()
-      setHedges((hedgesData as SearchHedge[]).map(normalizeHedge))
+      setHedges(hedgesData.map(normalizeHedge))
 
       const categoriesData = await hedgesApi.getCategories()
-      setCategories(categoriesData as string[])
+      setCategories(categoriesData)
     } catch (err) {
       console.error("Error loading hedges:", err)
       setError("No se pudieron cargar los hedges. Usando datos de demostración.")
@@ -144,24 +139,24 @@ export default function ProfessorHedgesPage() {
       ])
     } finally {
       setIsLoading(false)
-    }
-  }
-
-  const handleCreateHedge = async () => {
+    }\n  }, [])\n\n  const handleCreateHedge = async () => {
     try {
       if (!formData.name || !formData.category || !formData.query) {
         alert("Por favor completa todos los campos requeridos")
         return
       }
 
-      const newHedge = {
-        id: "",
-        createdAt: new Date().toISOString(),
-        ...formData,
-      } as any
-
-      const created = await hedgesApi.create(newHedge)
-      setHedges([...hedges, normalizeHedge(created as SearchHedge)])
+      const created = await hedgesApi.create({
+        name: formData.name,
+        category: formData.category,
+        query: formData.query,
+        description: formData.description,
+        estimatedResults: formData.estimatedResults,
+        precision: formData.precision,
+        recall: formData.recall,
+        isTemplate: formData.isTemplate,
+      })
+      setHedges([...hedges, normalizeHedge(created)])
       setIsCreateDialogOpen(false)
       resetForm()
     } catch (err) {
@@ -180,14 +175,12 @@ export default function ProfessorHedgesPage() {
       }
 
       const updated = await hedgesApi.update(editingHedge.id, {
-        id: editingHedge.id,
-        createdAt: editingHedge.createdAt,
         ...formData,
-      } as any)
+      })
 
       setHedges(
         hedges.map((h) =>
-          h.id === editingHedge.id ? normalizeHedge(updated as SearchHedge) : h
+          h.id === editingHedge.id ? normalizeHedge(updated) : h
         )
       )
       setIsEditDialogOpen(false)
@@ -200,7 +193,7 @@ export default function ProfessorHedgesPage() {
   }
 
   const handleDeleteHedge = async (id: string) => {
-    if (!confirm("¿Estás seguro de que deseas eliminar este hedge?")) return
+    if (!confirm("?Estás seguro de que deseas eliminar este hedge?")) return
 
     try {
       await hedgesApi.delete(id)
@@ -263,14 +256,9 @@ export default function ProfessorHedgesPage() {
       setTestResult(result)
       validateQuery(formData.query)
 
-      const resultCount =
-        (result as any).count ??
-        (result as any).resultCount ??
-        0
-      const estimatedPrecision =
-        (result as any).estimatedPrecision ?? formData.precision
-      const estimatedRecall =
-        (result as any).estimatedRecall ?? formData.recall
+      const resultCount = result?.resultCount ? 0
+      const estimatedPrecision = result?.estimatedPrecision ? formData.precision
+      const estimatedRecall = result?.estimatedRecall ? formData.recall
 
       setFormData(prev => ({
         ...prev,
@@ -286,11 +274,13 @@ export default function ProfessorHedgesPage() {
     }
   }
 
-  const filteredHedges = hedges.filter((hedge) => {
-    const matchesSearch = hedge.name.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesCategory = selectedCategory === "all" || hedge.category === selectedCategory
-    return matchesSearch && matchesCategory
-  })
+  const filteredHedges = useMemo(() => (
+    hedges.filter((hedge) => {
+      const matchesSearch = hedge.name.toLowerCase().includes(searchQuery.toLowerCase())
+      const matchesCategory = selectedCategory === "all" || hedge.category === selectedCategory
+      return matchesSearch && matchesCategory
+    })
+  ), [hedges, searchQuery, selectedCategory])
 
   if (isLoading) {
     return (
@@ -311,7 +301,7 @@ export default function ProfessorHedgesPage() {
             Configurador de Search Hedges
           </h1>
           <p className="text-muted-foreground">
-            Crea y gestiona estrategias de búsqueda predefinidas para tus estudiantes
+            Crea y gestiona estrategias de Búsqueda predefinidas para tus estudiantes
           </p>
         </div>
 
@@ -326,7 +316,7 @@ export default function ProfessorHedgesPage() {
             <DialogHeader>
               <DialogTitle>Crear Nuevo Search Hedge</DialogTitle>
               <DialogDescription>
-                Define una estrategia de búsqueda que los estudiantes podrán usar como plantilla.
+                Define una estrategia de Búsqueda que los estudiantes podrán usar como plantilla.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
@@ -344,7 +334,7 @@ export default function ProfessorHedgesPage() {
                   <Label htmlFor="category">Categoría *</Label>
                   <Select value={formData.category} onValueChange={(val) => setFormData({ ...formData, category: val })}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Seleccionar categoría" />
+                      <SelectValue placeholder="Seleccionar Categoría" />
                     </SelectTrigger>
                     <SelectContent>
                       {categories.map((cat) => (
@@ -359,7 +349,7 @@ export default function ProfessorHedgesPage() {
                 <Label htmlFor="description">Descripción</Label>
                 <Input
                   id="description"
-                  placeholder="Breve descripción del propósito del hedge"
+                  placeholder="Breve Descripción del propósito del hedge"
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 />
@@ -395,7 +385,7 @@ export default function ProfessorHedgesPage() {
                   }}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Usa sintaxis PubMed con términos MeSH y operadores booleanos
+                  Usa sintaxis PubMed con Términos MeSH y operadores booleanos
                 </p>
               </div>
 
@@ -406,19 +396,19 @@ export default function ProfessorHedgesPage() {
                     <div>
                       <span className="text-muted-foreground">Resultados:</span>
                       <p className="font-semibold">
-                        {testResult.count ?? testResult.resultCount ?? 0}
+                        {testResult.resultCount ? 0}
                       </p>
                     </div>
                     <div>
                       <span className="text-muted-foreground">Precisión:</span>
                       <p className="font-semibold">
-                        {(((testResult.estimatedPrecision ?? formData.precision) * 100) || 0).toFixed(0)}%
+                        {(((testResult.estimatedPrecision ? formData.precision) * 100) || 0).toFixed(0)}%
                       </p>
                     </div>
                     <div>
                       <span className="text-muted-foreground">Recall:</span>
                       <p className="font-semibold">
-                        {(((testResult.estimatedRecall ?? formData.recall) * 100) || 0).toFixed(0)}%
+                        {(((testResult.estimatedRecall ? formData.recall) * 100) || 0).toFixed(0)}%
                       </p>
                     </div>
                   </div>
@@ -483,10 +473,10 @@ export default function ProfessorHedgesPage() {
         <Select value={selectedCategory} onValueChange={setSelectedCategory}>
           <SelectTrigger className="w-full sm:w-64">
             <Filter className="h-4 w-4 mr-2" />
-            <SelectValue placeholder="Filtrar por categoría" />
+            <SelectValue placeholder="Filtrar por Categoría" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Todas las categorías</SelectItem>
+            <SelectItem value="all">Todas las Categorías</SelectItem>
             {categories.map((cat) => (
               <SelectItem key={cat} value={cat}>{cat}</SelectItem>
             ))}
@@ -542,13 +532,13 @@ export default function ProfessorHedgesPage() {
                   <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded">
                     <p className="text-xs text-muted-foreground">Precisión</p>
                     <p className="text-lg font-bold text-green-600 dark:text-green-400">
-                      {Math.round((hedge.precision ?? 0) * 100)}%
+                      {Math.round((hedge.precision ? 0) * 100)}%
                     </p>
                   </div>
                   <div className="bg-orange-50 dark:bg-orange-900/20 p-3 rounded">
                     <p className="text-xs text-muted-foreground">Recall</p>
                     <p className="text-lg font-bold text-orange-600 dark:text-orange-400">
-                      {Math.round((hedge.recall ?? 0) * 100)}%
+                      {Math.round((hedge.recall ? 0) * 100)}%
                     </p>
                   </div>
                 </div>
@@ -576,7 +566,7 @@ export default function ProfessorHedgesPage() {
                     <DialogHeader>
                       <DialogTitle>Editar Search Hedge</DialogTitle>
                       <DialogDescription>
-                        Actualiza los detalles de tu estrategia de búsqueda.
+                        Actualiza los detalles de tu estrategia de Búsqueda.
                       </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
@@ -594,7 +584,7 @@ export default function ProfessorHedgesPage() {
                           <Label htmlFor="edit-category">Categoría *</Label>
                           <Select value={formData.category} onValueChange={(val) => setFormData({ ...formData, category: val })}>
                             <SelectTrigger>
-                              <SelectValue placeholder="Seleccionar categoría" />
+                              <SelectValue placeholder="Seleccionar Categoría" />
                             </SelectTrigger>
                             <SelectContent>
                               {categories.map((cat) => (
@@ -609,7 +599,7 @@ export default function ProfessorHedgesPage() {
                         <Label htmlFor="edit-description">Descripción</Label>
                         <Input
                           id="edit-description"
-                          placeholder="Breve descripción del propósito del hedge"
+                          placeholder="Breve Descripción del propósito del hedge"
                           value={formData.description}
                           onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                         />
@@ -645,7 +635,7 @@ export default function ProfessorHedgesPage() {
                           }}
                         />
                         <p className="text-xs text-muted-foreground">
-                          Usa sintaxis PubMed con términos MeSH y operadores booleanos
+                          Usa sintaxis PubMed con Términos MeSH y operadores booleanos
                         </p>
                       </div>
 
@@ -656,19 +646,19 @@ export default function ProfessorHedgesPage() {
                             <div>
                               <span className="text-muted-foreground">Resultados:</span>
                               <p className="font-semibold">
-                                {testResult.count ?? testResult.resultCount ?? 0}
+                                {testResult.resultCount ? 0}
                               </p>
                             </div>
                             <div>
                               <span className="text-muted-foreground">Precisión:</span>
                               <p className="font-semibold">
-                                {(((testResult.estimatedPrecision ?? formData.precision) * 100) || 0).toFixed(0)}%
+                                {(((testResult.estimatedPrecision ? formData.precision) * 100) || 0).toFixed(0)}%
                               </p>
                             </div>
                             <div>
                               <span className="text-muted-foreground">Recall:</span>
                               <p className="font-semibold">
-                                {(((testResult.estimatedRecall ?? formData.recall) * 100) || 0).toFixed(0)}%
+                                {(((testResult.estimatedRecall ? formData.recall) * 100) || 0).toFixed(0)}%
                               </p>
                             </div>
                           </div>

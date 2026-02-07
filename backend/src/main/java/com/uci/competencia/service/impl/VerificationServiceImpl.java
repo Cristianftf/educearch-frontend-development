@@ -3,6 +3,7 @@ package com.uci.competencia.service.impl;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.uci.competencia.model.dto.request.VerificationRequestDTO;
+import com.uci.competencia.model.dto.request.VerificationRequest;
 import com.uci.competencia.model.dto.response.VerificationResponseDTO;
 import com.uci.competencia.model.entity.User;
 import com.uci.competencia.model.entity.VerificationResult;
@@ -10,9 +11,11 @@ import com.uci.competencia.model.enums.Verdict;
 import com.uci.competencia.model.enums.VerificationStatus;
 import com.uci.competencia.repository.UserRepository;
 import com.uci.competencia.repository.VerificationResultRepository;
+import com.uci.competencia.service.RAGService;
 import com.uci.competencia.service.VerificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jsoup.Jsoup;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -35,18 +38,24 @@ public class VerificationServiceImpl implements VerificationService {
     private final VerificationResultRepository verificationResultRepository;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
+    private final RAGService ragService;
 
     @Override
     public VerificationResponseDTO verifyClaim(VerificationRequestDTO request) {
-        log.info("Processing verification for claim: {}", request.getClaimText());
-
-        VerificationResult result = new VerificationResult();
         String claim = (request.getClaimText() != null && !request.getClaimText().isBlank())
             ? request.getClaimText()
             : request.getSourceUrl();
+        String claimForAnalysis = claim;
+        if (request.getSourceUrl() != null && (request.getClaimText() == null || request.getClaimText().isBlank())) {
+            claimForAnalysis = fetchClaimFromUrl(request.getSourceUrl());
+        }
+
+        log.info("Processing verification for claim: {}", claim);
+
+        VerificationResult result = new VerificationResult();
         result.setClaimText(claim);
         result.setSourceUrl(request.getSourceUrl());
-        result.setStatus(VerificationStatus.PENDING);
+        result.setStatus(VerificationStatus.PROCESSING);
 
         String userId = getCurrentUserId();
         if (userId != null) {
@@ -56,18 +65,43 @@ public class VerificationServiceImpl implements VerificationService {
 
         VerificationResult saved = verificationResultRepository.save(result);
 
-        VerificationResponseDTO response = new VerificationResponseDTO();
-        response.setId(saved.getId());
-        response.setClaim(saved.getClaimText());
-        response.setStatus("pending");
-        response.setScore(0.0);
-        response.setSupportingEvidence(new ArrayList<>());
-        response.setContradictingEvidence(new ArrayList<>());
-        response.setConflictingEvidence(new ArrayList<>());
-        response.setExplanation("El claim está en proceso de verificación.");
-        response.setRecommendations(new ArrayList<>());
-        response.setVerifiedAt(saved.getSubmittedAt() != null ? saved.getSubmittedAt().toString() : null);
-        return response;
+        VerificationResponseDTO response;
+        try {
+            VerificationRequest ragRequest = VerificationRequest.builder()
+                .claim(claimForAnalysis)
+                .context(request.getSourceUrl())
+                .maxArticles(15)
+                .confidenceThreshold(0.5)
+                .sessionId(request.getContext() != null ? request.getContext().getSessionId() : null)
+                .build();
+
+            response = ragService.verifyClaimAgainstEvidence(ragRequest);
+            response.setId(saved.getId());
+            response.setClaim(claim);
+
+            saved.setStatus(VerificationStatus.COMPLETED);
+            saved.setVerdict(mapVerdict(response.getVerdict()));
+            saved.setOverallScore(response.getScore());
+            saved.setConfidence(response.getConfidence());
+            saved.setEvidenceCount(response.getEvidenceCount());
+            saved.setSupportingEvidence(objectMapper.writeValueAsString(response.getSupportingEvidence()));
+            saved.setConflictingEvidence(objectMapper.writeValueAsString(response.getContradictingEvidence()));
+            saved.setExplanations(response.getExplanation());
+            saved.setRecommendations(objectMapper.writeValueAsString(response.getRecommendations()));
+            saved.setCompletedAt(java.time.LocalDateTime.now());
+
+            verificationResultRepository.save(saved);
+            return response;
+        } catch (Exception e) {
+            log.error("Error verifying claim", e);
+            saved.setStatus(VerificationStatus.FAILED);
+            saved.setExplanations("No se pudo completar la verificación. Intenta de nuevo.");
+            verificationResultRepository.save(saved);
+            response = convertToDTO(saved);
+            response.setId(saved.getId());
+            response.setClaim(claim);
+            return response;
+        }
     }
 
     @Override
@@ -141,6 +175,32 @@ public class VerificationServiceImpl implements VerificationService {
         dto.setExplanation(resolveExplanation(result));
         dto.setRecommendations(parseRecommendations(result.getRecommendations()));
         return dto;
+    }
+
+    private Verdict mapVerdict(String verdict) {
+        if (verdict == null) return null;
+        try {
+            return Verdict.valueOf(verdict);
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
+    private String fetchClaimFromUrl(String url) {
+        try {
+            String text = Jsoup.connect(url)
+                .userAgent("UCI-Competencia/1.0")
+                .timeout(10000)
+                .get()
+                .text();
+            if (text == null || text.isBlank()) {
+                return url;
+            }
+            return text.length() > 1200 ? text.substring(0, 1200) : text;
+        } catch (Exception e) {
+            log.warn("Unable to fetch content from URL, using URL as claim", e);
+            return url;
+        }
     }
 
     private String mapStatus(VerificationResult result) {

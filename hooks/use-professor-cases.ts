@@ -1,15 +1,7 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useProfessor } from '@/contexts/professor-context'
-import { casesApi, evaluationApi } from '@/lib/api'
+import { api, casesApi, evaluationApi } from '@/lib/api'
 import type { CaseStudy, CaseStatus, CaseSubmission } from '@/types'
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
-
-const buildApiUrl = (path: string) => {
-  const base = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL
-  const suffix = path.startsWith('/') ? path : `/${path}`
-  return `${base}${suffix}`
-}
 
 interface UseProfessorCasesReturn {
   cases: CaseStudy[]
@@ -32,6 +24,7 @@ export function useProfessorCases(): UseProfessorCasesReturn {
   const { cases, setCases, updateCase: updateCaseContext, deleteCase: deleteCaseContext } = useProfessor()
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const caseIds = useMemo(() => new Set(cases.map((item) => item.id)), [cases])
 
   const loadCases = useCallback(async () => {
     setIsLoading(true)
@@ -156,68 +149,29 @@ export function useProfessorCases(): UseProfessorCasesReturn {
       const pendingSubmissions = await evaluationApi.getPending()
 
       // Find current submission index
-      const currentIndex = pendingSubmissions.findIndex(sub => sub.id === currentSubmissionId)
+      const currentIndex = pendingSubmissions.findIndex((sub) => sub.id === currentSubmissionId)
       if (currentIndex === -1 || currentIndex >= pendingSubmissions.length - 1) return
 
       // Prefetch next submission
       const nextSubmission = pendingSubmissions[currentIndex + 1]
 
       // Prefetch submission details in background
-      fetch(buildApiUrl(`/submissions/${nextSubmission.id}`), {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-          'X-User-Role': 'professor',
-          'X-UCI-Platform': 'competencia-informacional'
-        }
-      }).catch(err => {
-        console.warn('[prefetchNextSubmission]: Failed to prefetch next submission', err)
-      })
+      void api.prefetch(`/submissions/${nextSubmission.id}`)
 
       // Prefetch case details if not already loaded
-      const caseDetails = cases.find(c => c.id === nextSubmission.caseId)
-      if (!caseDetails) {
-        fetch(buildApiUrl(`/cases/${nextSubmission.caseId}`), {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-            'X-User-Role': 'professor',
-            'X-UCI-Platform': 'competencia-informacional'
-          }
-        }).catch(err => {
-          console.warn('[prefetchNextSubmission]: Failed to prefetch case details', err)
-        })
+      if (!caseIds.has(nextSubmission.caseId)) {
+        void api.prefetch(`/cases/${nextSubmission.caseId}`)
       }
     } catch (err) {
       console.warn('[prefetchNextSubmission]: Error in prefetching', err)
     }
-  }, [cases])
+  }, [caseIds])
 
   const prefetchCaseDetails = useCallback(async (caseId: string) => {
     try {
       // Prefetch case details
-      fetch(buildApiUrl(`/cases/${caseId}`), {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-          'X-User-Role': 'professor',
-          'X-UCI-Platform': 'competencia-informacional'
-        }
-      }).catch(err => {
-        console.warn('[prefetchCaseDetails]: Failed to prefetch case', err)
-      })
-
-      // Prefetch submissions for this case
-      fetch(buildApiUrl(`/cases/${caseId}/submissions`), {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-          'X-User-Role': 'professor',
-          'X-UCI-Platform': 'competencia-informacional'
-        }
-      }).catch(err => {
-        console.warn('[prefetchCaseDetails]: Failed to prefetch submissions', err)
-      })
+      void api.prefetch(`/cases/${caseId}`)
+      void api.prefetch(`/cases/${caseId}/submissions`)
     } catch (err) {
       console.warn('[prefetchCaseDetails]: Error in prefetching', err)
     }

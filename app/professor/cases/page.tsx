@@ -1,9 +1,8 @@
 'use client'
 
-import React from "react"
-
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { casesApi } from '@/lib/api'
 import type { CaseStudy, CaseStatus, CaseDifficulty } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -43,7 +42,7 @@ import {
   Copy,
   ArrowRight,
 } from 'lucide-react'
-import { CaseWizard } from '@/components/case-wizard'
+// import { useRouter } from 'next/navigation'
 
 const statusConfig: Record<CaseStatus, { label: string; color: string }> = {
   draft: { label: 'Borrador', color: 'bg-muted text-muted-foreground' },
@@ -63,7 +62,7 @@ export default function ProfessorCasesPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [deleteDialog, setDeleteDialog] = useState<CaseStudy | null>(null)
   const [draggedCase, setDraggedCase] = useState<CaseStudy | null>(null)
-  const [wizardOpen, setWizardOpen] = useState(false)
+  const router = useRouter()
 
   useEffect(() => {
     async function loadCases() {
@@ -117,17 +116,19 @@ export default function ProfessorCasesPage() {
     setDraggedCase(null)
   }
 
-  const filteredCases = cases.filter(
-    (c) =>
-      c.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.scenario.toLowerCase().includes(searchTerm.toLowerCase())
-  )
+  const filteredCases = useMemo(() => (
+    cases.filter(
+      (c) =>
+        c.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.scenario.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+  ), [cases, searchTerm])
 
-  const casesByStatus: Record<CaseStatus, CaseStudy[]> = {
+  const casesByStatus = useMemo<Record<CaseStatus, CaseStudy[]>>(() => ({
     draft: filteredCases.filter((c) => c.status === 'draft'),
     active: filteredCases.filter((c) => c.status === 'active'),
     archived: filteredCases.filter((c) => c.status === 'archived'),
-  }
+  }), [filteredCases])
 
   if (isLoading) {
     return <CasesSkeleton />
@@ -135,20 +136,6 @@ export default function ProfessorCasesPage() {
 
   return (
     <div className="space-y-6">
-      {/* Wizard Dialog */}
-      <CaseWizard
-        isOpen={wizardOpen}
-        onClose={() => setWizardOpen(false)}
-        onSubmit={async (caseData) => {
-          try {
-            const newCase = await casesApi.create(caseData as CaseStudy)
-            setCases((prev) => [newCase, ...prev])
-          } catch (err) {
-            console.error('[v0] Error creating case:', err)
-          }
-        }}
-      />
-
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -160,7 +147,7 @@ export default function ProfessorCasesPage() {
             Gestiona y organiza los casos de estudio para tus estudiantes
           </p>
         </div>
-        <Button onClick={() => setWizardOpen(true)}>
+        <Button onClick={() => router.push('/professor/cases/new')}>
           <Plus className="mr-2 h-4 w-4" />
           Crear caso
         </Button>
@@ -232,7 +219,27 @@ export default function ProfessorCasesPage() {
                                     Editar
                                   </Link>
                                 </DropdownMenuItem>
-                                <DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={async () => {
+                                    try {
+                                      const duplicated = await casesApi.create({
+                                        title: `${caseStudy.title} (Copia)`,
+                                        scenario: caseStudy.scenario,
+                                        difficulty: caseStudy.difficulty,
+                                        status: 'draft',
+                                        requiredArticles: caseStudy.requiredArticles,
+                                        optionalArticles: caseStudy.optionalArticles,
+                                        guidingQuestions: caseStudy.guidingQuestions,
+                                        rubric: caseStudy.rubric,
+                                        dueDate: caseStudy.dueDate,
+                                        assignedStudents: [],
+                                      })
+                                      setCases((prev) => [duplicated, ...prev])
+                                    } catch (err) {
+                                      console.error('[v0] Error duplicating case:', err)
+                                    }
+                                  }}
+                                >
                                   <Copy className="mr-2 h-4 w-4" />
                                   Duplicar
                                 </DropdownMenuItem>
@@ -323,7 +330,7 @@ export default function ProfessorCasesPage() {
           <DialogHeader>
             <DialogTitle>Eliminar caso</DialogTitle>
             <DialogDescription>
-              ¿Estás seguro de que deseas eliminar el caso &ldquo;{deleteDialog?.title}&rdquo;? Esta acción
+              ?Estás seguro de que deseas eliminar el caso &ldquo;{deleteDialog?.title}&rdquo;? Esta acción
               no se puede deshacer.
             </DialogDescription>
           </DialogHeader>

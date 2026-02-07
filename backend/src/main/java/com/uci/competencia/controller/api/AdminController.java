@@ -60,11 +60,27 @@ public class AdminController {
         if (hasStatus && "pending".equalsIgnoreCase(status)) {
             userPage = Page.empty(pageable);
         } else if (hasRole && hasStatus) {
-            Role userRole = Role.valueOf(role.toUpperCase());
+            Role userRole;
+            try {
+                userRole = parseRole(role);
+            } catch (IllegalArgumentException e) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("error", "Invalid role");
+                error.put("message", e.getMessage());
+                return ResponseEntity.badRequest().body(error);
+            }
             boolean active = "active".equalsIgnoreCase(status);
             userPage = adminService.getUsersByRoleAndStatus(userRole, active, pageable);
         } else if (hasRole) {
-            Role userRole = Role.valueOf(role.toUpperCase());
+            Role userRole;
+            try {
+                userRole = parseRole(role);
+            } catch (IllegalArgumentException e) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("error", "Invalid role");
+                error.put("message", e.getMessage());
+                return ResponseEntity.badRequest().body(error);
+            }
             userPage = adminService.getUsersByRole(userRole, pageable);
         } else if (hasStatus) {
             boolean active = "active".equalsIgnoreCase(status);
@@ -101,7 +117,12 @@ public class AdminController {
     public ResponseEntity<UserDTO> createUser(@RequestBody UserDTO userDTO) {
         log.info("Creating new user: {}", userDTO.getEmail());
 
-        User user = convertToUserEntity(userDTO);
+        User user;
+        try {
+            user = convertToUserEntity(userDTO);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        }
         User savedUser = adminService.createUser(user);
         UserDTO responseDTO = convertToUserDTO(savedUser);
 
@@ -112,7 +133,12 @@ public class AdminController {
     public ResponseEntity<UserDTO> updateUser(@PathVariable String id, @RequestBody UserDTO userDTO) {
         log.info("Updating user: {}", id);
 
-        User user = convertToUserEntity(userDTO);
+        User user;
+        try {
+            user = convertToUserEntity(userDTO);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        }
         User updatedUser = adminService.updateUser(id, user);
         UserDTO responseDTO = convertToUserDTO(updatedUser);
 
@@ -136,7 +162,12 @@ public class AdminController {
 
         log.info("Changing role for user {} to {}", id, roleStr);
 
-        Role newRole = Role.valueOf(roleStr.toUpperCase());
+        Role newRole;
+        try {
+            newRole = parseRole(roleStr);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        }
         User updatedUser = adminService.changeUserRole(id, newRole);
         UserDTO userDTO = convertToUserDTO(updatedUser);
 
@@ -797,7 +828,8 @@ public class AdminController {
         dto.setName(user.getFirstName() + " " + user.getLastName());
         dto.setFirstName(user.getFirstName());
         dto.setLastName(user.getLastName());
-        dto.setRole(user.getRole().name().toLowerCase());
+        dto.setRole(user.getRole().name().toLowerCase().replace("role_", ""));
+        dto.setAvatar(user.getAvatar());
         dto.setFaculty(user.getFaculty());
         dto.setActive(user.isActive());
         dto.setCreatedAt(user.getCreatedAt() != null ? user.getCreatedAt().toString() : null);
@@ -811,11 +843,31 @@ public class AdminController {
         user.setFirstName(dto.getFirstName());
         user.setLastName(dto.getLastName());
         if (dto.getRole() != null) {
-            user.setRole(Role.valueOf(dto.getRole().toUpperCase()));
+            user.setRole(parseRole(dto.getRole()));
         }
         user.setFaculty(dto.getFaculty());
         user.setActive(dto.isActive());
         return user;
+    }
+
+    private Role parseRole(String roleStr) {
+        if (roleStr == null || roleStr.trim().isEmpty()) {
+            throw new IllegalArgumentException("Role cannot be empty");
+        }
+        String normalized = roleStr.trim().toUpperCase();
+        if (normalized.startsWith("ROLE_")) {
+            normalized = normalized.substring("ROLE_".length());
+        }
+        switch (normalized) {
+            case "STUDENT":
+                return Role.ROLE_STUDENT;
+            case "PROFESSOR":
+                return Role.ROLE_PROFESSOR;
+            case "ADMIN":
+                return Role.ROLE_ADMIN;
+            default:
+                throw new IllegalArgumentException("Invalid role: " + roleStr);
+        }
     }
 
     /**

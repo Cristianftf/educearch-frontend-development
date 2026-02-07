@@ -1,16 +1,19 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useMemo, useState, useCallback, useEffect } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { EvidencePyramid } from "@/components/evidence-pyramid"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { BookOpen, Filter, Layers, ArrowRight } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { searchApi } from "@/lib/search"
+import { BookOpen, Filter, Layers, ArrowRight, Loader2, Search } from "lucide-react"
 import type { SearchResult } from "@/types"
 
 type StudyBlock = {
   id: string
+  pmid?: string
   title: string
   year: number
   sampleSize: number
@@ -18,70 +21,9 @@ type StudyBlock = {
   hasConflictsOfInterest: boolean
   authors: string[]
   journal: string
+  studyType?: string
+  doi?: string
 }
-
-const demoStudies: StudyBlock[] = [
-  {
-    id: "sr-01",
-    title: "Metaanálisis sobre control glucémico en diabetes tipo 2",
-    year: 2023,
-    sampleSize: 24500,
-    level: 1,
-    hasConflictsOfInterest: false,
-    authors: ["Lopez A.", "Mendez R."],
-    journal: "Journal of Clinical Evidence",
-  },
-  {
-    id: "rct-01",
-    title: "Ensayo clínico aleatorizado: dieta mediterránea vs estándar",
-    year: 2022,
-    sampleSize: 820,
-    level: 2,
-    hasConflictsOfInterest: true,
-    authors: ["Garcia P.", "Duarte M."],
-    journal: "Clinical Nutrition Research",
-  },
-  {
-    id: "coh-01",
-    title: "Cohorte multicéntrica de hipertensión en adultos jóvenes",
-    year: 2021,
-    sampleSize: 5400,
-    level: 3,
-    hasConflictsOfInterest: false,
-    authors: ["Santos L.", "Perez J."],
-    journal: "Epidemiology Today",
-  },
-  {
-    id: "cc-01",
-    title: "Caso-control: factores de riesgo cardiovasculares",
-    year: 2020,
-    sampleSize: 1200,
-    level: 4,
-    hasConflictsOfInterest: false,
-    authors: ["Ramos T.", "Vega C."],
-    journal: "Cardio Science",
-  },
-  {
-    id: "cr-01",
-    title: "Serie de casos sobre efectos adversos de antibióticos",
-    year: 2019,
-    sampleSize: 38,
-    level: 5,
-    hasConflictsOfInterest: false,
-    authors: ["Ruiz H."],
-    journal: "Case Reports in Medicine",
-  },
-  {
-    id: "exp-01",
-    title: "Opinión de expertos sobre manejo del dolor crónico",
-    year: 2018,
-    sampleSize: 0,
-    level: 6,
-    hasConflictsOfInterest: true,
-    authors: ["Panel de expertos UCI"],
-    journal: "Clinical Guidelines Review",
-  },
-]
 
 function mapToSearchResult(study: StudyBlock): SearchResult {
   const studyTypeByLevel: Record<number, string> = {
@@ -95,28 +37,97 @@ function mapToSearchResult(study: StudyBlock): SearchResult {
 
   return {
     id: study.id,
-    pmid: study.id,
+    pmid: study.pmid ?? study.id,
     title: study.title,
     authors: study.authors,
     journal: study.journal,
     year: study.year,
-    abstract: "Resumen no disponible en modo demo. Reemplazar con datos reales.",
-    studyType: studyTypeByLevel[study.level] || "Study",
+    abstract: "",
+    studyType: study.studyType || studyTypeByLevel[study.level] || "Study",
     evidenceLevel: study.level,
     sampleSize: study.sampleSize || undefined,
     hasConflictOfInterest: study.hasConflictsOfInterest,
+    doi: study.doi,
   }
 }
 
 export default function EvidencePyramidPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [selectedLevel, setSelectedLevel] = useState<number | null>(null)
   const [selectedStudies, setSelectedStudies] = useState<string[]>([])
+  const [query, setQuery] = useState("")
+  const [studies, setStudies] = useState<StudyBlock[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const inferEvidenceLevel = useCallback((studyType?: string) => {
+    if (!studyType) return 6
+    const normalized = studyType.toLowerCase()
+    if (normalized.includes("systematic") || normalized.includes("meta")) return 1
+    if (normalized.includes("randomized") || normalized.includes("clinical trial")) return 2
+    if (normalized.includes("cohort")) return 3
+    if (normalized.includes("case-control")) return 4
+    if (normalized.includes("case report")) return 5
+    return 6
+  }, [])
+
+  const mapResultsToStudies = useCallback((results: SearchResult[]) => {
+    return results.map((result) => ({
+      id: result.id,
+      pmid: result.pmid,
+      title: result.title,
+      year: result.year,
+      sampleSize: result.sampleSize || 0,
+      level: result.evidenceLevel ?? inferEvidenceLevel(result.studyType),
+      hasConflictsOfInterest: result.hasConflictOfInterest ?? false,
+      authors: result.authors || [],
+      journal: result.journal || "",
+      studyType: result.studyType,
+      doi: result.doi,
+    }))
+  }, [inferEvidenceLevel])
+
+  const runSearch = useCallback(async (term?: string) => {
+    const searchTerm = (term ?? query).trim()
+    if (!searchTerm) {
+      setError("Ingresa un tema para buscar evidencia.")
+      return
+    }
+    setIsSearching(true)
+    setError(null)
+    try {
+      const session = await searchApi.execute({
+        id: `pyramid-${Date.now()}`,
+        terms: [{ id: searchTerm, term: searchTerm, description: "" }],
+        operators: [],
+        filters: {},
+        rawQuery: searchTerm,
+      })
+      setStudies(mapResultsToStudies(session.results))
+      setSelectedStudies([])
+      setSelectedLevel(null)
+    } catch (err) {
+      console.error("[pyramid] Error fetching evidence:", err)
+      setError("No se pudo cargar evidencia desde PubMed.")
+    } finally {
+      setIsSearching(false)
+    }
+  }, [query, mapResultsToStudies])
+
+  const initialQuery = searchParams.get("q")
+
+  useEffect(() => {
+    if (initialQuery) {
+      setQuery(initialQuery)
+      runSearch(initialQuery)
+    }
+  }, [initialQuery, runSearch])
 
   const filteredStudies = useMemo(() => {
-    if (!selectedLevel) return demoStudies
-    return demoStudies.filter((s) => s.level === selectedLevel)
-  }, [selectedLevel])
+    if (!selectedLevel) return studies
+    return studies.filter((s) => s.level === selectedLevel)
+  }, [selectedLevel, studies])
 
   const handleStudySelect = (study: StudyBlock) => {
     setSelectedStudies((prev) =>
@@ -126,7 +137,7 @@ export default function EvidencePyramidPage() {
 
   const handleAddToBibliography = (studyIds: string[]) => {
     const payload = studyIds
-      .map((id) => demoStudies.find((s) => s.id === id))
+      .map((id) => studies.find((s) => s.id === id))
       .filter(Boolean)
       .map((study) => mapToSearchResult(study as StudyBlock))
     localStorage.setItem(
@@ -146,10 +157,47 @@ export default function EvidencePyramidPage() {
         <p className="text-muted-foreground mt-1">
           Explora la jerarquía de evidencia y selecciona estudios para tu bibliografía.
         </p>
-        <p className="text-xs text-muted-foreground mt-2">
-          Vista demo: los datos son de ejemplo y no provienen de búsquedas reales.
-        </p>
       </div>
+
+      <Card className="border-primary/20 bg-primary/5">
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Search className="h-5 w-5 text-primary" />
+            Buscar evidencia real
+          </CardTitle>
+          <CardDescription>
+            Ingresa un tema o pregunta clínica para consultar PubMed.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Ej: diabetes tipo 2 y metformina"
+              disabled={isSearching}
+            />
+            <Button onClick={() => runSearch()} disabled={isSearching || !query.trim()}>
+              {isSearching ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Buscando...
+                </>
+              ) : (
+                "Buscar evidencia"
+              )}
+            </Button>
+          </div>
+          {error && (
+            <p className="text-sm text-destructive">{error}</p>
+          )}
+          {!error && studies.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              Aún no hay resultados. Realiza una búsqueda para cargar estudios reales.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">

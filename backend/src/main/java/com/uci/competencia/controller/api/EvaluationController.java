@@ -3,6 +3,7 @@ package com.uci.competencia.controller.api;
 import com.uci.competencia.model.dto.response.EvaluationDTO;
 import com.uci.competencia.model.entity.Evaluation;
 import com.uci.competencia.service.EvaluationService;
+import com.uci.competencia.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -36,7 +37,7 @@ public class EvaluationController {
         log.info("Getting pending evaluations for professor");
         
         try {
-            String professorId = getProfessorIdFromContext();
+            String professorId = SecurityUtils.getCurrentUserId();
             List<Map<String, Object>> pending = evaluationService.getPendingEvaluations(professorId);
 
             Map<String, Object> response = new HashMap<>();
@@ -61,7 +62,7 @@ public class EvaluationController {
         log.info("Getting reviewed evaluations for professor");
 
         try {
-            String professorId = getProfessorIdFromContext();
+            String professorId = SecurityUtils.getCurrentUserId();
             List<Map<String, Object>> reviewed = evaluationService.getReviewedEvaluations(professorId);
 
             Map<String, Object> response = new HashMap<>();
@@ -88,7 +89,7 @@ public class EvaluationController {
         log.info("Creating evaluation for submission: {}", submissionId);
 
         try {
-            String professorId = getProfessorIdFromContext();
+            String professorId = SecurityUtils.getCurrentUserId();
             Evaluation evaluation = evaluationService.createEvaluation(submissionId, professorId, evaluationData);
 
             EvaluationDTO dto = convertToDTO(evaluation);
@@ -199,7 +200,7 @@ public class EvaluationController {
         log.info("Getting all evaluations for professor");
 
         try {
-            String professorId = getProfessorIdFromContext();
+            String professorId = SecurityUtils.getCurrentUserId();
             List<EvaluationDTO> evaluations = evaluationService.getProfessorEvaluations(professorId);
 
             Map<String, Object> response = new HashMap<>();
@@ -212,15 +213,6 @@ public class EvaluationController {
             log.error("Error getting evaluations: {}", e.getMessage());
             return buildErrorResponse("Error getting evaluations", e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
         }
-    }
-
-    /**
-     * Helper para obtener profesor ID del contexto
-     */
-    private String getProfessorIdFromContext() {
-        // En producción, obtener del contexto de seguridad
-        // Por ahora retornar un ID de ejemplo
-        return "professor_context_id";
     }
 
     /**

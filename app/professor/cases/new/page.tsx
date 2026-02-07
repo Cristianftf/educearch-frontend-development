@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { casesApi, searchApi } from '@/lib/api'
-import type { CaseDifficulty, MeshTerm, SearchResult } from '@/types'
+import type { CaseDifficulty, GuidingQuestion, RubricItem, SearchResult } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -46,7 +46,7 @@ import {
 const difficultyConfig: Record<CaseDifficulty, { label: string; description: string; color: string }> = {
   novice: {
     label: 'Novato',
-    description: 'Conceptos básicos, búsquedas simples',
+    description: 'Conceptos básicos, Búsquedas simples',
     color: 'bg-success/10 text-success border-success/30',
   },
   intermediate: {
@@ -59,25 +59,6 @@ const difficultyConfig: Record<CaseDifficulty, { label: string; description: str
     description: 'Estrategias complejas, evaluación crítica',
     color: 'bg-destructive/10 text-destructive border-destructive/30',
   },
-}
-
-interface GuidingQuestion {
-  id: string
-  question: string
-  competency: 'access' | 'process' | 'communicate'
-  points: number
-}
-
-interface RubricItem {
-  id: string
-  criteria: string
-  competency: 'access' | 'process' | 'communicate'
-  maxPoints: number
-  levels: {
-    excellent: string
-    good: string
-    needs_improvement: string
-  }
 }
 
 export default function NewCasePage() {
@@ -108,18 +89,18 @@ export default function NewCasePage() {
   const [rubricItems, setRubricItems] = useState<RubricItem[]>([
     {
       id: '1',
-      criteria: 'Uso de términos MeSH',
+      criteria: 'Uso de Términos MeSH',
       competency: 'access',
       maxPoints: 20,
       levels: {
-        excellent: 'Utiliza términos MeSH precisos y relevantes',
-        good: 'Utiliza algunos términos MeSH correctamente',
-        needs_improvement: 'No utiliza términos MeSH o son incorrectos',
+        excellent: 'Utiliza Términos MeSH precisos y relevantes',
+        good: 'Utiliza algunos Términos MeSH correctamente',
+        needs_improvement: 'No utiliza Términos MeSH o son incorrectos',
       },
     },
     {
       id: '2',
-      criteria: 'Evaluación de evidencia',
+      criteria: 'evaluación de evidencia',
       competency: 'process',
       maxPoints: 30,
       levels: {
@@ -134,9 +115,9 @@ export default function NewCasePage() {
       competency: 'communicate',
       maxPoints: 20,
       levels: {
-        excellent: 'Bibliografía perfectamente formateada según norma',
-        good: 'Bibliografía con errores menores de formato',
-        needs_improvement: 'Bibliografía mal formateada o incompleta',
+        excellent: 'bibliografía perfectamente formateada según norma',
+        good: 'bibliografía con errores menores de formato',
+        needs_improvement: 'bibliografía mal formateada o incompleta',
       },
     },
   ])
@@ -280,7 +261,7 @@ export default function NewCasePage() {
           </TabsTrigger>
           <TabsTrigger value="rubric" className="gap-2">
             <ClipboardList className="h-4 w-4" />
-            <span className="hidden sm:inline">Rúbrica</span>
+            <span className="hidden sm:inline">rúbrica</span>
           </TabsTrigger>
         </TabsList>
 
@@ -290,7 +271,7 @@ export default function NewCasePage() {
             <div className="lg:col-span-2 space-y-6">
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-lg">Información del caso</CardTitle>
+                  <CardTitle className="text-lg">información del caso</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
@@ -420,7 +401,7 @@ export default function NewCasePage() {
               <CardHeader>
                 <CardTitle className="text-lg">Buscar artículos</CardTitle>
                 <CardDescription>
-                  Busca y añade artículos como recursos del caso
+                  Busca y Añade artículos como recursos del caso
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -468,7 +449,7 @@ export default function NewCasePage() {
                                   }
                                 }}
                               >
-                                {isRequired ? 'Obligatorio' : 'Añadir obligatorio'}
+                                {isRequired ? 'Obligatorio' : 'añadir obligatorio'}
                               </Button>
                               <Button
                                 variant={isOptional ? 'secondary' : 'outline'}
@@ -482,7 +463,7 @@ export default function NewCasePage() {
                                   }
                                 }}
                               >
-                                {isOptional ? 'Opcional' : 'Añadir opcional'}
+                                {isOptional ? 'Opcional' : 'añadir opcional'}
                               </Button>
                             </div>
                           </div>
@@ -500,7 +481,7 @@ export default function NewCasePage() {
                 <CardHeader>
                   <CardTitle className="text-lg text-success flex items-center gap-2">
                     <BookOpen className="h-5 w-5" />
-                    Artículos obligatorios ({requiredArticles.length})
+                    artículos obligatorios ({requiredArticles.length})
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -539,7 +520,7 @@ export default function NewCasePage() {
                 <CardHeader>
                   <CardTitle className="text-lg text-muted-foreground flex items-center gap-2">
                     <BookOpen className="h-5 w-5" />
-                    Artículos opcionales ({optionalArticles.length})
+                    artículos opcionales ({optionalArticles.length})
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -590,7 +571,7 @@ export default function NewCasePage() {
                 </div>
                 <Button onClick={addQuestion}>
                   <Plus className="mr-2 h-4 w-4" />
-                  Añadir pregunta
+                  añadir pregunta
                 </Button>
               </div>
             </CardHeader>
@@ -670,14 +651,14 @@ export default function NewCasePage() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-lg">Rúbrica de evaluación</CardTitle>
+                  <CardTitle className="text-lg">rúbrica de evaluación</CardTitle>
                   <CardDescription>
                     Define los criterios y niveles de desempeño
                   </CardDescription>
                 </div>
                 <Button onClick={addRubricItem}>
                   <Plus className="mr-2 h-4 w-4" />
-                  Añadir criterio
+                  añadir criterio
                 </Button>
               </div>
             </CardHeader>

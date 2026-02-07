@@ -147,6 +147,7 @@ export function CaseWizard({ isOpen, onClose, onSubmit }: CaseWizardProps) {
         ...formData,
         guidingQuestions,
         status: 'draft',
+        assignedStudents: [],
       })
       onClose()
       // Reset form

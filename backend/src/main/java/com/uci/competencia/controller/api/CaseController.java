@@ -31,7 +31,15 @@ public class CaseController {
     @PreAuthorize("hasRole('PROFESSOR')")
     public ResponseEntity<List<CaseStudyDTO>> getAllCases(
             @RequestParam(required = false) String status) {
-        CaseStatus caseStatus = status != null ? CaseStatus.valueOf(status.toUpperCase()) : null;
+        CaseStatus caseStatus = null;
+        if (status != null && !status.isBlank()) {
+            try {
+                caseStatus = CaseStatus.valueOf(status.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                log.warn("Invalid case status filter: {}", status);
+                return ResponseEntity.badRequest().build();
+            }
+        }
         List<CaseStudyDTO> cases = caseService.getAllCases(caseStatus);
         return ResponseEntity.ok(cases);
     }

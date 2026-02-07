@@ -10,6 +10,9 @@ import com.uci.competencia.repository.SearchSessionRepository;
 import com.uci.competencia.repository.SearchResultRepository;
 import com.uci.competencia.repository.UserRepository;
 import com.uci.competencia.service.SearchService;
+import com.uci.competencia.service.external.PubMedApiService;
+import com.uci.competencia.util.EvidenceLevelMapper;
+import com.uci.competencia.util.PubMedQueryBuilder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -33,17 +36,23 @@ public class SearchServiceImpl implements SearchService {
     private final SearchResultRepository searchResultRepository;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
+    private final PubMedApiService pubMedApiService;
+    private final PubMedQueryBuilder pubMedQueryBuilder;
 
     public SearchServiceImpl(
         SearchSessionRepository searchSessionRepository,
         SearchResultRepository searchResultRepository,
         UserRepository userRepository,
-        ObjectMapper objectMapper
+        ObjectMapper objectMapper,
+        PubMedApiService pubMedApiService,
+        PubMedQueryBuilder pubMedQueryBuilder
     ) {
         this.searchSessionRepository = searchSessionRepository;
         this.searchResultRepository = searchResultRepository;
         this.userRepository = userRepository;
         this.objectMapper = objectMapper;
+        this.pubMedApiService = pubMedApiService;
+        this.pubMedQueryBuilder = pubMedQueryBuilder;
     }
 
     @Override
@@ -52,12 +61,13 @@ public class SearchServiceImpl implements SearchService {
 
         SearchResponseDTO response = new SearchResponseDTO();
         response.setSearchId(null);
-        
-        // Aquí se integraría con PubMed API
-        List<SearchResult> localResults = searchLocalResults(request);
-        ArrayList<SearchResponseDTO.SearchResultDTO> results = new ArrayList<>();
-        for (SearchResult result : localResults) {
-            results.add(mapToResultDTO(result));
+
+        List<SearchResponseDTO.SearchResultDTO> results = executePubMedSearch(request);
+        if (results.isEmpty()) {
+            List<SearchResult> localResults = searchLocalResults(request);
+            for (SearchResult result : localResults) {
+                results.add(mapToResultDTO(result));
+            }
         }
         response.setResults(results);
         
@@ -81,6 +91,31 @@ public class SearchServiceImpl implements SearchService {
         persistSearchSession(request, response);
 
         return response;
+    }
+
+    private List<SearchResponseDTO.SearchResultDTO> executePubMedSearch(SearchRequestDTO request) {
+        try {
+            if (request == null || request.getQuery() == null || request.getQuery().getTerms() == null) {
+                return new ArrayList<>();
+            }
+            int maxResults = 100;
+            if (request.getFilters() != null && request.getFilters().getMaxResults() != null) {
+                maxResults = Math.max(1, Math.min(200, request.getFilters().getMaxResults()));
+            }
+            String pubmedQuery = pubMedQueryBuilder.buildPubMedQuery(request.getQuery(), request.getFilters());
+            List<PubMedApiService.PubMedArticle> articles = pubMedApiService.searchArticles(pubmedQuery, maxResults);
+            if (articles.isEmpty()) {
+                return new ArrayList<>();
+            }
+            List<SearchResponseDTO.SearchResultDTO> results = new ArrayList<>();
+            for (PubMedApiService.PubMedArticle article : articles) {
+                results.add(mapToResultDTO(article));
+            }
+            return results;
+        } catch (Exception e) {
+            log.warn("Error executing PubMed search", e);
+            return new ArrayList<>();
+        }
     }
 
     private List<SearchResult> searchLocalResults(SearchRequestDTO request) {
@@ -255,6 +290,59 @@ public class SearchServiceImpl implements SearchService {
         dto.setMeshTerms(entity.getMeshTerms());
         
         return dto;
+    }
+
+    public SearchResponseDTO.SearchResultDTO mapToResultDTO(PubMedApiService.PubMedArticle article) {
+        SearchResponseDTO.SearchResultDTO dto = new SearchResponseDTO.SearchResultDTO();
+        dto.setId(article.pmid() != null ? article.pmid() : "result-" + System.currentTimeMillis());
+        dto.setPmid(article.pmid());
+        dto.setTitle(article.title());
+        dto.setAbstractText(article.abstractText());
+        dto.setAuthors(article.authors() != null ? article.authors() : List.of());
+        dto.setJournal(article.journal());
+        dto.setYear(extractYear(article.publicationDate()));
+
+        var studyType = EvidenceLevelMapper.mapStudyType(article.publicationTypes());
+        dto.setStudyType(mapStudyType(studyType));
+        dto.setEvidenceLevel(EvidenceLevelMapper.evidenceLevelForStudyType(studyType));
+
+        dto.setSampleSize(extractSampleSize(article.abstractText()));
+        dto.setHasConflictOfInterest(false);
+        dto.setDoi(article.doi());
+        dto.setMeshTerms(article.meshTerms());
+        dto.setFullTextUrl(article.doi() != null ? "https://doi.org/" + article.doi() : null);
+        return dto;
+    }
+
+    private Integer extractSampleSize(String abstractText) {
+        if (abstractText == null || abstractText.isBlank()) {
+            return null;
+        }
+        String text = abstractText.toLowerCase();
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\b(n|sample size)\\s*=?\\s*(\\d{2,6})\\b");
+        java.util.regex.Matcher matcher = pattern.matcher(text);
+        if (matcher.find()) {
+            try {
+                return Integer.parseInt(matcher.group(2));
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private Integer extractYear(String publicationDate) {
+        if (publicationDate == null || publicationDate.isBlank()) {
+            return null;
+        }
+        if (publicationDate.length() >= 4) {
+            try {
+                return Integer.parseInt(publicationDate.substring(0, 4));
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private String mapStudyType(com.uci.competencia.model.enums.StudyType studyType) {

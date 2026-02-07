@@ -37,7 +37,15 @@ public class CaseServiceImpl implements CaseService {
             caseStudyRepository.findAll();
 
         return cases.stream()
-            .map(this::convertToDTO)
+            .map(caseStudy -> {
+                try {
+                    return convertToDTO(caseStudy);
+                } catch (Exception e) {
+                    log.warn("Skipping case {} due to conversion error: {}", caseStudy.getId(), e.getMessage());
+                    return null;
+                }
+            })
+            .filter(java.util.Objects::nonNull)
             .collect(Collectors.toList());
     }
 
@@ -52,7 +60,9 @@ public class CaseServiceImpl implements CaseService {
     public CaseStudyDTO createCase(CaseStudyDTO caseStudyDTO, String professorId) {
         CaseStudy caseStudy = convertToEntity(caseStudyDTO);
         caseStudy.setCreatedBy(professorId);
-        caseStudy.setStatus(CaseStatus.DRAFT);
+        if (caseStudy.getStatus() == null) {
+            caseStudy.setStatus(CaseStatus.DRAFT);
+        }
 
         CaseStudy saved = caseStudyRepository.save(caseStudy);
         return convertToDTO(saved);
@@ -251,15 +261,21 @@ public class CaseServiceImpl implements CaseService {
         dto.setId(caseStudy.getId());
         dto.setTitle(caseStudy.getTitle());
         dto.setScenario(caseStudy.getScenario());
-        dto.setDifficulty(caseStudy.getDifficulty().name().toLowerCase());
-        dto.setStatus(caseStudy.getStatus().name().toLowerCase());
-        dto.setRequiredArticles(caseStudy.getRequiredArticles());
-        dto.setOptionalArticles(caseStudy.getOptionalArticles());
-        dto.setGuidingQuestions(caseStudy.getGuidingQuestions());
+        CaseDifficulty difficulty = caseStudy.getDifficulty() != null
+            ? caseStudy.getDifficulty()
+            : CaseDifficulty.NOVICE;
+        CaseStatus status = caseStudy.getStatus() != null
+            ? caseStudy.getStatus()
+            : CaseStatus.DRAFT;
+        dto.setDifficulty(difficulty.name().toLowerCase());
+        dto.setStatus(status.name().toLowerCase());
+        dto.setRequiredArticles(safeList(caseStudy.getRequiredArticles()));
+        dto.setOptionalArticles(safeList(caseStudy.getOptionalArticles()));
+        dto.setGuidingQuestions(safeList(caseStudy.getGuidingQuestions()));
         dto.setCreatedBy(caseStudy.getCreatedBy());
         dto.setCreatedAt(caseStudy.getCreatedAt());
         dto.setDueDate(caseStudy.getDueDate());
-        dto.setAssignedStudents(caseStudy.getAssignedStudents());
+        dto.setAssignedStudents(safeList(caseStudy.getAssignedStudents()));
 
         // Convertir rúbrica: de List<String> (JSON) a List<RubricItemDTO>
         if (caseStudy.getRubric() != null && !caseStudy.getRubric().isEmpty()) {
@@ -301,10 +317,10 @@ public class CaseServiceImpl implements CaseService {
             entity.setStatus(CaseStatus.DRAFT);
         }
 
-        entity.setRequiredArticles(dto.getRequiredArticles());
-        entity.setOptionalArticles(dto.getOptionalArticles());
-        entity.setGuidingQuestions(dto.getGuidingQuestions());
-        entity.setAssignedStudents(dto.getAssignedStudents());
+        entity.setRequiredArticles(safeList(dto.getRequiredArticles()));
+        entity.setOptionalArticles(safeList(dto.getOptionalArticles()));
+        entity.setGuidingQuestions(safeList(dto.getGuidingQuestions()));
+        entity.setAssignedStudents(safeList(dto.getAssignedStudents()));
 
         entity.setDueDate(dto.getDueDate());
 
@@ -318,6 +334,10 @@ public class CaseServiceImpl implements CaseService {
         }
 
         return entity;
+    }
+
+    private <T> List<T> safeList(List<T> value) {
+        return value != null ? new java.util.ArrayList<>(value) : new java.util.ArrayList<>();
     }
 
     private CaseSubmissionDTO convertSubmissionToDTO(CaseSubmission submission) {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { searchApi, hedgesApi } from "@/lib/api"
 import type { MeshTerm, SearchFilters, SearchQuery, SearchResult } from "@/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -63,16 +63,23 @@ export default function ProfessorSearchPage() {
     return () => clearTimeout(timer)
   }, [searchTerm])
 
-  const activeRawQuery =
+  const activeRawQuery = useMemo(() => (
     queryMode === "visual" ? visualQuery?.rawQuery || "" : rawQuery
-  const activeTerms =
-    queryMode === "visual" ? visualQuery?.terms || [] : rawQuery ? [{ id: "raw", term: rawQuery }] : []
-  const activeOperators =
+  ), [queryMode, rawQuery, visualQuery])
+  const activeTerms = useMemo(() => (
+    queryMode === "visual"
+      ? visualQuery?.terms || []
+      : rawQuery
+        ? [{ id: "raw", term: rawQuery }]
+        : []
+  ), [queryMode, rawQuery, visualQuery])
+  const activeOperators = useMemo(() => (
     queryMode === "visual" ? visualQuery?.operators || [] : []
+  ), [queryMode, visualQuery])
 
   const executeSearch = useCallback(async () => {
     if (!activeRawQuery.trim() || activeTerms.length === 0) {
-      setError("Construye una búsqueda antes de ejecutar.")
+      setError("Construye una Búsqueda antes de ejecutar.")
       return
     }
     setIsSearching(true)
@@ -87,7 +94,7 @@ export default function ProfessorSearchPage() {
       const session = await searchApi.execute(query)
       setResults(session.results)
     } catch (err) {
-      setError("Error al ejecutar la búsqueda.")
+      setError("Error al ejecutar la Búsqueda.")
     } finally {
       setIsSearching(false)
     }
@@ -103,7 +110,6 @@ export default function ProfessorSearchPage() {
         query: activeRawQuery.trim(),
         description: hedgeDescription.trim(),
         estimatedResults: results.length,
-        createdBy: "professor",
       })
       setHedgeOpen(false)
       setHedgeName("")
@@ -118,7 +124,7 @@ export default function ProfessorSearchPage() {
       <div>
         <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Búsqueda Profesor</h1>
         <p className="text-muted-foreground mt-1">
-          Ejecuta búsquedas y guarda estrategias como Search Hedges reutilizables.
+          Ejecuta Búsquedas y guarda estrategias como Search Hedges reutilizables.
         </p>
       </div>
 
@@ -135,7 +141,7 @@ export default function ProfessorSearchPage() {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Buscar términos MeSH..."
+              placeholder="Buscar Términos MeSH..."
               className="pl-9"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -188,7 +194,7 @@ export default function ProfessorSearchPage() {
           ) : (
             <>
               <Search className="mr-2 h-4 w-4" />
-              Ejecutar búsqueda
+              Ejecutar Búsqueda
             </>
           )}
         </Button>
@@ -204,7 +210,7 @@ export default function ProfessorSearchPage() {
             <DialogHeader>
               <DialogTitle>Guardar estrategia</DialogTitle>
               <DialogDescription>
-                Convierte esta búsqueda en un Search Hedge reutilizable.
+                Convierte esta Búsqueda en un Search Hedge reutilizable.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
@@ -216,7 +222,7 @@ export default function ProfessorSearchPage() {
                 <Label>Categoría</Label>
                 <Select value={hedgeCategory} onValueChange={setHedgeCategory}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Selecciona categoría" />
+                    <SelectValue placeholder="Selecciona Categoría" />
                   </SelectTrigger>
                   <SelectContent>
                     {(categories.length > 0 ? categories : ["General"]).map((cat) => (

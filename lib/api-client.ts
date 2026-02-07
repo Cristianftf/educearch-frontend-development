@@ -17,13 +17,8 @@ class ApiClient {
     this.userRole = role
   }
 
-  private async request<T>(
-    endpoint: string,
-    options: RequestInit = {},
-    responseType: 'json' | 'blob' | 'text' = 'json'
-  ): Promise<T> {
+  private buildHeaders(options: RequestInit = {}): HeadersInit {
     const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
-
     const headers: HeadersInit = {
       'X-UCI-Platform': 'competencia-informacional',
       ...(options.headers || {}),
@@ -40,6 +35,16 @@ class ApiClient {
     if (this.userRole) {
       ;(headers as Record<string, string>)['X-User-Role'] = this.userRole
     }
+
+    return headers
+  }
+
+  private async request<T>(
+    endpoint: string,
+    options: RequestInit = {},
+    responseType: 'json' | 'blob' | 'text' = 'json'
+  ): Promise<T> {
+    const headers = this.buildHeaders(options)
 
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       ...options,
@@ -115,6 +120,18 @@ class ApiClient {
 
   delete<T>(endpoint: string): Promise<T> {
     return this.request<T>(endpoint, { method: 'DELETE' })
+  }
+
+  async prefetch(endpoint: string): Promise<void> {
+    const headers = this.buildHeaders()
+    try {
+      await fetch(`${this.baseUrl}${endpoint}`, {
+        method: 'GET',
+        headers,
+      })
+    } catch {
+      // Ignore prefetch failures
+    }
   }
 }
 

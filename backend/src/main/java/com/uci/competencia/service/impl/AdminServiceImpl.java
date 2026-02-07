@@ -81,8 +81,14 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     public User createUser(User user) {
-        // Hash the password if it's not already hashed
-        if (user.getPasswordHash() != null && !user.getPasswordHash().startsWith("$2a$")) {
+        if (user.getUsername() == null || user.getUsername().trim().isEmpty()) {
+            user.setUsername(generateUniqueUsername(user.getEmail()));
+        }
+
+        if (user.getPasswordHash() == null || user.getPasswordHash().trim().isEmpty()) {
+            String tempPassword = generateTemporaryPassword();
+            user.setPasswordHash(passwordEncoder.encode(tempPassword));
+        } else if (!isBcryptHash(user.getPasswordHash())) {
             user.setPasswordHash(passwordEncoder.encode(user.getPasswordHash()));
         }
         return userRepository.save(user);
@@ -96,6 +102,9 @@ public class AdminServiceImpl implements AdminService {
         existingUser.setEmail(user.getEmail());
         existingUser.setFaculty(user.getFaculty());
         existingUser.setActive(user.isActive());
+        if (user.getRole() != null) {
+            existingUser.setRole(user.getRole());
+        }
         return userRepository.save(existingUser);
     }
 
@@ -1255,6 +1264,30 @@ public class AdminServiceImpl implements AdminService {
             sb.append(chars.charAt(index));
         }
         return sb.toString();
+    }
+
+    private boolean isBcryptHash(String value) {
+        if (value == null) return false;
+        return value.startsWith("$2a$") || value.startsWith("$2b$") || value.startsWith("$2y$");
+    }
+
+    private String generateUniqueUsername(String email) {
+        String base = "user";
+        if (email != null && email.contains("@")) {
+            base = email.substring(0, email.indexOf("@"));
+        }
+        base = base.toLowerCase().replaceAll("[^a-z0-9._-]", "");
+        if (base.length() < 3) {
+            base = "user";
+        }
+
+        String candidate = base;
+        int suffix = 1;
+        while (userRepository.existsByUsername(candidate)) {
+            candidate = base + suffix;
+            suffix++;
+        }
+        return candidate;
     }
 
     // ======================== ALERTS MANAGEMENT ========================

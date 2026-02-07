@@ -3,16 +3,15 @@ package com.uci.competencia.controller.api;
 import com.uci.competencia.model.dto.response.SearchHedgeDTO;
 import com.uci.competencia.model.dto.response.SearchHedgeTestResultDTO;
 import com.uci.competencia.service.SearchHedgeService;
+import com.uci.competencia.util.SecurityUtils;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -21,11 +20,11 @@ import java.util.List;
 @RequestMapping("/api/hedges")
 @CrossOrigin(origins = {"http://localhost:3000", "http://localhost:3001", "https://frontend.uci.cu"})
 @PreAuthorize("hasRole('PROFESSOR')")
+@RequiredArgsConstructor
 @Slf4j
 public class SearchHedgesController {
     
-    @Autowired
-    private SearchHedgeService hedgeService;
+    private final SearchHedgeService hedgeService;
     
     /**
      * GET /api/hedges
@@ -37,7 +36,7 @@ public class SearchHedgesController {
     public ResponseEntity<List<SearchHedgeDTO>> getAllHedges(
             @RequestParam(required = false) String category) {
         log.info("Getting all hedges for category: {}", category);
-        String professorId = getCurrentUserId();
+        String professorId = SecurityUtils.getCurrentUserId();
         List<SearchHedgeDTO> hedges = hedgeService.getAllHedges(professorId, category);
         return ResponseEntity.ok(hedges);
     }
@@ -65,7 +64,7 @@ public class SearchHedgesController {
     @PostMapping
     public ResponseEntity<SearchHedgeDTO> createHedge(@RequestBody SearchHedgeDTO hedge) {
         log.info("Creating new hedge: {}", hedge.getName());
-        String professorId = getCurrentUserId();
+        String professorId = SecurityUtils.getCurrentUserId();
         SearchHedgeDTO created = hedgeService.createHedge(hedge, professorId);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
@@ -122,17 +121,6 @@ public class SearchHedgesController {
         log.info("Testing hedge query");
         SearchHedgeTestResultDTO result = hedgeService.testHedge(request.getQuery());
         return ResponseEntity.ok(result);
-    }
-    
-    /**
-     * Obtiene el ID del usuario actual desde el contexto de seguridad
-     */
-    private String getCurrentUserId() {
-        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        if (principal instanceof UserDetails) {
-            return ((UserDetails) principal).getUsername();
-        }
-        return principal.toString();
     }
     
     /**

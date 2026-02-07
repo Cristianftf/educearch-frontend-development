@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { evaluationApi } from '@/lib/api'
 import type { CaseSubmission, Evaluation, CompetencyType } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -45,16 +45,16 @@ const competencyConfig: Record<
   { label: string; description: string }
 > = {
   access: {
-    label: 'Acceso a la Información',
-    description: 'Uso de operadores booleanos y términos MeSH',
+    label: 'Acceso a la información',
+    description: 'Uso de operadores booleanos y Términos MeSH',
   },
   process: {
     label: 'Procesamiento',
-    description: 'Evaluación crítica de la evidencia',
+    description: 'evaluación crítica de la evidencia',
   },
   communicate: {
     label: 'Comunicación',
-    description: 'Citación y formato de bibliografía',
+    description: 'citación y formato de bibliografía',
   },
 }
 
@@ -78,22 +78,24 @@ export default function ProfessorEvaluationsPage() {
   })
   const [generalFeedback, setGeneralFeedback] = useState('')
 
-  useEffect(() => {
-    async function loadSubmissions() {
-      try {
-        const [pending, reviewed] = await Promise.all([
-          evaluationApi.getPending(),
-          evaluationApi.getReviewed(),
-        ])
-        setSubmissions([...pending, ...reviewed])
-      } catch (err) {
-        console.error('[v0] Error loading submissions:', err)
-      } finally {
-        setIsLoading(false)
-      }
+  const loadSubmissions = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const [pending, reviewed] = await Promise.all([
+        evaluationApi.getPending(),
+        evaluationApi.getReviewed(),
+      ])
+      setSubmissions([...pending, ...reviewed])
+    } catch (err) {
+      console.error('[professor evaluations] Error loading submissions:', err)
+    } finally {
+      setIsLoading(false)
     }
-    loadSubmissions()
   }, [])
+
+  useEffect(() => {
+    void loadSubmissions()
+  }, [loadSubmissions])
 
   const handleSelectSubmission = useCallback((submission: CaseSubmission) => {
     setSelectedSubmission(submission)
@@ -120,19 +122,23 @@ export default function ProfessorEvaluationsPage() {
         feedback: generalFeedback,
       })
 
-      // Refresh submissions
-      const pending = await evaluationApi.getPending()
-      setSubmissions(pending)
+      await loadSubmissions()
       setSelectedSubmission(null)
     } catch (err) {
       console.error('[v0] Error submitting evaluation:', err)
     } finally {
       setIsSubmitting(false)
     }
-  }, [selectedSubmission, scores, comments, generalFeedback])
+  }, [selectedSubmission, scores, comments, generalFeedback, loadSubmissions])
 
-  const pendingSubmissions = submissions.filter((s) => s.status === 'pending')
-  const reviewedSubmissions = submissions.filter((s) => s.status === 'reviewed')
+  const pendingSubmissions = useMemo(
+    () => submissions.filter((s) => s.status === 'pending'),
+    [submissions]
+  )
+  const reviewedSubmissions = useMemo(
+    () => submissions.filter((s) => s.status === 'reviewed'),
+    [submissions]
+  )
 
   if (isLoading) {
     return <EvaluationsSkeleton />
@@ -293,7 +299,7 @@ export default function ProfessorEvaluationsPage() {
 
                     {selectedSubmission.bibliography && (
                       <div>
-                        <Label className="text-sm font-medium">Bibliografía</Label>
+                        <Label className="text-sm font-medium">bibliografía</Label>
                         <ScrollArea className="h-[100px] mt-2 border rounded-lg">
                           <pre className="p-4 text-xs font-mono">
                             {selectedSubmission.bibliography}
@@ -363,7 +369,7 @@ export default function ProfessorEvaluationsPage() {
                     {/* Overall Score */}
                     <div className="p-4 rounded-lg bg-muted">
                       <div className="flex items-center justify-between">
-                        <span className="font-medium">Puntuación total</span>
+                        <span className="font-medium">puntuación total</span>
                         <span className="text-2xl font-bold text-primary">
                           {Math.round(
                             (scores.access + scores.process + scores.communicate) / 3

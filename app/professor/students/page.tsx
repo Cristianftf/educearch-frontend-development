@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useMemo, useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -37,6 +37,7 @@ import {
   Loader2,
 } from "lucide-react"
 import { professorAnalyticsApi } from "@/lib/api"
+import type { ProfessorAnalyticsOverview } from "@/types"
 
 type StudentProgress = {
   id: string
@@ -71,6 +72,20 @@ const mockStudents: StudentProgress[] = [
   },
 ]
 
+type StudentCompetency = NonNullable<ProfessorAnalyticsOverview["studentCompetencies"]>[number]
+
+const determineTrend = (score: number): "up" | "down" | "stable" => {
+  if (score >= 80) return "up"
+  if (score < 60) return "down"
+  return "stable"
+}
+
+const determineStatus = (score: number): "active" | "at-risk" | "inactive" => {
+  if (score < 60) return "at-risk"
+  if (score === 0) return "inactive"
+  return "active"
+}
+
 export default function ProfessorStudentsPage() {
   const [students, setStudents] = useState<StudentProgress[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -89,7 +104,7 @@ export default function ProfessorStudentsPage() {
         
         // Transformar studentCompetencies a formato de tabla
         if (data.studentCompetencies) {
-          const transformedStudents = data.studentCompetencies.map((student: any) => ({
+          const transformedStudents = data.studentCompetencies.map((student: StudentCompetency) => ({
             id: student.studentId,
             name: student.studentName,
             email: student.studentEmail,
@@ -119,20 +134,22 @@ export default function ProfessorStudentsPage() {
     loadStudents()
   }, [])
 
-  const filteredStudents = students
-    .filter((student) => {
-      const matchesSearch =
-        student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        student.email.toLowerCase().includes(searchQuery.toLowerCase())
-      const matchesStatus = statusFilter === "all" || student.status === statusFilter
-      return matchesSearch && matchesStatus
-    })
-    .sort((a, b) => {
-      if (sortBy === "name") return a.name.localeCompare(b.name)
-      if (sortBy === "score") return b.overallScore - a.overallScore
-      if (sortBy === "activity") return 0 // Would need proper date comparison
-      return 0
-    })
+  const filteredStudents = useMemo(() => {
+    return students
+      .filter((student) => {
+        const matchesSearch =
+          student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          student.email.toLowerCase().includes(searchQuery.toLowerCase())
+        const matchesStatus = statusFilter === "all" || student.status === statusFilter
+        return matchesSearch && matchesStatus
+      })
+      .sort((a, b) => {
+        if (sortBy === "name") return a.name.localeCompare(b.name)
+        if (sortBy === "score") return b.overallScore - a.overallScore
+        if (sortBy === "activity") return 0 // Would need proper date comparison
+        return 0
+      })
+  }, [students, searchQuery, sortBy, statusFilter])
 
   const getTrendIcon = (trend: string) => {
     switch (trend) {
@@ -164,23 +181,15 @@ export default function ProfessorStudentsPage() {
     return "text-red-600"
   }
 
-  // Funciones auxiliares
-  const determineTrend = (score: number): "up" | "down" | "stable" => {
-    if (score >= 80) return "up"
-    if (score < 60) return "down"
-    return "stable"
-  }
-
-  const determineStatus = (score: number): "active" | "at-risk" | "inactive" => {
-    if (score < 60) return "at-risk"
-    if (score === 0) return "inactive"
-    return "active"
-  }
-
-  const atRiskCount = students.filter((s) => s.status === "at-risk").length
-  const averageScore = students.length > 0 
-    ? Math.round(students.reduce((sum, s) => sum + s.overallScore, 0) / students.length)
-    : 0
+  const atRiskCount = useMemo(
+    () => students.filter((s) => s.status === "at-risk").length,
+    [students]
+  )
+  const averageScore = useMemo(() => (
+    students.length > 0
+      ? Math.round(students.reduce((sum, s) => sum + s.overallScore, 0) / students.length)
+      : 0
+  ), [students])
 
   if (isLoading) {
     return (
@@ -316,7 +325,7 @@ export default function ProfessorStudentsPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="name">Nombre</SelectItem>
-                <SelectItem value="score">Puntuación</SelectItem>
+                <SelectItem value="score">puntuación</SelectItem>
                 <SelectItem value="activity">Actividad</SelectItem>
               </SelectContent>
             </Select>

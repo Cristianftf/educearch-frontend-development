@@ -1,53 +1,44 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { professorAnalyticsApi } from "@/lib/api"
-import type { StudentSummary } from "@/types"
+import type { ProfessorAnalyticsOverview } from "@/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { AlertCircle, BarChart3, Users, TrendingDown, TrendingUp, RefreshCw } from "lucide-react"
 
-type Overview = {
-  studentCount: number
-  averageProgress: Record<string, number>
-  lowProgressStudents: StudentSummary[]
-  commonSearchTerms: { term: string; count: number }[]
-  problematicTerms: { term: string; errorRate: number }[]
-}
-
-const normalizeErrorRate = (value?: number) => {
+const toPercent = (value?: number) => {
   if (typeof value !== "number" || Number.isNaN(value)) return 0
   return value <= 1 ? Math.round(value * 100) : Math.round(value)
 }
 
 export default function ProfessorAnalyticsPage() {
-  const [data, setData] = useState<Overview | null>(null)
+  const [data, setData] = useState<ProfessorAnalyticsOverview | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setIsLoading(true)
     setError(null)
     try {
       const overview = await professorAnalyticsApi.getClassOverview()
       setData(overview)
     } catch (err) {
-      setError("No se pudieron cargar las analíticas.")
+      setError("No se pudieron cargar las Analíticas.")
     } finally {
       setIsLoading(false)
     }
-  }
-
-  useEffect(() => {
-    load()
   }, [])
 
-  if (isLoading) {
+  useEffect(() => {
+    void load()
+  }, [load])
+if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[300px] text-muted-foreground">
-        Cargando analíticas...
+        Cargando Analíticas...
       </div>
     )
   }
@@ -64,9 +55,9 @@ export default function ProfessorAnalyticsPage() {
     )
   }
 
-  const access = Math.round(data.averageProgress.access || 0)
-  const process = Math.round(data.averageProgress.process || 0)
-  const communicate = Math.round(data.averageProgress.communicate || 0)
+  const access = toPercent(data.averageProgress.access)
+  const process = toPercent(data.averageProgress.process)
+  const communicate = toPercent(data.averageProgress.communicate)
 
   return (
     <div className="space-y-6">
@@ -77,7 +68,7 @@ export default function ProfessorAnalyticsPage() {
             Analíticas de Clase
           </h1>
           <p className="text-muted-foreground mt-1">
-            Seguimiento de progreso, búsqueda y desempeño estudiantil.
+            Seguimiento de progreso, Búsqueda y desempeño estudiantil.
           </p>
         </div>
         <Button variant="outline" onClick={load}>
@@ -173,7 +164,7 @@ export default function ProfessorAnalyticsPage() {
                 <div key={term.term} className="flex items-center justify-between">
                   <span className="text-sm">{term.term}</span>
                   <Badge variant="outline" className="text-destructive">
-                    {normalizeErrorRate(term.errorRate)}%
+                    {toPercent(term.errorRate)}%
                   </Badge>
                 </div>
               ))

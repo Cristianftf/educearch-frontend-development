@@ -1,5 +1,6 @@
 package com.uci.competencia.service.impl;
 
+import com.uci.competencia.exception.ResourceNotFoundException;
 import com.uci.competencia.model.dto.response.ProfessorAnalyticsDTO;
 import com.uci.competencia.model.dto.response.StudentProgressDTO;
 import com.uci.competencia.model.dto.response.CaseStudyDTO;
@@ -20,6 +21,13 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService {
+
+    private static final double LOW_PROGRESS_THRESHOLD = 60.0;
+    private static final Map<String, Double> EMPTY_COMPETENCY_MAP = Map.of(
+        "access", 0.0,
+        "process", 0.0,
+        "communicate", 0.0
+    );
     
     private final CaseStudyRepository caseStudyRepository;
     private final UserRepository userRepository;
@@ -47,14 +55,14 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
         
         // 4. Obtener estudiantes con bajo rendimiento
         List<ProfessorAnalyticsDTO.StudentSummaryDTO> lowProgress = 
-            getLowProgressStudents(studentIds, 60.0);
+            getLowProgressStudents(studentIds, LOW_PROGRESS_THRESHOLD);
         dto.setLowProgressStudents(lowProgress);
         
         // 5. Términos de búsqueda comunes (placeholder)
-        dto.setCommonSearchTerms(new ArrayList<>());
+        dto.setCommonSearchTerms(Collections.emptyList());
         
         // 6. Términos problemáticos (placeholder)
-        dto.setProblematicTerms(new ArrayList<>());
+        dto.setProblematicTerms(Collections.emptyList());
         
         // 7. Competencias de estudiantes
         List<ProfessorAnalyticsDTO.StudentCompetencyDetailsDTO> competencies = 
@@ -275,11 +283,8 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
     public CaseStudyDTO createCaseStudy(CaseStudyDTO caseData, String professorId) {
         log.info("Creating case study for professor: {}", professorId);
         
-        Optional<User> professor = userRepository.findById(professorId);
-        if (professor.isEmpty()) {
-            log.error("Professor not found: {}", professorId);
-            return null;
-        }
+        userRepository.findById(professorId)
+            .orElseThrow(() -> new ResourceNotFoundException("Professor not found: " + professorId));
         
         CaseStudy caseStudy = new CaseStudy();
         caseStudy.setTitle(caseData.getTitle());
@@ -296,8 +301,8 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
         dto.setId(caseStudy.getId());
         dto.setTitle(caseStudy.getTitle());
         dto.setScenario(caseStudy.getScenario());
-        dto.setDifficulty(caseStudy.getDifficulty().toString());
-        dto.setStatus(caseStudy.getStatus().toString());
+        dto.setDifficulty(caseStudy.getDifficulty() != null ? caseStudy.getDifficulty().toString() : null);
+        dto.setStatus(caseStudy.getStatus() != null ? caseStudy.getStatus().toString() : null);
         dto.setRequiredArticles(caseStudy.getRequiredArticles());
         dto.setOptionalArticles(caseStudy.getOptionalArticles());
         dto.setGuidingQuestions(caseStudy.getGuidingQuestions());
@@ -326,11 +331,7 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
             if (studentIds.isEmpty()) {
                 performance.put("averageScore", 0.0);
                 performance.put("completionRate", 0.0);
-                performance.put("competencyDistribution", Map.of(
-                    "access", 0.0,
-                    "process", 0.0,
-                    "communicate", 0.0
-                ));
+                performance.put("competencyDistribution", EMPTY_COMPETENCY_MAP);
                 performance.put("topStudents", List.of());
                 performance.put("studentCount", 0);
                 return performance;
@@ -402,11 +403,13 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
             double completionRate = (completedCount * 100.0) / studentIds.size();
             
             // Distribución de competencias
-            Map<String, Double> competencyDist = Map.of(
-                "access", completedCount > 0 ? accessTotal / completedCount : 0.0,
-                "process", completedCount > 0 ? processTotal / completedCount : 0.0,
-                "communicate", completedCount > 0 ? commTotal / completedCount : 0.0
-            );
+            Map<String, Double> competencyDist = completedCount > 0
+                ? Map.of(
+                    "access", accessTotal / completedCount,
+                    "process", processTotal / completedCount,
+                    "communicate", commTotal / completedCount
+                )
+                : EMPTY_COMPETENCY_MAP;
             
             // Top estudiantes (ordenar por score descendente y tomar los 5 mejores)
             List<Map<String, Object>> topStudents = studentMetrics.stream()
@@ -429,11 +432,7 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
             log.error("Error calculating class performance metrics", e);
             performance.put("averageScore", 0.0);
             performance.put("completionRate", 0.0);
-            performance.put("competencyDistribution", Map.of(
-                "access", 0.0,
-                "process", 0.0,
-                "communicate", 0.0
-            ));
+            performance.put("competencyDistribution", EMPTY_COMPETENCY_MAP);
             performance.put("topStudents", List.of());
         }
         

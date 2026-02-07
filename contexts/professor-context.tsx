@@ -1,13 +1,12 @@
 'use client'
 
-import { createContext, useContext, useState, useCallback, type ReactNode, type Dispatch, type SetStateAction } from 'react'
+import { createContext, useContext, useState, useCallback, useMemo, type ReactNode, type Dispatch, type SetStateAction } from 'react'
 import type {
   CaseStudy,
   CaseSubmission,
   StudentProgress,
   SearchHedge,
   Evaluation,
-  User,
 } from '@/types'
 
 interface ProfessorAnalytics {
@@ -48,7 +47,7 @@ interface ProfessorContextType {
   addEvaluation: (evaluation: Evaluation) => void
   setEvaluations: (evaluations: Evaluation[]) => void
 
-  // Analíticas
+  // Anal?ticas
   analytics: ProfessorAnalytics
   updateAnalytics: (updates: Partial<ProfessorAnalytics>) => void
 
@@ -146,7 +145,7 @@ export function ProfessorProvider({ children }: { children: ReactNode }) {
     setAnalytics((prev) => ({ ...prev, ...updates }))
   }, [])
 
-  const value: ProfessorContextType = {
+  const value = useMemo<ProfessorContextType>(() => ({
     cases,
     addCase,
     updateCase,
@@ -171,7 +170,32 @@ export function ProfessorProvider({ children }: { children: ReactNode }) {
     updateAnalytics,
     selectedCaseFilter,
     setSelectedCaseFilter,
-  }
+  }), [
+    cases,
+    addCase,
+    updateCase,
+    deleteCase,
+    setCases,
+    submissions,
+    addSubmission,
+    updateSubmissionStatus,
+    setSubmissions,
+    students,
+    setStudents,
+    getStudentProgress,
+    hedges,
+    addHedge,
+    updateHedge,
+    deleteHedge,
+    setHedges,
+    evaluations,
+    addEvaluation,
+    setEvaluations,
+    analytics,
+    updateAnalytics,
+    selectedCaseFilter,
+    setSelectedCaseFilter,
+  ])
 
   return <ProfessorContext.Provider value={value}>{children}</ProfessorContext.Provider>
 }

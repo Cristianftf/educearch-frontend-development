@@ -80,6 +80,9 @@ function normalizeCaseStudy(caseStudy: BackendCaseStudy): CaseStudy {
 
   return {
     ...caseStudy,
+    requiredArticles: caseStudy.requiredArticles ?? [],
+    optionalArticles: caseStudy.optionalArticles ?? [],
+    assignedStudents: caseStudy.assignedStudents ?? [],
     guidingQuestions,
     rubric,
   }
@@ -109,20 +112,58 @@ function serializeRubricItem(item: RubricItem): BackendRubricItem {
 }
 
 function serializeCaseStudy(caseStudy: Partial<CaseStudy>): BackendCaseStudy {
-  const guidingQuestions = (caseStudy.guidingQuestions ?? []).map((q) =>
-    typeof q === 'string' ? q : serializeGuidingQuestion(q)
-  )
-  const rubric = (caseStudy.rubric ?? []).map((item) =>
-    'criteria' in item ? serializeRubricItem(item as RubricItem) : (item as BackendRubricItem)
-  )
+  const hasGuidingQuestions = typeof caseStudy.guidingQuestions !== 'undefined'
+  const hasRubric = typeof caseStudy.rubric !== 'undefined'
+  const guidingQuestions = hasGuidingQuestions
+    ? (caseStudy.guidingQuestions ?? []).map((q) =>
+        typeof q === 'string' ? q : serializeGuidingQuestion(q)
+      )
+    : undefined
+  const rubric = hasRubric
+    ? (caseStudy.rubric ?? []).map((item) =>
+        'criteria' in item ? serializeRubricItem(item as RubricItem) : (item as BackendRubricItem)
+      )
+    : undefined
 
   const { startDate, ...rest } = caseStudy
+  const dueDate = normalizeDateTime(caseStudy.dueDate)
+  const assignedStudents = caseStudy.assignedStudents
 
-  return {
+  const payload: BackendCaseStudy = {
     ...rest,
-    guidingQuestions,
-    rubric,
   } as BackendCaseStudy
+
+  if (guidingQuestions) {
+    payload.guidingQuestions = guidingQuestions
+  }
+  if (rubric) {
+    payload.rubric = rubric
+  }
+  if (dueDate) {
+    payload.dueDate = dueDate
+  }
+  if (assignedStudents) {
+    payload.assignedStudents = assignedStudents
+  }
+
+  return payload
+}
+
+function normalizeDateTime(value?: string): string | undefined {
+  if (!value) return undefined
+  if (value.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(value)) {
+    return value
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return `${value}T00:00:00Z`
+  }
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) {
+    return `${value}:00Z`
+  }
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(value)) {
+    return `${value}Z`
+  }
+  return value
 }
 
 export const casesApi = {

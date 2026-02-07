@@ -7,6 +7,7 @@ import com.uci.competencia.model.dto.response.SearchResponseDTO;
 import com.uci.competencia.model.entity.SearchSession;
 import com.uci.competencia.repository.SearchSessionRepository;
 import com.uci.competencia.service.SearchService;
+import com.uci.competencia.service.external.PubMedApiService;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,6 +37,9 @@ public class SearchController {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private PubMedApiService pubMedApiService;
+
     @PostMapping("/execute")
     @PreAuthorize("hasAnyRole('STUDENT', 'PROFESSOR')")
     public ResponseEntity<SearchResponseDTO> executeSearch(@Valid @RequestBody SearchRequestDTO request) {
@@ -47,13 +51,25 @@ public class SearchController {
     @GetMapping("/mesh/suggestions")
     public ResponseEntity<List<Map<String, String>>> getMeshSuggestions(@RequestParam String term) {
         log.info("Getting MeSH suggestions for term: {}", term);
-        // Placeholder response until PubMed integration is implemented
         List<Map<String, String>> suggestions = new ArrayList<>();
-        if (term != null && !term.isBlank()) {
+        if (term == null || term.isBlank()) {
+            return ResponseEntity.ok(suggestions);
+        }
+        try {
+            List<PubMedApiService.MeshSuggestion> results = pubMedApiService.getSuggestedMeshTerms(term, 10);
+            for (PubMedApiService.MeshSuggestion result : results) {
+                Map<String, String> entry = new HashMap<>();
+                entry.put("id", result.id());
+                entry.put("term", result.term());
+                entry.put("description", result.description());
+                suggestions.add(entry);
+            }
+        } catch (Exception ex) {
+            log.warn("Error fetching MeSH suggestions, using fallback", ex);
             Map<String, String> entry = new HashMap<>();
             entry.put("id", term.toUpperCase());
             entry.put("term", term);
-            entry.put("description", "Suggested MeSH term");
+            entry.put("description", "Suggested term");
             suggestions.add(entry);
         }
         return ResponseEntity.ok(suggestions);

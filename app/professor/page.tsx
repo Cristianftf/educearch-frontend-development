@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/contexts/auth-context'
 import { professorAnalyticsApi, evaluationApi } from '@/lib/api'
-import type { StudentSummary, CaseSubmission, CompetencyType } from '@/types'
+import type { CaseSubmission, CompetencyType, ProfessorAnalyticsOverview } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -29,22 +29,6 @@ import {
 } from 'lucide-react'
 import { StudentsCompetencyHeatmap } from '@/components/students-competency-heatmap-enhanced'
 
-interface DashboardData {
-  studentCount: number
-  averageProgress: Record<string, number>
-  lowProgressStudents: StudentSummary[]
-  commonSearchTerms: { term: string; count: number }[]
-  problematicTerms: { term: string; errorRate: number }[]
-  studentCompetencies?: Array<{
-    studentId: string
-    studentName: string
-    studentEmail: string
-    avatar?: string
-    scores: Record<CompetencyType, number>
-    averageScore: number
-  }>
-}
-
 const competencyLabels: Record<CompetencyType, string> = {
   access: 'Acceso',
   process: 'Procesamiento',
@@ -58,30 +42,52 @@ const toPercent = (value?: number) => {
 
 export default function ProfessorDashboard() {
   const { user } = useAuth()
-  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null)
+  const [dashboardData, setDashboardData] = useState<ProfessorAnalyticsOverview | null>(null)
   const [pendingSubmissions, setPendingSubmissions] = useState<CaseSubmission[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const loadData = useCallback(async () => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const [analytics, submissions] = await Promise.all([
+        professorAnalyticsApi.getClassOverview(),
+        evaluationApi.getPending(),
+      ])
+      setDashboardData(analytics)
+      setPendingSubmissions(submissions)
+    } catch (err) {
+      console.error('[professor dashboard] Error loading data:', err)
+      setError('No se pudo cargar el panel.')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    async function loadData() {
-      try {
-        const [analytics, submissions] = await Promise.all([
-          professorAnalyticsApi.getClassOverview(),
-          evaluationApi.getPending(),
-        ])
-        setDashboardData(analytics)
-        setPendingSubmissions(submissions)
-      } catch (err) {
-        console.error('[v0] Error loading dashboard:', err)
-      } finally {
-        setIsLoading(false)
-      }
-    }
-    loadData()
-  }, [])
+    void loadData()
+  }, [loadData])
+
+  const averageProgress = useMemo(() => {
+    if (!dashboardData?.averageProgress) return 0
+    const access = toPercent(dashboardData.averageProgress.access)
+    const process = toPercent(dashboardData.averageProgress.process)
+    const communicate = toPercent(dashboardData.averageProgress.communicate)
+    return Math.round((access + process + communicate) / 3)
+  }, [dashboardData])
 
   if (isLoading) {
     return <DashboardSkeleton />
+  }
+
+  if (error && !dashboardData) {
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-destructive">{error}</p>
+        <Button variant="outline" onClick={loadData}>Reintentar</Button>
+      </div>
+    )
   }
 
   return (
@@ -159,17 +165,7 @@ export default function ProfessorDashboard() {
                 <TrendingUp className="h-6 w-6 text-success" />
               </div>
               <div>
-                <p className="text-2xl font-bold">
-                  {dashboardData?.averageProgress?.access
-                    ? Math.round(
-                        (dashboardData.averageProgress.access +
-                          dashboardData.averageProgress.process +
-                          dashboardData.averageProgress.communicate) /
-                          3
-                      )
-                    : 0}
-                  %
-                </p>
+                <p className="text-2xl font-bold">{averageProgress}%</p>
                 <p className="text-sm text-muted-foreground">Progreso promedio</p>
               </div>
             </div>
@@ -212,7 +208,7 @@ export default function ProfessorDashboard() {
           <CardContent>
             <div className="space-y-6">
               {(Object.keys(competencyLabels) as CompetencyType[]).map((competency) => {
-                const value = dashboardData?.averageProgress?.[competency] || 0
+                const value = toPercent(dashboardData?.averageProgress?.[competency])
                 return (
                   <div key={competency} className="space-y-2">
                     <div className="flex items-center justify-between">

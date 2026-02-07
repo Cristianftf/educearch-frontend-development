@@ -32,6 +32,24 @@ export interface CompetencyProgress {
   lastUpdated: string
 }
 
+// ============ ANALITICAS (PROFESOR) ============
+
+export interface ProfessorAnalyticsOverview {
+  studentCount: number
+  averageProgress: Record<CompetencyType, number>
+  lowProgressStudents: StudentSummary[]
+  commonSearchTerms: { term: string; count: number }[]
+  problematicTerms: { term: string; errorRate: number }[]
+  studentCompetencies?: Array<{
+    studentId: string
+    studentName: string
+    studentEmail: string
+    avatar?: string
+    scores: Record<CompetencyType, number>
+    averageScore: number
+  }>
+}
+
 export interface StudentProgress {
   userId: string
   competencies: Record<CompetencyType, CompetencyProgress>
@@ -216,6 +234,7 @@ export interface SearchHedge {
   recall?: number
   createdBy: string
   createdAt: string
+  isTemplate?: boolean
 }
 
 // ============ ADMINISTRACIÓN ============

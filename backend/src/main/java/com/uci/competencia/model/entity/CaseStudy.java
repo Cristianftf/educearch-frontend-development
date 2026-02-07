@@ -1,5 +1,7 @@
 package com.uci.competencia.model.entity;
 
+import com.uci.competencia.model.converter.CaseDifficultyConverter;
+import com.uci.competencia.model.converter.CaseStatusConverter;
 import com.uci.competencia.model.enums.CaseDifficulty;
 import com.uci.competencia.model.enums.CaseStatus;
 import jakarta.persistence.*;
@@ -27,11 +29,11 @@ public class CaseStudy {
     @Column(length = 5000)
     private String scenario;
 
-    @Enumerated(EnumType.STRING)
+    @Convert(converter = CaseDifficultyConverter.class)
     @Column(nullable = false)
     private CaseDifficulty difficulty;
 
-    @Enumerated(EnumType.STRING)
+    @Convert(converter = CaseStatusConverter.class)
     @Column(nullable = false)
     private CaseStatus status = CaseStatus.DRAFT;
 
@@ -47,12 +49,12 @@ public class CaseStudy {
 
     @ElementCollection
     @CollectionTable(name = "case_guiding_questions", joinColumns = @JoinColumn(name = "case_id"))
-    @Column(name = "question")
+    @Column(name = "question", length = 1000)
     private List<String> guidingQuestions;
 
     @ElementCollection
     @CollectionTable(name = "case_rubric", joinColumns = @JoinColumn(name = "case_id"))
-    @Column(name = "rubric_data")
+    @Column(name = "rubric_data", columnDefinition = "TEXT")
     private List<String> rubric; // JSON string for rubric items
 
     @Column(nullable = false)
