@@ -398,6 +398,22 @@ public class AdminController {
         return ResponseEntity.ok(health);
     }
 
+    @GetMapping("/dashboard")
+    public ResponseEntity<Map<String, Object>> getDashboardData() {
+        log.info("Getting admin dashboard data");
+
+        Map<String, Object> dashboard = adminService.getDashboardData();
+        return ResponseEntity.ok(dashboard);
+    }
+
+    @GetMapping("/system/overview")
+    public ResponseEntity<Map<String, Object>> getSystemOverview() {
+        log.info("Getting system overview");
+
+        Map<String, Object> overview = adminService.getSystemOverview();
+        return ResponseEntity.ok(overview);
+    }
+
     @GetMapping("/settings")
     public ResponseEntity<AdminService.SystemConfiguration> getSettings() {
         log.info("Getting system settings");
@@ -481,6 +497,19 @@ public class AdminController {
             errorResponse.put("error", "Error al restaurar backup");
             errorResponse.put("message", e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+
+    @DeleteMapping("/backups/{backupId}")
+    public ResponseEntity<Void> deleteBackup(@PathVariable String backupId) {
+        log.info("Deleting backup: {}", backupId);
+
+        try {
+            adminService.deleteBackup(backupId);
+            return ResponseEntity.noContent().build();
+        } catch (Exception e) {
+            log.error("Error deleting backup: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
     }
 

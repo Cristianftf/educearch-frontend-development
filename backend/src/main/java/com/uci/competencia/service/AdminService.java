@@ -67,6 +67,16 @@ public interface AdminService {
     Map<String, Object> getSystemHealth();
 
     /**
+     * Obtener datos consolidados para el dashboard de administraciÃ³n
+     */
+    Map<String, Object> getDashboardData();
+
+    /**
+     * Obtener informaciÃ³n detallada del sistema para la vista de sistema
+     */
+    Map<String, Object> getSystemOverview();
+
+    /**
      * Importar usuarios en lote desde CSV/JSON
      *
      * @param batchImport Datos de importación
@@ -168,6 +178,11 @@ public interface AdminService {
      * Obtener lista de backups
      */
     List<Map<String, Object>> getBackupsList();
+
+    /**
+     * Eliminar backup por ID
+     */
+    void deleteBackup(String backupId);
     
     /**
      * Restaurar desde backup

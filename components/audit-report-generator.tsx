@@ -47,16 +47,16 @@ interface ReportResult {
 }
 
 const REPORT_TYPES = [
-  { value: "daily", label: "Diario", description: "Últimas 24 horas" },
-  { value: "weekly", label: "Semanal", description: "Últimos 7 d�as" },
-  { value: "monthly", label: "Mensual", description: "Últimos 30 d�as" },
+  { value: "daily", label: "Diario", description: "Ãšltimas 24 horas" },
+  { value: "weekly", label: "Semanal", description: "Ãšltimos 7 días" },
+  { value: "monthly", label: "Mensual", description: "Ãšltimos 30 días" },
   { value: "custom", label: "Personalizado", description: "Rango de fechas" },
 ]
 
 const EXPORT_FORMATS = [
-  { value: "pdf", label: "📄 PDF", description: "Reporte formateado con gr�ficos" },
-  { value: "excel", label: "📊 Excel", description: "Tabla con filtros y an�lisis" },
-  { value: "json", label: "📋 JSON", description: "Datos sin procesar" },
+  { value: "pdf", label: "ðŸ“„ PDF", description: "Reporte formateado con gráficos" },
+  { value: "excel", label: "ðŸ“Š Excel", description: "Tabla con filtros y análisis" },
+  { value: "json", label: "ðŸ“‹ JSON", description: "Datos sin procesar" },
 ]
 
 export function AuditReportGenerator() {
@@ -178,9 +178,9 @@ export function AuditReportGenerator() {
       </DialogTrigger>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Generar Reporte de Auditor�a</DialogTitle>
+          <DialogTitle>Generar Reporte de Auditoría</DialogTitle>
           <DialogDescription>
-            Exporta logs de auditor�a en el formato que necesites
+            Exporta logs de auditoría en el formato que necesites
           </DialogDescription>
         </DialogHeader>
 
@@ -235,7 +235,7 @@ export function AuditReportGenerator() {
 
           {/* Export Format Selection */}
           <div className="space-y-3">
-            <Label className="text-base font-semibold">Formato de Exportaci�n</Label>
+            <Label className="text-base font-semibold">Formato de Exportación</Label>
             <div className="grid grid-cols-3 gap-3">
               {EXPORT_FORMATS.map((option) => (
                 <button
@@ -266,9 +266,9 @@ export function AuditReportGenerator() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todos los niveles</SelectItem>
-                    <SelectItem value="INFO">ℹ️ Info</SelectItem>
-                    <SelectItem value="WARN">⚠️ Advertencia</SelectItem>
-                    <SelectItem value="ERROR">❌ Error</SelectItem>
+                    <SelectItem value="INFO">â„¹ï¸ Info</SelectItem>
+                    <SelectItem value="WARN">âš ï¸ Advertencia</SelectItem>
+                    <SelectItem value="ERROR">âŒ Error</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -298,10 +298,10 @@ export function AuditReportGenerator() {
               <CheckCircle className="w-4 h-4 text-green-700" />
               <AlertDescription className="text-green-800">
                 <div className="space-y-2">
-                  <div className="font-medium">✅ Reporte generado exitosamente</div>
+                  <div className="font-medium">âœ… Reporte generado exitosamente</div>
                   <div className="text-sm">
                     <div><strong>Archivo:</strong> {result.fileName}</div>
-                    <div><strong>Tama�o:</strong> {formatFileSize(result.size)}</div>
+                    <div><strong>Tamaño:</strong> {formatFileSize(result.size)}</div>
                     <div><strong>Generado:</strong> {format(new Date(result.generatedAt), "PPpp", { locale: {} })}</div>
                   </div>
                 </div>

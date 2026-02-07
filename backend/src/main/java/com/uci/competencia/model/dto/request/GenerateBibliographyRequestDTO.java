@@ -20,4 +20,19 @@ public class GenerateBibliographyRequestDTO {
 
     @NotBlank(message = "Name is required")
     private String name;
+
+    private List<ArticleDTO> articles;
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ArticleDTO {
+        private String id;
+        private String pmid;
+        private String title;
+        private List<String> authors;
+        private String journal;
+        private Integer year;
+        private String doi;
+    }
 }

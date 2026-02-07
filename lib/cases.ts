@@ -157,4 +157,7 @@ export const casesApi = {
 
   submit: (caseId: string, submission: Omit<CaseSubmission, 'id' | 'submittedAt' | 'status'>) =>
     api.post<CaseSubmission>(`/cases/${caseId}/submit`, submission),
+
+  getMySubmission: (caseId: string) =>
+    api.get<CaseSubmission>(`/cases/${caseId}/submission`),
 }

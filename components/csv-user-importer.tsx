@@ -45,10 +45,10 @@ const EXPECTED_HEADERS = ["name", "email", "role", "faculty", "status"]
 const ALLOWED_ROLES = ["student", "professor", "admin"]
 const ALLOWED_FACULTIES = [
   "Medicina",
-  "EnfermerÌa",
-  "EstomatologÌa",
-  "TecnologÌa",
-  "AdministraciÛn",
+  "Enfermer√≠a",
+  "Estomatolog√≠a",
+  "Tecnolog√≠a",
+  "Administraci√≥n",
 ]
 
 export function CSVUserImporter() {
@@ -139,7 +139,7 @@ export function CSVUserImporter() {
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
         if (!emailRegex.test(row.email)) {
           imported.importStatus = "error"
-          imported.message = "Email inv·lido"
+          imported.message = "Email inv√°lido"
           return imported
         }
 
@@ -157,13 +157,13 @@ export function CSVUserImporter() {
           row.role !== "admin"
         ) {
           imported.importStatus = "warning"
-          imported.message = `Facultad no est·ndar: ${row.faculty}`
+          imported.message = `Facultad no est√°ndar: ${row.faculty}`
         }
 
         // Validate status if provided
         if (row.status && !["active", "inactive", "pending"].includes(row.status)) {
           imported.importStatus = "warning"
-          imported.message = `Estado ser· configurado como "pending"`
+          imported.message = `Estado ser√° configurado como "pending"`
           imported.status = "pending"
         }
 
@@ -179,7 +179,7 @@ export function CSVUserImporter() {
   // Handle file selection
   const handleFileSelect = async (file: File) => {
     if (file.type !== "text/csv" && !file.name.endsWith(".csv")) {
-      setPreviewError("Por favor selecciona un archivo CSV v·lido")
+      setPreviewError("Por favor selecciona un archivo CSV v√°lido")
       return
     }
 
@@ -231,7 +231,7 @@ export function CSVUserImporter() {
     const validUsers = importedUsers.filter((u) => u.importStatus === "valid")
 
     if (validUsers.length === 0) {
-      setPreviewError("No hay usuarios v·lidos para importar")
+      setPreviewError("No hay usuarios v√°lidos para importar")
       return
     }
 
@@ -266,8 +266,8 @@ export function CSVUserImporter() {
   const downloadTemplate = () => {
     const template =
       "name,email,role,faculty,status\n" +
-      "Juan PÈrez,juan.perez@estudiante.uci.cu,student,Medicina,active\n" +
-      "Dr. MarÌa LÛpez,maria.lopez@uci.cu,professor,Medicina,active\n" +
+      "Juan P√©rez,juan.perez@estudiante.uci.cu,student,Medicina,active\n" +
+      "Dr. Mar√≠a L√≥pez,maria.lopez@uci.cu,professor,Medicina,active\n" +
       "Admin Sistema,admin@uci.cu,admin,,active"
 
     const blob = new Blob([template], { type: "text/csv;charset=utf-8;" })
@@ -284,7 +284,7 @@ export function CSVUserImporter() {
         <CardHeader>
           <CardTitle>Importar Usuarios desde CSV</CardTitle>
           <CardDescription>
-            Carga un archivo CSV con usuarios. Solo se importar·n filas v·lidas.
+            Carga un archivo CSV con usuarios. Solo se importar√°n filas v√°lidas.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -304,7 +304,7 @@ export function CSVUserImporter() {
               {/* Template Download */}
               <div className="flex justify-between items-center p-3 bg-blue-50 rounded-lg border border-blue-200">
                 <div className="text-sm text-blue-900">
-                  üìã Necesitas ayuda con el formato? Descarga la plantilla
+                  √∞≈∏‚Äú‚Äπ Necesitas ayuda con el formato? Descarga la plantilla
                 </div>
                 <Button
                   variant="outline"
@@ -341,7 +341,7 @@ export function CSVUserImporter() {
                 <div className="flex flex-col items-center gap-2">
                   <Upload className={`w-8 h-8 ${dragActive ? "text-blue-500" : "text-gray-400"}`} />
                   <div className="text-base font-medium">
-                    {csvFile ? csvFile.name : "Arrastra tu archivo CSV aquÌ"}
+                    {csvFile ? csvFile.name : "Arrastra tu archivo CSV aqu√≠"}
                   </div>
                   <div className="text-sm text-gray-500">
                     o haz click para seleccionar un archivo
@@ -356,7 +356,7 @@ export function CSVUserImporter() {
                   <div className="space-y-1 text-sm">
                     <p>Columnas requeridas: <strong>name, email, role</strong></p>
                     <p>Columnas opcionales: faculty, status</p>
-                    <p>Roles v·lidos: student, professor, admin</p>
+                    <p>Roles v√°lidos: student, professor, admin</p>
                   </div>
                 </AlertDescription>
               </Alert>
@@ -388,7 +388,7 @@ export function CSVUserImporter() {
                   <div className="text-2xl font-bold text-green-700">
                     {importedUsers.filter((u) => u.importStatus === "valid").length}
                   </div>
-                  <div className="text-xs text-green-700">V·lidas</div>
+                  <div className="text-xs text-green-700">V√°lidas</div>
                 </Card>
                 <Card className="p-3 border-yellow-200 bg-yellow-50">
                   <div className="text-2xl font-bold text-yellow-700">
@@ -451,7 +451,7 @@ export function CSVUserImporter() {
                           )}
                           {user.importStatus === "warning" && (
                             <Badge className="bg-yellow-100 text-yellow-800">
-                              ‚ö†Ô∏è Aviso
+                              √¢≈°¬†√Ø¬∏¬è Aviso
                             </Badge>
                           )}
                           {user.importStatus === "error" && (
@@ -547,7 +547,7 @@ export function CSVUserImporter() {
                     <Alert className="border-green-200 bg-green-50">
                       <CheckCircle className="w-4 h-4 text-green-700" />
                       <AlertDescription className="text-green-800">
-                        ‚úÖ Se importaron exitosamente {importStats.imported} usuario
+                        √¢≈ì‚Ä¶ Se importaron exitosamente {importStats.imported} usuario
                         {importStats.imported !== 1 ? "s" : ""}.
                         {importStats.updated > 0 && (
                           <> Se actualizaron {importStats.updated} usuario{importStats.updated !== 1 ? "s" : ""}.</>
@@ -572,7 +572,7 @@ export function CSVUserImporter() {
                           ))}
                           {importStats.errors.length > 5 && (
                             <p className="text-sm italic">
-                              +{importStats.errors.length - 5} errores m·s
+                              +{importStats.errors.length - 5} errores m√°s
                             </p>
                           )}
                         </div>

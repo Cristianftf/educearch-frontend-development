@@ -1,8 +1,12 @@
-import type { SystemHealth, AdminSystemConfiguration, Alert } from '@/types'
+import type { SystemHealth, AdminSystemConfiguration, Alert, AdminDashboardData, SystemOverview } from '@/types'
 import { api } from './api-client'
 
 export const adminSystemApi = {
   getHealth: () => api.get<SystemHealth>('/admin/health'),
+
+  getDashboard: () => api.get<AdminDashboardData>('/admin/dashboard'),
+
+  getSystemOverview: () => api.get<SystemOverview>('/admin/system/overview'),
 
   getSettings: () => api.get<AdminSystemConfiguration>('/admin/settings'),
 
@@ -26,10 +30,13 @@ export const adminSystemApi = {
     api.post<{ backupId: string; downloadUrl?: string; status: string; message: string }>('/admin/backup', options),
 
   getBackups: () =>
-    api.get<{ backups: Array<{ id: string; createdAt: string; size: number; status: string }>; count: number }>('/admin/backups'),
+    api.get<{ backups: Array<{ id: string; createdAt: string; size: number; status: string; type?: string; progress?: number; downloadUrl?: string }>; count: number }>('/admin/backups'),
 
   restoreBackup: (backupId: string) =>
     api.post<{ backupId: string; status: string; message: string }>(`/admin/backups/${backupId}/restore`),
+
+  deleteBackup: (backupId: string) =>
+    api.delete<void>(`/admin/backups/${backupId}`),
 
   clearCache: (cacheNames: string[] = ['all']) =>
     api.post<{ status: string; cleared: string[]; timestamp: string }>('/admin/cache/clear', { cacheNames }),

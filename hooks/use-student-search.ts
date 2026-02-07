@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useStudent } from '@/contexts/student-context'
 import { searchApi } from '@/lib/api'
 import type { SearchQuery, SearchSession, MeshTerm } from '@/types'
@@ -20,30 +21,24 @@ interface UseStudentSearchReturn {
 
 export function useStudentSearch(): UseStudentSearchReturn {
   const { addActivity, savedSearches, setSavedSearches, addSavedSearch, toggleSearchFavorite } = useStudent()
+  const queryClient = useQueryClient()
+
+  const searchHistory = savedSearches
   const [isSearching, setIsSearching] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [currentSession, setCurrentSession] = useState<SearchSession | null>(null)
-  const [searchHistory, setSearchHistory] = useState<SearchQuery[]>(savedSearches)
 
   const loadHistory = useCallback(async (page = 1, limit = 10) => {
     try {
-      const { searches } = await searchApi.getHistory(page, limit)
-      setSearchHistory(searches)
-      setSavedSearches(searches)
+      const data = await queryClient.fetchQuery({
+        queryKey: ['student', 'searchHistory', page, limit],
+        queryFn: () => searchApi.getHistory(page, limit),
+      })
+      setSavedSearches(data.searches)
     } catch (err) {
       console.error('[useStudentSearch loadHistory]:', err)
     }
-  }, [setSavedSearches])
-
-  useEffect(() => {
-    if (savedSearches.length > 0) {
-      setSearchHistory(savedSearches)
-    }
-  }, [savedSearches])
-
-  useEffect(() => {
-    setSearchHistory(savedSearches)
-  }, [savedSearches])
+  }, [queryClient, setSavedSearches])
 
   const executeSearch = useCallback(
     async (query: SearchQuery) => {
@@ -65,7 +60,7 @@ export function useStudentSearch(): UseStudentSearchReturn {
 
         // Auto-guardar búsqueda
         addSavedSearch(query)
-        setSearchHistory((prev) => [query, ...prev])
+        queryClient.invalidateQueries({ queryKey: ['student', 'searchHistory'] })
         return session
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error al ejecutar búsqueda'
@@ -76,7 +71,7 @@ export function useStudentSearch(): UseStudentSearchReturn {
         setIsSearching(false)
       }
     },
-    [addActivity, addSavedSearch]
+    [addActivity, addSavedSearch, queryClient]
   )
 
   const saveSearch = useCallback(
@@ -84,24 +79,25 @@ export function useStudentSearch(): UseStudentSearchReturn {
       try {
         await searchApi.saveSearch(searchId, isFavorite)
         toggleSearchFavorite(searchId)
+        queryClient.invalidateQueries({ queryKey: ['student', 'searchHistory'] })
       } catch (err) {
         setError('No se pudo guardar la búsqueda')
         console.error('[useStudentSearch saveSearch]:', err)
       }
     },
-    [toggleSearchFavorite]
+    [toggleSearchFavorite, queryClient]
   )
 
   const deleteSearch = useCallback(async (searchId: string) => {
     try {
       await searchApi.deleteSearch(searchId)
-      setSearchHistory((prev) => prev.filter((s) => s.id !== searchId))
       setSavedSearches((prev) => prev.filter((s) => s.id !== searchId))
+      queryClient.invalidateQueries({ queryKey: ['student', 'searchHistory'] })
     } catch (err) {
       setError('No se pudo eliminar la búsqueda')
       console.error('[useStudentSearch deleteSearch]:', err)
     }
-  }, [setSavedSearches])
+  }, [queryClient, setSavedSearches])
 
   const reuseSearch = useCallback(async (searchId: string) => {
     const search = searchHistory.find((s) => s.id === searchId)

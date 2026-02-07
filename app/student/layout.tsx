@@ -2,14 +2,13 @@
 
 import React from "react"
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/auth-context'
 import { StudentProvider } from '@/contexts/student-context'
-import { useStudentSearch } from '@/hooks/use-student-search'
-import { useStudentVerify } from '@/hooks/use-student-verify'
-import { bibliographyApi } from '@/lib/api'
+import { bibliographyApi, searchApi, verifyApi } from '@/lib/api'
 import { useStudent } from '@/contexts/student-context'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -52,18 +51,38 @@ const navigation = [
 ]
 
 function StudentDataProvider({ children }: { children: React.ReactNode }) {
-  const { loadHistory: loadSearchHistory } = useStudentSearch()
-  const { loadHistory: loadVerifyHistory } = useStudentVerify()
-  const { setBibliographies } = useStudent()
+  const { setSavedSearches, setVerificationHistory, setBibliographies } = useStudent()
 
-  React.useEffect(() => {
-    loadSearchHistory(1, 10).catch(() => {})
-    loadVerifyHistory(1, 10).catch(() => {})
-    bibliographyApi
-      .getHistory()
-      .then(setBibliographies)
-      .catch(() => {})
-  }, [loadSearchHistory, loadVerifyHistory, setBibliographies])
+  const searchHistoryQuery = useQuery({
+    queryKey: ['student', 'searchHistory', 1, 10],
+    queryFn: () => searchApi.getHistory(1, 10),
+  })
+  const verifyHistoryQuery = useQuery({
+    queryKey: ['student', 'verifyHistory', 1, 10],
+    queryFn: () => verifyApi.getHistory(1, 10),
+  })
+  const bibliographyHistoryQuery = useQuery({
+    queryKey: ['student', 'bibliographyHistory'],
+    queryFn: () => bibliographyApi.getHistory(),
+  })
+
+  useEffect(() => {
+    if (searchHistoryQuery.data?.searches) {
+      setSavedSearches(searchHistoryQuery.data.searches)
+    }
+  }, [searchHistoryQuery.data, setSavedSearches])
+
+  useEffect(() => {
+    if (verifyHistoryQuery.data?.verifications) {
+      setVerificationHistory(verifyHistoryQuery.data.verifications)
+    }
+  }, [verifyHistoryQuery.data, setVerificationHistory])
+
+  useEffect(() => {
+    if (bibliographyHistoryQuery.data) {
+      setBibliographies(bibliographyHistoryQuery.data)
+    }
+  }, [bibliographyHistoryQuery.data, setBibliographies])
 
   return <>{children}</>
 }

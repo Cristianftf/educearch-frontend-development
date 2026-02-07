@@ -24,20 +24,38 @@ type SearchResponseDTO = {
 }
 
 function mapResults(results: SearchResponseDTO['results'] = []): SearchResult[] {
-  return results.map((item) => ({
-    id: item.id,
-    pmid: item.pmid,
-    title: item.title,
-    authors: item.authors ?? [],
-    journal: item.journal ?? '',
-    year: item.year ?? new Date().getFullYear(),
-    abstract: item.abstractText ?? '',
-    studyType: item.studyType ?? 'Unknown',
-    evidenceLevel: item.evidenceLevel ?? 0,
-    sampleSize: item.sampleSize,
-    hasConflictOfInterest: item.hasConflictOfInterest ?? false,
-    doi: item.doi,
-  }))
+  return results.map((item, index) => {
+    const id = item.id ?? item.pmid ?? `result-${index}`
+    const pmid = item.pmid ?? ''
+    const title = item.title ?? '(Sin titulo)'
+    const authors = Array.isArray(item.authors)
+      ? item.authors.filter((author): author is string => typeof author === 'string' && author.trim().length > 0)
+      : []
+    const year = typeof item.year === 'number' && Number.isFinite(item.year)
+      ? item.year
+      : new Date().getFullYear()
+    const evidenceLevel = typeof item.evidenceLevel === 'number' && Number.isFinite(item.evidenceLevel)
+      ? item.evidenceLevel
+      : 0
+    const sampleSize = typeof item.sampleSize === 'number' && Number.isFinite(item.sampleSize)
+      ? Math.max(0, item.sampleSize)
+      : undefined
+
+    return {
+      id,
+      pmid,
+      title,
+      authors,
+      journal: item.journal ?? '',
+      year,
+      abstract: item.abstractText ?? '',
+      studyType: item.studyType ?? 'Unknown',
+      evidenceLevel,
+      sampleSize,
+      hasConflictOfInterest: item.hasConflictOfInterest ?? false,
+      doi: item.doi,
+    }
+  })
 }
 
 function buildSearchRequest(query: SearchQuery) {
@@ -54,6 +72,7 @@ function buildSearchRequest(query: SearchQuery) {
       yearFrom: filters.yearRange?.[0],
       yearTo: filters.yearRange?.[1],
       studyTypes: filters.studyTypes,
+      minSampleSize: filters.minSampleSize,
       language: filters.languages?.[0],
     },
     context: {

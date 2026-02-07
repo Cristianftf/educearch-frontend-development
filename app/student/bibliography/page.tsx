@@ -2,7 +2,8 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { bibliographyApi, searchApi } from '@/lib/api'
+import { bibliographyApi } from '@/lib/bibliography'
+import { searchApi } from '@/lib/search'
 import type { Bibliography, BibliographyFormat, SearchResult, SearchQuery } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -82,6 +83,9 @@ export default function BibliographyPage() {
   const [recentSearches, setRecentSearches] = useState<SearchQuery[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedFormat, setSelectedFormat] = useState<BibliographyFormat>('apa')
+  const [availableFormats, setAvailableFormats] = useState<BibliographyFormat[]>(
+    Object.keys(FORMAT_LABELS) as BibliographyFormat[]
+  )
   const [bibliographyName, setBibliographyName] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatedBibliography, setGeneratedBibliography] = useState<Bibliography | null>(null)
@@ -92,18 +96,54 @@ export default function BibliographyPage() {
   const [isLoadingFromHistory, setIsLoadingFromHistory] = useState(false)
   const { addBibliography, setBibliographies, bibliographies } = useStudent()
 
+  useEffect(() => {
+    let isMounted = true
+    const loadFormats = async () => {
+      try {
+        const data = await bibliographyApi.getFormats()
+        if (!isMounted) return
+        const normalized = (data.formats || [])
+          .map((format) => (format in FORMAT_LABELS ? (format as BibliographyFormat) : null))
+          .filter(Boolean) as BibliographyFormat[]
+        if (normalized.length > 0) {
+          setAvailableFormats(normalized)
+          if (!normalized.includes(selectedFormat)) {
+            setSelectedFormat(normalized[0])
+          }
+        }
+      } catch (err) {
+        console.error('[v0] Error loading formats:', err)
+      }
+    }
+
+    loadFormats()
+    return () => {
+      isMounted = false
+    }
+  }, [selectedFormat])
+
   // Load saved bibliographies and available articles
   useEffect(() => {
+    let isMounted = true
     async function loadData() {
       try {
-        const searchHistory = await searchApi.getHistory(1, 50)
+        const [searchHistory, bibliographyHistory] = await Promise.all([
+          searchApi.getHistory(1, 50),
+          bibliographyApi.getHistory(),
+        ])
+        if (!isMounted) return
         setRecentSearches(searchHistory.searches || [])
+        setSavedBibliographies(bibliographyHistory)
+        setBibliographies(bibliographyHistory)
       } catch (err) {
         console.error('[v0] Error loading data:', err)
       }
     }
     loadData()
-  }, [])
+    return () => {
+      isMounted = false
+    }
+  }, [setBibliographies])
 
   useEffect(() => {
     if (bibliographies.length > 0) {
@@ -127,8 +167,20 @@ export default function BibliographyPage() {
       }
     }
 
+    const getSelectionV2 = (key: string) => {
+      try {
+        const raw = localStorage.getItem(key)
+        if (!raw) return null
+        const parsed = JSON.parse(raw) as { version: number; items: SearchResult[] }
+        if (!parsed || parsed.version !== 2 || !Array.isArray(parsed.items)) return null
+        return parsed.items
+      } catch {
+        return null
+      }
+    }
+
     if (source === 'pyramid') {
-      const parsed = getSelection('evidence_pyramid_selection')
+      const parsed = getSelectionV2('evidence_pyramid_selection_v2') ?? getSelection('evidence_pyramid_selection')
       if (!parsed) return
       setAvailableArticles(parsed)
       setSelectedArticles(parsed)
@@ -138,7 +190,7 @@ export default function BibliographyPage() {
     }
 
     if (source === 'search') {
-      const parsed = getSelection('search_selection')
+      const parsed = getSelectionV2('search_selection_v2') ?? getSelection('search_selection')
       if (!parsed) return
       setAvailableArticles(parsed)
       setSelectedArticles(parsed)
@@ -153,7 +205,12 @@ export default function BibliographyPage() {
 
     setIsLoadingArticles(true)
     try {
+      const queryId =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `search-${Date.now()}`
       const session = await searchApi.execute({
+        id: queryId,
         terms: [{ id: 'search', term, description: '' }],
         operators: [],
         filters: {},
@@ -173,12 +230,7 @@ export default function BibliographyPage() {
     setIsLoadingFromHistory(true)
     setError(null)
     try {
-      const session = await searchApi.execute({
-        terms: search.terms,
-        operators: search.operators,
-        filters: search.filters,
-        rawQuery: search.rawQuery,
-      })
+      const session = await searchApi.execute(search)
       setAvailableArticles(session.results)
       setSelectedArticles([])
     } catch (err) {
@@ -229,7 +281,8 @@ export default function BibliographyPage() {
       const bibliography = await bibliographyApi.generate(
         selectedArticles.map((a) => a.id),
         selectedFormat,
-        bibliographyName
+        bibliographyName,
+        selectedArticles
       )
       setGeneratedBibliography(bibliography)
       addBibliography(bibliography)
@@ -244,7 +297,7 @@ export default function BibliographyPage() {
     } finally {
       setIsGenerating(false)
     }
-  }, [selectedArticles, selectedFormat, bibliographyName])
+  }, [addBibliography, bibliographyName, selectedArticles, selectedFormat, setBibliographies])
 
   const copyToClipboard = useCallback(async () => {
     if (!generatedBibliography) return
@@ -531,9 +584,11 @@ export default function BibliographyPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {(Object.keys(FORMAT_LABELS) as BibliographyFormat[]).map((format) => (
-                      <SelectItem key={format} value={format}>
-                        {FORMAT_LABELS[format]}
-                      </SelectItem>
+                      availableFormats.includes(format) && (
+                        <SelectItem key={format} value={format}>
+                          {FORMAT_LABELS[format]}
+                        </SelectItem>
+                      )
                     ))}
                   </SelectContent>
                 </Select>

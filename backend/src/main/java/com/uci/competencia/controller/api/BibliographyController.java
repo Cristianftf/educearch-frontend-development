@@ -165,7 +165,7 @@ public class BibliographyController {
         } else if (result.getPublicationDate() != null) {
             dto.setYear(result.getPublicationDate().getYear());
         }
-        dto.setStudyType(result.getStudyType() != null ? result.getStudyType().name().toLowerCase() : "unknown");
+        dto.setStudyType(mapStudyType(result.getStudyType()));
         dto.setEvidenceLevel(result.getEvidenceLevel());
         dto.setSampleSize(result.getSampleSize());
         dto.setHasConflictOfInterest(result.getHasConflictOfInterest() != null ? result.getHasConflictOfInterest() : false);
@@ -220,5 +220,20 @@ public class BibliographyController {
         docContent.append("\\par}");
 
         return docContent.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    private String mapStudyType(com.uci.competencia.model.enums.StudyType studyType) {
+        if (studyType == null) {
+            return "unknown";
+        }
+        return switch (studyType) {
+            case SYSTEMATIC_REVIEW -> "systematic_review";
+            case META_ANALYSIS -> "meta_analysis";
+            case RANDOMIZED_CONTROLLED_TRIAL -> "rct";
+            case COHORT_STUDY -> "cohort";
+            case CASE_CONTROL -> "case_control";
+            case CASE_REPORT -> "case_report";
+            default -> studyType.name().toLowerCase();
+        };
     }
 }

@@ -129,7 +129,10 @@ export default function EvidencePyramidPage() {
       .map((id) => demoStudies.find((s) => s.id === id))
       .filter(Boolean)
       .map((study) => mapToSearchResult(study as StudyBlock))
-    localStorage.setItem("evidence_pyramid_selection", JSON.stringify(payload))
+    localStorage.setItem(
+      "evidence_pyramid_selection_v2",
+      JSON.stringify({ version: 2, items: payload })
+    )
     router.push("/student/bibliography?source=pyramid")
   }
 
@@ -142,6 +145,9 @@ export default function EvidencePyramidPage() {
         </h1>
         <p className="text-muted-foreground mt-1">
           Explora la jerarquía de evidencia y selecciona estudios para tu bibliografía.
+        </p>
+        <p className="text-xs text-muted-foreground mt-2">
+          Vista demo: los datos son de ejemplo y no provienen de búsquedas reales.
         </p>
       </div>
 

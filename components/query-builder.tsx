@@ -198,16 +198,25 @@ export default function QueryBuilder({ availableTerms, onQueryChange }: QueryBui
   const buildQueryString = useCallback((): string => {
     if (queryElements.length === 0) return ''
 
-    const terms = queryElements.filter(e => e.type === 'term')
-    const operators = queryElements.filter(e => e.type === 'operator')
+    const orderedTerms: QueryElement[] = []
+    const orderedOperators: QueryElement[] = []
 
-    if (terms.length === 0) return ''
+    for (const element of queryElements) {
+      if (element.type === 'term') {
+        orderedTerms.push(element)
+        continue
+      }
+      if (element.type === 'operator' && orderedTerms.length > 0) {
+        orderedOperators.push(element)
+      }
+    }
 
-    let query = `[${terms[0].value}]`
+    if (orderedTerms.length === 0) return ''
 
-    for (let i = 1; i < terms.length; i++) {
-      const op = operators[i - 1]?.value || 'AND'
-      query += ` ${op} [${terms[i].value}]`
+    let query = `[${orderedTerms[0].value}]`
+    for (let i = 1; i < orderedTerms.length; i++) {
+      const op = orderedOperators[i - 1]?.value || 'AND'
+      query += ` ${op} [${orderedTerms[i].value}]`
     }
 
     return query
@@ -216,15 +225,24 @@ export default function QueryBuilder({ availableTerms, onQueryChange }: QueryBui
   // Update query string whenever elements change
   React.useEffect(() => {
     const query = buildQueryString()
-    const terms = queryElements
-      .filter((e) => e.type === 'term')
-      .map((e) => ({
-        id: e.termId || e.id,
-        term: e.value,
-      }))
-    const operators = queryElements
-      .filter((e) => e.type === 'operator')
-      .map((e) => e.value as BooleanOperator)
+    const orderedTerms: QueryElement[] = []
+    const orderedOperators: QueryElement[] = []
+
+    for (const element of queryElements) {
+      if (element.type === 'term') {
+        orderedTerms.push(element)
+        continue
+      }
+      if (element.type === 'operator' && orderedTerms.length > 0) {
+        orderedOperators.push(element)
+      }
+    }
+
+    const terms = orderedTerms.map((e) => ({
+      id: e.termId || e.id,
+      term: e.value,
+    }))
+    const operators = orderedOperators.map((e) => e.value as BooleanOperator)
 
     onQueryChange({ rawQuery: query, terms, operators })
   }, [buildQueryString, onQueryChange, queryElements])

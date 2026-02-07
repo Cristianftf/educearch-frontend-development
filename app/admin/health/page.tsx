@@ -1,4 +1,4 @@
-"use client"
+ï»¿"use client"
 
 import { useState, useEffect, useMemo } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { adminSystemApi } from "@/lib/admin-system"
+import type { SystemServiceStatus } from "@/types"
 import {
   Server,
   Database,
@@ -20,32 +21,14 @@ import {
   MemoryStick,
 } from "lucide-react"
 
-type ServiceStatus = {
-  name: string
-  status: "online" | "warning" | "offline"
-  latency: number
-  uptime: string
-  lastCheck: string
-}
-
-const services: ServiceStatus[] = [
-  { name: "API Principal", status: "online", latency: 12, uptime: "99.99%", lastCheck: "Hace 30s" },
-  { name: "Base de Datos PostgreSQL", status: "online", latency: 5, uptime: "99.95%", lastCheck: "Hace 30s" },
-  { name: "PubMed Gateway", status: "online", latency: 145, uptime: "99.8%", lastCheck: "Hace 30s" },
-  { name: "Servicio RAG (Meditron)", status: "online", latency: 230, uptime: "99.5%", lastCheck: "Hace 30s" },
-  { name: "Redis Cache", status: "online", latency: 2, uptime: "99.99%", lastCheck: "Hace 30s" },
-  { name: "Cola de Tareas (RabbitMQ)", status: "online", latency: 8, uptime: "99.9%", lastCheck: "Hace 30s" },
-  { name: "Servicio de Email", status: "warning", latency: 450, uptime: "98.5%", lastCheck: "Hace 30s" },
-  { name: "Almacenamiento S3", status: "online", latency: 35, uptime: "99.99%", lastCheck: "Hace 30s" },
-]
-
 export default function AdminHealthPage() {
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [cpuUsage, setCpuUsage] = useState(45)
-  const [memoryUsage, setMemoryUsage] = useState(62)
-  const [diskUsage, setDiskUsage] = useState(38)
+  const [cpuUsage, setCpuUsage] = useState(0)
+  const [memoryUsage, setMemoryUsage] = useState(0)
+  const [diskUsage, setDiskUsage] = useState(0)
   const [health, setHealth] = useState<any | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [services, setServices] = useState<SystemServiceStatus[]>([])
 
   const loadHealth = async () => {
     setError(null)
@@ -55,6 +38,7 @@ export default function AdminHealthPage() {
       if (typeof response?.cpu === "number") setCpuUsage(response.cpu)
       if (typeof response?.memory === "number") setMemoryUsage(response.memory)
       if (typeof response?.disk === "number") setDiskUsage(response.disk)
+      if (Array.isArray(response?.services)) setServices(response.services)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cargar salud del sistema")
     } finally {
@@ -97,12 +81,15 @@ export default function AdminHealthPage() {
     if (health?.status) {
       return String(health.status).toUpperCase() === "UP" ? "online" : "warning"
     }
-    return "online"
+    return "warning"
   }, [health])
 
   const overallOk = overallStatus === "online"
   const onlineServices = services.filter((s) => s.status === "online").length
   const totalServices = services.length
+  const latency = health?.apiLatency
+  const pubmedUsage = health?.pubmedUsage
+  const pubmedPercent = pubmedUsage?.limit ? Math.min(100, pubmedUsage.percent) : 0
 
   return (
     <div className="space-y-6">
@@ -143,12 +130,16 @@ export default function AdminHealthPage() {
               {overallOk ? "Sistema Operativo" : "Sistema con Advertencias"}
             </p>
             <p className={`text-sm ${overallOk ? "text-green-600" : "text-amber-600"}`}>
-              {onlineServices} de {totalServices} servicios funcionando correctamente
+              {totalServices > 0
+                ? `${onlineServices} de ${totalServices} servicios funcionando correctamente`
+                : "Sin datos de servicios"}
             </p>
           </div>
           <div className="text-right">
-            <p className="text-2xl font-bold text-foreground">99.9%</p>
-            <p className="text-xs text-muted-foreground">Uptime general</p>
+            <p className="text-2xl font-bold text-foreground">
+              {latency?.p95 ? `${Math.round(latency.p95)}ms` : "--"}
+            </p>
+            <p className="text-xs text-muted-foreground">Latencia P95</p>
           </div>
         </CardContent>
       </Card>
@@ -171,7 +162,7 @@ export default function AdminHealthPage() {
                 </Badge>
               </div>
               <Progress value={cpuUsage} className="h-2" />
-              <p className="text-xs text-muted-foreground">8 núcleos disponibles</p>
+              <p className="text-xs text-muted-foreground">Uso reportado por sistema</p>
             </div>
           </CardContent>
         </Card>
@@ -192,7 +183,7 @@ export default function AdminHealthPage() {
                 </Badge>
               </div>
               <Progress value={memoryUsage} className="h-2" />
-              <p className="text-xs text-muted-foreground">12.4 GB de 20 GB usados</p>
+              <p className="text-xs text-muted-foreground">Uso reportado por JVM</p>
             </div>
           </CardContent>
         </Card>
@@ -207,11 +198,11 @@ export default function AdminHealthPage() {
           <CardContent>
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-3xl font-bold">{diskUsage}%</span>
+                <span className="text-3xl font-bold">{Math.round(diskUsage)}%</span>
                 <Badge variant="outline">Normal</Badge>
               </div>
               <Progress value={diskUsage} className="h-2" />
-              <p className="text-xs text-muted-foreground">190 GB de 500 GB usados</p>
+              <p className="text-xs text-muted-foreground">Uso del disco principal</p>
             </div>
           </CardContent>
         </Card>
@@ -224,24 +215,24 @@ export default function AdminHealthPage() {
             <Zap className="h-5 w-5" />
             Tiempos de Respuesta
           </CardTitle>
-          <CardDescription>Percentiles de latencia en las últimas 24 horas</CardDescription>
+          <CardDescription>Percentiles de latencia en las Ãºltimas 24 horas</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-6 md:grid-cols-4">
             <div className="text-center p-4 rounded-lg bg-muted/50">
-              <p className="text-3xl font-bold text-foreground">42ms</p>
+              <p className="text-3xl font-bold text-foreground">{latency?.p50 ? `${Math.round(latency.p50)}ms` : "--"}</p>
               <p className="text-sm text-muted-foreground">P50 (Mediana)</p>
             </div>
             <div className="text-center p-4 rounded-lg bg-muted/50">
-              <p className="text-3xl font-bold text-foreground">89ms</p>
+              <p className="text-3xl font-bold text-foreground">{latency?.p75 ? `${Math.round(latency.p75)}ms` : "--"}</p>
               <p className="text-sm text-muted-foreground">P75</p>
             </div>
             <div className="text-center p-4 rounded-lg bg-muted/50">
-              <p className="text-3xl font-bold text-foreground">128ms</p>
+              <p className="text-3xl font-bold text-foreground">{latency?.p95 ? `${Math.round(latency.p95)}ms` : "--"}</p>
               <p className="text-sm text-muted-foreground">P95</p>
             </div>
             <div className="text-center p-4 rounded-lg bg-muted/50">
-              <p className="text-3xl font-bold text-foreground">256ms</p>
+              <p className="text-3xl font-bold text-foreground">{latency?.p99 ? `${Math.round(latency.p99)}ms` : "--"}</p>
               <p className="text-sm text-muted-foreground">P99</p>
             </div>
           </div>
@@ -260,41 +251,45 @@ export default function AdminHealthPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3">
-            {services.map((service, index) => (
-              <div
-                key={index}
-                className={`flex items-center justify-between p-4 rounded-lg border ${
-                  service.status === "warning"
-                    ? "border-amber-200 bg-amber-50/50"
-                    : service.status === "offline"
-                    ? "border-red-200 bg-red-50/50"
-                    : "bg-muted/30"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  {getStatusIcon(service.status)}
-                  <div>
-                    <p className="font-medium">{service.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      Ãšltima verificación: {service.lastCheck}
-                    </p>
+          {services.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No hay servicios reportados.</p>
+          ) : (
+            <div className="space-y-3">
+              {services.map((service, index) => (
+                <div
+                  key={index}
+                  className={`flex items-center justify-between p-4 rounded-lg border ${
+                    service.status === "warning"
+                      ? "border-amber-200 bg-amber-50/50"
+                      : service.status === "offline"
+                      ? "border-red-200 bg-red-50/50"
+                      : "bg-muted/30"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    {getStatusIcon(service.status)}
+                    <div>
+                      <p className="font-medium">{service.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Ãšltima verificaciÃ³n: {service.lastCheck ? formatRelative(service.lastCheck) : "Sin datos"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="text-right hidden sm:block">
+                      <p className="text-sm font-medium">{service.latency ? `${Math.round(service.latency)}ms` : "--"}</p>
+                      <p className="text-xs text-muted-foreground">Latencia</p>
+                    </div>
+                    <div className="text-right hidden sm:block">
+                      <p className="text-sm font-medium">{service.uptime ?? "--"}</p>
+                      <p className="text-xs text-muted-foreground">Uptime</p>
+                    </div>
+                    {getStatusBadge(service.status)}
                   </div>
                 </div>
-                <div className="flex items-center gap-4">
-                  <div className="text-right hidden sm:block">
-                    <p className="text-sm font-medium">{service.latency}ms</p>
-                    <p className="text-xs text-muted-foreground">Latencia</p>
-                  </div>
-                  <div className="text-right hidden sm:block">
-                    <p className="text-sm font-medium">{service.uptime}</p>
-                    <p className="text-xs text-muted-foreground">Uptime</p>
-                  </div>
-                  {getStatusBadge(service.status)}
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -310,20 +305,26 @@ export default function AdminHealthPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="font-medium">Llamadas realizadas hoy</p>
-              <p className="text-sm text-muted-foreground">Límite diario: 10,000</p>
+              <p className="text-sm text-muted-foreground">LÃ­mite diario: {pubmedUsage?.limit ?? 0}</p>
             </div>
             <div className="text-right">
-              <p className="text-2xl font-bold">7,850</p>
-              <p className="text-sm text-muted-foreground">78.5% utilizado</p>
+              <p className="text-2xl font-bold">{pubmedUsage?.used ?? 0}</p>
+              <p className="text-sm text-muted-foreground">{pubmedUsage?.percent ?? 0}% utilizado</p>
             </div>
           </div>
-          <Progress value={78.5} className="h-3" />
-          <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
-            <AlertTriangle className="h-4 w-4 text-amber-600" />
-            <p className="text-sm text-amber-700">
-              Se recomienda aumentar el límite o activar el modo de caché agresivo.
-            </p>
-          </div>
+          <Progress value={pubmedPercent} className="h-3" />
+          {pubmedUsage?.limit ? (
+            <div className={`flex items-center gap-2 p-3 rounded-lg ${pubmedPercent > 80 ? "bg-amber-50 border border-amber-200" : "bg-green-50 border border-green-200"}`}>
+              <AlertTriangle className={`h-4 w-4 ${pubmedPercent > 80 ? "text-amber-600" : "text-green-600"}`} />
+              <p className={`text-sm ${pubmedPercent > 80 ? "text-amber-700" : "text-green-700"}`}>
+                {pubmedPercent > 80
+                  ? "Se recomienda aumentar el lÃ­mite o activar cachÃ© agresivo."
+                  : "Uso dentro de lÃ­mites normales."}
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Sin lÃ­mite configurado.</p>
+          )}
         </CardContent>
       </Card>
     </div>

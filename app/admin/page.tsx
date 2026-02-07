@@ -1,6 +1,7 @@
-"use client"
+ï»¿"use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import Link from "next/link"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -27,15 +28,87 @@ import {
   RefreshCw,
 } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
+import { adminSystemApi } from "@/lib/admin-system"
+import type { AdminDashboardData } from "@/types"
+
+const formatUptime = (uptimeMs?: number) => {
+  if (!uptimeMs || uptimeMs <= 0) return "Sin datos"
+  const totalSeconds = Math.floor(uptimeMs / 1000)
+  const days = Math.floor(totalSeconds / 86400)
+  const hours = Math.floor((totalSeconds % 86400) / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const parts = []
+  if (days > 0) parts.push(`${days} dÃ­a${days === 1 ? "" : "s"}`)
+  if (hours > 0) parts.push(`${hours} hora${hours === 1 ? "" : "s"}`)
+  if (parts.length === 0) parts.push(`${minutes} min`)
+  return parts.slice(0, 2).join(", ")
+}
+
+const formatRelative = (iso?: string) => {
+  if (!iso) return "Sin datos"
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return "Sin datos"
+  const diffMs = Date.now() - date.getTime()
+  const diffMinutes = Math.floor(diffMs / 60000)
+  if (diffMinutes < 1) return "hace segundos"
+  if (diffMinutes < 60) return `hace ${diffMinutes} min`
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24) return `hace ${diffHours} h`
+  const diffDays = Math.floor(diffHours / 24)
+  return `hace ${diffDays} dÃ­a${diffDays === 1 ? "" : "s"}`
+}
+
+const formatNumber = (value?: number) => (typeof value === "number" ? value.toLocaleString() : "0")
 
 export default function AdminDashboard() {
   const { user } = useAuth()
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [dashboard, setDashboard] = useState<AdminDashboardData | null>(null)
+
+  const loadDashboard = async (manual = false) => {
+    if (manual) setIsRefreshing(true)
+    setIsLoading(true)
+    setError(null)
+    try {
+      const response = await adminSystemApi.getDashboard()
+      setDashboard(response)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cargar dashboard")
+    } finally {
+      setIsLoading(false)
+      setIsRefreshing(false)
+    }
+  }
 
   const handleRefresh = () => {
-    setIsRefreshing(true)
-    setTimeout(() => setIsRefreshing(false), 1500)
+    loadDashboard(true)
   }
+
+  useEffect(() => {
+    loadDashboard(false)
+  }, [])
+
+  const stats = dashboard?.stats
+  const resources = dashboard?.resources
+  const systemStatus = dashboard?.systemStatus
+  const services = dashboard?.services ?? []
+  const alerts = dashboard?.alerts ?? []
+  const activity = dashboard?.activity
+
+  const searchesTrend = stats?.searchesChangePercent ?? 0
+  const searchesTrendUp = searchesTrend >= 0
+  const usersTrend = stats?.usersChangePercent ?? 0
+  const usersTrendUp = usersTrend >= 0
+
+  const cpuValue = Math.min(100, Math.max(0, resources?.cpu ?? 0))
+  const memoryValue = Math.min(100, Math.max(0, resources?.memory ?? 0))
+  const diskValue = Math.min(100, Math.max(0, resources?.disk ?? 0))
+  const pubmedUsage = resources?.pubmedUsage
+  const pubmedPercent = pubmedUsage?.limit ? Math.min(100, pubmedUsage.percent) : 0
+
+  const overallOk = String(systemStatus?.status ?? "UP").toUpperCase() === "UP"
 
   return (
     <div className="space-y-6">
@@ -59,20 +132,32 @@ export default function AdminDashboard() {
         </Button>
       </div>
 
+      {error && (
+        <div className="text-sm text-destructive">
+          {error}
+        </div>
+      )}
+
       {/* System Status Banner */}
-      <Card className="border-green-200 bg-green-50/50">
+      <Card className={overallOk ? "border-green-200 bg-green-50/50" : "border-amber-200 bg-amber-50/50"}>
         <CardContent className="flex items-center gap-4 py-4">
-          <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
-            <CheckCircle className="h-5 w-5 text-green-600" />
+          <div className={`h-10 w-10 rounded-full ${overallOk ? "bg-green-100" : "bg-amber-100"} flex items-center justify-center`}>
+            {overallOk ? (
+              <CheckCircle className="h-5 w-5 text-green-600" />
+            ) : (
+              <AlertTriangle className="h-5 w-5 text-amber-600" />
+            )}
           </div>
           <div className="flex-1">
-            <p className="font-medium text-green-800">Sistema Operativo</p>
-            <p className="text-sm text-green-600">
-              Todos los servicios funcionando correctamente. Ãšltima verificación: hace 2 minutos.
+            <p className={`font-medium ${overallOk ? "text-green-800" : "text-amber-800"}`}>
+              {overallOk ? "Sistema Operativo" : "Sistema con Advertencias"}
+            </p>
+            <p className={`text-sm ${overallOk ? "text-green-600" : "text-amber-600"}`}>
+              Ãšltima verificaciÃ³n: {formatRelative(systemStatus?.lastCheck)}
             </p>
           </div>
-          <Badge variant="outline" className="border-green-300 text-green-700">
-            99.9% Uptime
+          <Badge variant="outline" className={overallOk ? "border-green-300 text-green-700" : "border-amber-300 text-amber-700"}>
+            Uptime: {formatUptime(systemStatus?.uptimeMs)}
           </Badge>
         </CardContent>
       </Card>
@@ -87,10 +172,10 @@ export default function AdminDashboard() {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">1,284</div>
-            <div className="flex items-center gap-1 text-xs text-green-600">
-              <TrendingUp className="h-3 w-3" />
-              <span>+12% este mes</span>
+            <div className="text-2xl font-bold">{formatNumber(stats?.totalUsers)}</div>
+            <div className={`flex items-center gap-1 text-xs ${usersTrendUp ? "text-green-600" : "text-red-600"}`}>
+              {usersTrendUp ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+              <span>{Math.abs(usersTrend).toFixed(1)}% Ãºltimos 30 dÃ­as</span>
             </div>
           </CardContent>
         </Card>
@@ -103,10 +188,10 @@ export default function AdminDashboard() {
             <GraduationCap className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">1,156</div>
+            <div className="text-2xl font-bold">{formatNumber(stats?.activeStudents)}</div>
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
               <Clock className="h-3 w-3" />
-              <span>423 activos hoy</span>
+              <span>{formatNumber(stats?.students)} estudiantes totales</span>
             </div>
           </CardContent>
         </Card>
@@ -119,10 +204,10 @@ export default function AdminDashboard() {
             <BookOpen className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">98</div>
-            <div className="flex items-center gap-1 text-xs text-green-600">
-              <TrendingUp className="h-3 w-3" />
-              <span>+5 nuevos</span>
+            <div className="text-2xl font-bold">{formatNumber(stats?.professors)}</div>
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Clock className="h-3 w-3" />
+              <span>{formatNumber(stats?.admins)} administradores</span>
             </div>
           </CardContent>
         </Card>
@@ -130,15 +215,15 @@ export default function AdminDashboard() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Búsquedas Hoy
+              BÃºsquedas Hoy
             </CardTitle>
             <Search className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">3,842</div>
-            <div className="flex items-center gap-1 text-xs text-green-600">
-              <TrendingUp className="h-3 w-3" />
-              <span>+23% vs ayer</span>
+            <div className="text-2xl font-bold">{formatNumber(stats?.searchesToday)}</div>
+            <div className={`flex items-center gap-1 text-xs ${searchesTrendUp ? "text-green-600" : "text-red-600"}`}>
+              {searchesTrendUp ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+              <span>{Math.abs(searchesTrend).toFixed(1)}% vs ayer</span>
             </div>
           </CardContent>
         </Card>
@@ -150,7 +235,7 @@ export default function AdminDashboard() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Activity className="h-5 w-5" />
-              Métricas del Sistema en Tiempo Real
+              MÃ©tricas del Sistema en Tiempo Real
             </CardTitle>
             <CardDescription>
               Monitoreo de recursos y rendimiento
@@ -163,9 +248,9 @@ export default function AdminDashboard() {
                   <Cpu className="h-4 w-4 text-muted-foreground" />
                   <span>CPU</span>
                 </div>
-                <span className="font-medium">45%</span>
+                <span className="font-medium">{cpuValue.toFixed(1)}%</span>
               </div>
-              <Progress value={45} className="h-2" />
+              <Progress value={cpuValue} className="h-2" />
             </div>
 
             <div className="space-y-2">
@@ -174,9 +259,9 @@ export default function AdminDashboard() {
                   <HardDrive className="h-4 w-4 text-muted-foreground" />
                   <span>Memoria RAM</span>
                 </div>
-                <span className="font-medium">62%</span>
+                <span className="font-medium">{memoryValue.toFixed(1)}%</span>
               </div>
-              <Progress value={62} className="h-2" />
+              <Progress value={memoryValue} className="h-2" />
             </div>
 
             <div className="space-y-2">
@@ -185,9 +270,9 @@ export default function AdminDashboard() {
                   <Database className="h-4 w-4 text-muted-foreground" />
                   <span>Almacenamiento</span>
                 </div>
-                <span className="font-medium">38%</span>
+                <span className="font-medium">{diskValue.toFixed(1)}%</span>
               </div>
-              <Progress value={38} className="h-2" />
+              <Progress value={diskValue} className="h-2" />
             </div>
 
             <div className="space-y-2">
@@ -196,22 +281,31 @@ export default function AdminDashboard() {
                   <Zap className="h-4 w-4 text-muted-foreground" />
                   <span>API PubMed (Llamadas)</span>
                 </div>
-                <span className="font-medium">7,850 / 10,000</span>
+                <span className="font-medium">
+                  {formatNumber(pubmedUsage?.used)}
+                  {pubmedUsage?.limit ? ` / ${formatNumber(pubmedUsage.limit)}` : ""}
+                </span>
               </div>
-              <Progress value={78.5} className="h-2" />
+              <Progress value={pubmedPercent} className="h-2" />
             </div>
 
             <div className="grid grid-cols-3 gap-4 pt-4 border-t">
               <div className="text-center">
-                <p className="text-2xl font-bold text-foreground">42ms</p>
+                <p className="text-2xl font-bold text-foreground">
+                  {resources?.latency?.p50 ? `${Math.round(resources.latency.p50)}ms` : "--"}
+                </p>
                 <p className="text-xs text-muted-foreground">Latencia P50</p>
               </div>
               <div className="text-center">
-                <p className="text-2xl font-bold text-foreground">128ms</p>
+                <p className="text-2xl font-bold text-foreground">
+                  {resources?.latency?.p95 ? `${Math.round(resources.latency.p95)}ms` : "--"}
+                </p>
                 <p className="text-xs text-muted-foreground">Latencia P95</p>
               </div>
               <div className="text-center">
-                <p className="text-2xl font-bold text-foreground">256ms</p>
+                <p className="text-2xl font-bold text-foreground">
+                  {resources?.latency?.p99 ? `${Math.round(resources.latency.p99)}ms` : "--"}
+                </p>
                 <p className="text-xs text-muted-foreground">Latencia P99</p>
               </div>
             </div>
@@ -226,14 +320,10 @@ export default function AdminDashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {[
-              { name: "API Principal", status: "online", latency: "12ms" },
-              { name: "Base de Datos", status: "online", latency: "5ms" },
-              { name: "PubMed Gateway", status: "online", latency: "145ms" },
-              { name: "Servicio RAG", status: "online", latency: "230ms" },
-              { name: "Cache Redis", status: "online", latency: "2ms" },
-              { name: "Cola de Tareas", status: "online", latency: "8ms" },
-            ].map((service, index) => (
+            {services.length === 0 && (
+              <p className="text-sm text-muted-foreground">Sin datos de servicios.</p>
+            )}
+            {services.map((service, index) => (
               <div key={index} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div
@@ -248,7 +338,7 @@ export default function AdminDashboard() {
                   <span className="text-sm">{service.name}</span>
                 </div>
                 <span className="text-xs text-muted-foreground">
-                  {service.latency}
+                  {service.latency ? `${Math.round(service.latency)}ms` : "--"}
                 </span>
               </div>
             ))}
@@ -266,55 +356,44 @@ export default function AdminDashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {[
-                {
-                  type: "warning",
-                  message: "Alto uso de API PubMed (78.5%)",
-                  time: "Hace 15 min",
-                },
-                {
-                  type: "info",
-                  message: "Backup automático completado",
-                  time: "Hace 2 horas",
-                },
-                {
-                  type: "warning",
-                  message: "3 intentos de login fallidos - usuario@test.cu",
-                  time: "Hace 3 horas",
-                },
-                {
-                  type: "success",
-                  message: "Actualización del modelo RAG completada",
-                  time: "Hace 1 día",
-                },
-              ].map((alert, index) => (
-                <div
-                  key={index}
-                  className={`flex items-start gap-3 p-3 rounded-lg ${
-                    alert.type === "warning"
-                      ? "bg-amber-50 border border-amber-200"
-                      : alert.type === "success"
-                      ? "bg-green-50 border border-green-200"
-                      : "bg-blue-50 border border-blue-200"
-                  }`}
-                >
-                  <AlertTriangle
-                    className={`h-4 w-4 mt-0.5 ${
+            {alerts.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No hay alertas recientes.</p>
+            ) : (
+              <div className="space-y-4">
+                {alerts.map((alert) => (
+                  <div
+                    key={alert.id}
+                    className={`flex items-start gap-3 p-3 rounded-lg ${
                       alert.type === "warning"
-                        ? "text-amber-500"
+                        ? "bg-amber-50 border border-amber-200"
+                        : alert.type === "error"
+                        ? "bg-red-50 border border-red-200"
                         : alert.type === "success"
-                        ? "text-green-500"
-                        : "text-blue-500"
+                        ? "bg-green-50 border border-green-200"
+                        : "bg-blue-50 border border-blue-200"
                     }`}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">{alert.message}</p>
-                    <p className="text-xs text-muted-foreground">{alert.time}</p>
+                  >
+                    <AlertTriangle
+                      className={`h-4 w-4 mt-0.5 ${
+                        alert.type === "warning"
+                          ? "text-amber-500"
+                          : alert.type === "error"
+                          ? "text-red-500"
+                          : alert.type === "success"
+                          ? "text-green-500"
+                          : "text-blue-500"
+                      }`}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">{alert.message}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatRelative(alert.timestamp)}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -333,53 +412,51 @@ export default function AdminDashboard() {
                 <TabsTrigger value="api">API</TabsTrigger>
               </TabsList>
               <TabsContent value="users" className="mt-4 space-y-3">
-                {[
-                  { action: "Nuevo registro", user: "Maria Garcia", time: "Hace 5 min" },
-                  { action: "Login exitoso", user: "Carlos Lopez", time: "Hace 12 min" },
-                  { action: "Actualización perfil", user: "Ana Torres", time: "Hace 25 min" },
-                  { action: "Cambio de contraseña", user: "Pedro Ruiz", time: "Hace 1 hora" },
-                ].map((activity, index) => (
-                  <div key={index} className="flex items-center justify-between py-2 border-b last:border-0">
-                    <div>
-                      <p className="text-sm font-medium">{activity.action}</p>
-                      <p className="text-xs text-muted-foreground">{activity.user}</p>
+                {activity?.users?.length ? (
+                  activity.users.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between py-2 border-b last:border-0">
+                      <div>
+                        <p className="text-sm font-medium">{item.action}</p>
+                        <p className="text-xs text-muted-foreground">{item.user ?? "Sistema"}</p>
+                      </div>
+                      <span className="text-xs text-muted-foreground">{formatRelative(item.timestamp)}</span>
                     </div>
-                    <span className="text-xs text-muted-foreground">{activity.time}</span>
-                  </div>
-                ))}
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground">Sin actividad reciente.</p>
+                )}
               </TabsContent>
               <TabsContent value="system" className="mt-4 space-y-3">
-                {[
-                  { action: "Backup completado", detail: "15.2 GB", time: "Hace 2 horas" },
-                  { action: "Cache limpiado", detail: "2.1 GB liberados", time: "Hace 4 horas" },
-                  { action: "Índices optimizados", detail: "Base de datos", time: "Hace 6 horas" },
-                ].map((activity, index) => (
-                  <div key={index} className="flex items-center justify-between py-2 border-b last:border-0">
-                    <div>
-                      <p className="text-sm font-medium">{activity.action}</p>
-                      <p className="text-xs text-muted-foreground">{activity.detail}</p>
+                {activity?.system?.length ? (
+                  activity.system.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between py-2 border-b last:border-0">
+                      <div>
+                        <p className="text-sm font-medium">{item.action}</p>
+                        <p className="text-xs text-muted-foreground">{item.user ?? "Sistema"}</p>
+                      </div>
+                      <span className="text-xs text-muted-foreground">{formatRelative(item.timestamp)}</span>
                     </div>
-                    <span className="text-xs text-muted-foreground">{activity.time}</span>
-                  </div>
-                ))}
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground">Sin actividad del sistema.</p>
+                )}
               </TabsContent>
               <TabsContent value="api" className="mt-4 space-y-3">
-                {[
-                  { endpoint: "/api/search", calls: "1,234", status: "OK" },
-                  { endpoint: "/api/verify", calls: "567", status: "OK" },
-                  { endpoint: "/api/mesh", calls: "892", status: "OK" },
-                  { endpoint: "/api/export", calls: "156", status: "OK" },
-                ].map((api, index) => (
-                  <div key={index} className="flex items-center justify-between py-2 border-b last:border-0">
-                    <div>
-                      <p className="text-sm font-medium font-mono">{api.endpoint}</p>
-                      <p className="text-xs text-muted-foreground">{api.calls} llamadas hoy</p>
+                {activity?.api?.length ? (
+                  activity.api.map((apiItem, index) => (
+                    <div key={`${apiItem.endpoint}-${index}`} className="flex items-center justify-between py-2 border-b last:border-0">
+                      <div>
+                        <p className="text-sm font-medium font-mono">{apiItem.endpoint}</p>
+                        <p className="text-xs text-muted-foreground">{apiItem.calls} llamadas hoy</p>
+                      </div>
+                      <Badge variant="outline" className={apiItem.status === "WARN" ? "text-amber-600 border-amber-300" : "text-green-600 border-green-300"}>
+                        {apiItem.status === "WARN" ? "WARN" : "OK"}
+                      </Badge>
                     </div>
-                    <Badge variant="outline" className="text-green-600 border-green-300">
-                      {api.status}
-                    </Badge>
-                  </div>
-                ))}
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground">Sin actividad de API.</p>
+                )}
               </TabsContent>
             </Tabs>
           </CardContent>
@@ -389,29 +466,41 @@ export default function AdminDashboard() {
       {/* Quick Actions */}
       <Card>
         <CardHeader>
-          <CardTitle>Acciones Rápidas</CardTitle>
+          <CardTitle>Acciones RÃ¡pidas</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Button variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 bg-transparent">
-              <Users className="h-5 w-5" />
-              <span>Crear Usuario</span>
+            <Button variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 bg-transparent" asChild>
+              <Link href="/admin/users">
+                <Users className="h-5 w-5" />
+                <span>Crear Usuario</span>
+              </Link>
             </Button>
-            <Button variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 bg-transparent">
-              <Database className="h-5 w-5" />
-              <span>Backup Manual</span>
+            <Button variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 bg-transparent" asChild>
+              <Link href="/admin/system">
+                <Database className="h-5 w-5" />
+                <span>Backup Manual</span>
+              </Link>
             </Button>
-            <Button variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 bg-transparent">
-              <Shield className="h-5 w-5" />
-              <span>Ver Logs Seguridad</span>
+            <Button variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 bg-transparent" asChild>
+              <Link href="/admin/audit">
+                <Shield className="h-5 w-5" />
+                <span>Ver Logs Seguridad</span>
+              </Link>
             </Button>
-            <Button variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 bg-transparent">
-              <FileText className="h-5 w-5" />
-              <span>Generar Reporte</span>
+            <Button variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 bg-transparent" asChild>
+              <Link href="/admin/audit">
+                <FileText className="h-5 w-5" />
+                <span>Generar Reporte</span>
+              </Link>
             </Button>
           </div>
         </CardContent>
       </Card>
+
+      {isLoading && (
+        <div className="text-sm text-muted-foreground">Cargando dashboard...</div>
+      )}
     </div>
   )
 }

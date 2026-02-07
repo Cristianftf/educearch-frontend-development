@@ -12,4 +12,5 @@ import java.util.Optional;
 public interface SearchResultRepository extends JpaRepository<SearchResult, String> {
     Optional<SearchResult> findByPmid(String pmid);
     Page<SearchResult> findByTitle(String title, Pageable pageable);
+    Page<SearchResult> findByTitleContainingIgnoreCase(String title, Pageable pageable);
 }

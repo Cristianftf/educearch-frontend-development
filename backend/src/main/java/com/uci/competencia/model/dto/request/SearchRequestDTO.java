@@ -44,6 +44,10 @@ public class SearchRequestDTO {
         private Boolean hasFullText;
         private String language;
 
+        @Min(value = 0, message = "Minimum sample size cannot be negative")
+        @Max(value = 100000, message = "Minimum sample size too large")
+        private Integer minSampleSize;
+
         @Max(value = 500, message = "Maximum results limited to 500")
         private Integer maxResults = 100;
     }

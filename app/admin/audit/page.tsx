@@ -1,7 +1,8 @@
-"use client"
+ï»¿"use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { adminAuditApi } from "@/lib/api"
+import { adminReportApi } from "@/lib/admin-report"
 import type { AuditLog } from "@/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -42,6 +43,7 @@ export default function AdminAuditPage() {
   const [levelFilter, setLevelFilter] = useState<string>("all")
   const [expandedLog, setExpandedLog] = useState<string | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [total, setTotal] = useState(0)
@@ -165,13 +167,40 @@ export default function AdminAuditPage() {
     loadLogs()
   }
 
+  const handleQuickReport = async (days: number) => {
+    setIsExporting(true)
+    setError(null)
+    try {
+      const end = new Date()
+      const start = new Date()
+      start.setDate(end.getDate() - days)
+      const startDate = start.toISOString().slice(0, 10)
+      const endDate = end.toISOString().slice(0, 10)
+      const response = await adminReportApi.getAuditExport("pdf", startDate, endDate)
+      if (response?.downloadUrl) {
+        const link = document.createElement("a")
+        link.href = response.downloadUrl
+        link.download = response.fileName || `audit-report-${endDate}.pdf`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+      } else {
+        throw new Error("No se pudo generar el reporte")
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al generar reporte")
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">
-            Auditoría del Sistema
+            AuditorÃ­a del Sistema
           </h1>
           <p className="text-muted-foreground">
             Monitorea todas las actividades y eventos del sistema
@@ -415,29 +444,44 @@ export default function AdminAuditPage() {
       {/* Reports Section */}
       <Card>
         <CardHeader>
-          <CardTitle>Reportes Automáticos</CardTitle>
+          <CardTitle>Reportes AutomÃ¡ticos</CardTitle>
           <CardDescription>
             Genera reportes detallados de actividad del sistema
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 sm:grid-cols-3">
-            <Button variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 bg-transparent">
-              <FileText className="h-5 w-5" />
-              <span className="font-medium">Reporte Diario</span>
-              <span className="text-xs text-muted-foreground">Actividad últimas 24h</span>
-            </Button>
-            <Button variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 bg-transparent">
-              <FileText className="h-5 w-5" />
-              <span className="font-medium">Reporte Semanal</span>
-              <span className="text-xs text-muted-foreground">Resumen de la semana</span>
-            </Button>
-            <Button variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 bg-transparent">
-              <FileText className="h-5 w-5" />
-              <span className="font-medium">Reporte Mensual</span>
-              <span className="text-xs text-muted-foreground">Estadísticas del mes</span>
-            </Button>
-          </div>
+  <Button
+    variant="outline"
+    className="h-auto py-4 flex flex-col items-center gap-2 bg-transparent"
+    onClick={() => handleQuickReport(1)}
+    disabled={isExporting}
+  >
+    <FileText className="h-5 w-5" />
+    <span className="font-medium">Reporte Diario</span>
+    <span className="text-xs text-muted-foreground">Actividad Ãºltimas 24h</span>
+  </Button>
+  <Button
+    variant="outline"
+    className="h-auto py-4 flex flex-col items-center gap-2 bg-transparent"
+    onClick={() => handleQuickReport(7)}
+    disabled={isExporting}
+  >
+    <FileText className="h-5 w-5" />
+    <span className="font-medium">Reporte Semanal</span>
+    <span className="text-xs text-muted-foreground">Resumen de la semana</span>
+  </Button>
+  <Button
+    variant="outline"
+    className="h-auto py-4 flex flex-col items-center gap-2 bg-transparent"
+    onClick={() => handleQuickReport(30)}
+    disabled={isExporting}
+  >
+    <FileText className="h-5 w-5" />
+    <span className="font-medium">Reporte Mensual</span>
+    <span className="text-xs text-muted-foreground">EstadÃ­sticas del mes</span>
+  </Button>
+</div>
         </CardContent>
       </Card>
     </div>

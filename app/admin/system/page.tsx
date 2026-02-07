@@ -1,4 +1,4 @@
-"use client"
+Ôªø"use client"
 
 import { useEffect, useMemo, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { adminSystemApi } from "@/lib/admin-system"
+import type { SystemOverview } from "@/types"
 import {
   Server,
   Database,
@@ -26,7 +27,22 @@ type Backup = {
   createdAt: string
   size: number
   status: string
-  type: "automatic" | "manual"
+  type?: string
+  progress?: number
+  downloadUrl?: string
+}
+
+const formatUptime = (uptimeMs?: number) => {
+  if (!uptimeMs || uptimeMs <= 0) return "Sin datos"
+  const totalSeconds = Math.floor(uptimeMs / 1000)
+  const days = Math.floor(totalSeconds / 86400)
+  const hours = Math.floor((totalSeconds % 86400) / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const parts = []
+  if (days > 0) parts.push(`${days} d√≠a${days === 1 ? "" : "s"}`)
+  if (hours > 0) parts.push(`${hours} hora${hours === 1 ? "" : "s"}`)
+  if (parts.length === 0) parts.push(`${minutes} min`)
+  return parts.slice(0, 2).join(", ")
 }
 
 export default function AdminSystemPage() {
@@ -38,7 +54,9 @@ export default function AdminSystemPage() {
   const [isOptimizingDb, setIsOptimizingDb] = useState(false)
   const [isCleaningLogs, setIsCleaningLogs] = useState(false)
   const [isReindexing, setIsReindexing] = useState(false)
+  const [isDeleting, setIsDeleting] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [overview, setOverview] = useState<SystemOverview | null>(null)
 
   const loadBackups = async () => {
     setIsLoading(true)
@@ -50,7 +68,9 @@ export default function AdminSystemPage() {
         createdAt: backup.createdAt,
         size: backup.size,
         status: backup.status,
-        type: "automatic",
+        type: backup.type,
+        progress: backup.progress,
+        downloadUrl: backup.downloadUrl,
       }))
       setBackups(normalized)
     } catch (err) {
@@ -61,8 +81,18 @@ export default function AdminSystemPage() {
     }
   }
 
+  const loadOverview = async () => {
+    try {
+      const response = await adminSystemApi.getSystemOverview()
+      setOverview(response)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cargar datos del sistema")
+    }
+  }
+
   useEffect(() => {
     loadBackups()
+    loadOverview()
   }, [])
 
   const handleCreateBackup = async () => {
@@ -82,6 +112,13 @@ export default function AdminSystemPage() {
     return backups.find((b) => String(b.status).toUpperCase() === "COMPLETED")
   }, [backups])
 
+  const latestBackup = useMemo(() => {
+    if (backups.length === 0) return null
+    return backups.reduce((latest, current) =>
+      new Date(current.createdAt) > new Date(latest.createdAt) ? current : latest
+    )
+  }, [backups])
+
   const handleRestoreLatest = async () => {
     if (!latestCompletedBackup) return
     setIsRestoring(true)
@@ -93,6 +130,21 @@ export default function AdminSystemPage() {
       setError(err instanceof Error ? err.message : "Error al restaurar backup")
     } finally {
       setIsRestoring(false)
+    }
+  }
+
+  const handleDeleteBackup = async (backupId: string) => {
+    const confirmed = window.confirm("Eliminar este backup?")
+    if (!confirmed) return
+    setIsDeleting(backupId)
+    setError(null)
+    try {
+      await adminSystemApi.deleteBackup(backupId)
+      await loadBackups()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al eliminar backup")
+    } finally {
+      setIsDeleting(null)
     }
   }
 
@@ -144,11 +196,15 @@ export default function AdminSystemPage() {
     }
   }
 
+  const backupTotalBytes = useMemo(
+    () => backups.reduce((sum, b) => sum + (b.size || 0), 0),
+    [backups]
+  )
+  const storageTotalBytes = overview?.storage?.totalBytes ?? 0
   const backupsStorageUsage = useMemo(() => {
-    const totalBytes = backups.reduce((sum, b) => sum + (b.size || 0), 0)
-    const totalGb = totalBytes / (1024 * 1024 * 1024)
-    return Math.min(100, Math.round((totalGb / 100) * 100))
-  }, [backups])
+    if (!storageTotalBytes) return 0
+    return Math.min(100, Math.round((backupTotalBytes / storageTotalBytes) * 100))
+  }, [backupTotalBytes, storageTotalBytes])
 
   const formatBytes = (bytes: number) => {
     if (!bytes) return "0 B"
@@ -174,8 +230,14 @@ export default function AdminSystemPage() {
     const upper = String(status).toUpperCase()
     if (upper.includes("IN_PROGRESS") || upper.includes("RUNNING")) return "in-progress"
     if (upper.includes("FAIL")) return "failed"
+    if (upper.includes("RESTOR")) return "restoring"
     return "completed"
   }
+
+  const server = overview?.server
+  const database = overview?.database
+  const redis = overview?.redis
+  const tasks = overview?.scheduledTasks ?? []
 
   return (
     <div className="space-y-6">
@@ -183,13 +245,19 @@ export default function AdminSystemPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">
-            GestiÛn del Sistema
+            Gesti√≥n del Sistema
           </h1>
           <p className="text-muted-foreground">
-            Administra backups, cachÈ y mantenimiento del sistema
+            Administra backups, cach√© y mantenimiento del sistema
           </p>
         </div>
       </div>
+
+      {error && (
+        <div className="text-sm text-destructive">
+          {error}
+        </div>
+      )}
 
       {/* System Info Cards */}
       <div className="grid gap-4 md:grid-cols-3">
@@ -203,15 +271,15 @@ export default function AdminSystemPage() {
           <CardContent className="space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Sistema Operativo</span>
-              <span>Ubuntu 22.04 LTS</span>
+              <span>{server?.os ?? "Sin datos"}</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Node.js</span>
-              <span>v20.10.0</span>
+              <span className="text-muted-foreground">Runtime</span>
+              <span>{server?.runtime ?? "Java"}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Uptime</span>
-              <span className="text-green-600">45 dÌas, 12 horas</span>
+              <span className="text-green-600">{formatUptime(server?.uptimeMs)}</span>
             </div>
           </CardContent>
         </Card>
@@ -226,15 +294,15 @@ export default function AdminSystemPage() {
           <CardContent className="space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Motor</span>
-              <span>PostgreSQL 15.2</span>
+              <span>{database?.engine ?? "Sin datos"}</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">TamaÒo</span>
-              <span>12.4 GB</span>
+              <span className="text-muted-foreground">Tama√±o</span>
+              <span>{formatBytes(database?.sizeBytes ?? 0)}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Conexiones</span>
-              <span>24 / 100</span>
+              <span>{database ? `${database.connections} / ${database.maxConnections}` : "Sin datos"}</span>
             </div>
           </CardContent>
         </Card>
@@ -243,21 +311,21 @@ export default function AdminSystemPage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-base">
               <HardDrive className="h-4 w-4" />
-              CachÈ Redis
+              Cach√© Redis
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Memoria usada</span>
-              <span>2.1 GB / 4 GB</span>
+              <span>{formatBytes(redis?.usedBytes ?? 0)} / {formatBytes(redis?.maxBytes ?? 0)}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Hit Rate</span>
-              <span className="text-green-600">94.5%</span>
+              <span className="text-green-600">{redis?.hitRate ?? 0}%</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Keys</span>
-              <span>45,892</span>
+              <span>{redis?.keys ?? 0}</span>
             </div>
           </CardContent>
         </Card>
@@ -303,9 +371,13 @@ export default function AdminSystemPage() {
             <div className="flex items-center gap-3">
               <CheckCircle className="h-5 w-5 text-green-600" />
               <div>
-                <p className="font-medium text-green-800">Backups autom·ticos activos</p>
+                <p className="font-medium text-green-800">
+                  {latestBackup ? "√öltimo backup registrado" : "Sin backups registrados"}
+                </p>
                 <p className="text-sm text-green-600">
-                  PrÛximo backup programado: Hoy a las 22:00
+                  {latestBackup
+                    ? `√öltimo backup: ${formatDate(latestBackup.createdAt)}`
+                    : "A√∫n no se ha generado un backup"}
                 </p>
               </div>
             </div>
@@ -316,7 +388,7 @@ export default function AdminSystemPage() {
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium">Almacenamiento de backups</span>
               <span className="text-sm text-muted-foreground">
-                {formatBytes(backups.reduce((sum, b) => sum + (b.size || 0), 0))} / 100 GB
+                {formatBytes(backupTotalBytes)} / {storageTotalBytes ? formatBytes(storageTotalBytes) : "Sin datos"}
               </span>
             </div>
             <Progress value={backupsStorageUsage} className="h-2" />
@@ -327,7 +399,7 @@ export default function AdminSystemPage() {
             <div className="grid grid-cols-5 gap-4 px-4 py-2 text-sm font-medium text-muted-foreground border-b">
               <span>Fecha</span>
               <span>Tipo</span>
-              <span>TamaÒo</span>
+              <span>Tama√±o</span>
               <span>Estado</span>
               <span className="text-right">Acciones</span>
             </div>
@@ -342,7 +414,7 @@ export default function AdminSystemPage() {
                 </span>
                 <span>
                   <Badge variant="secondary">
-                    Sistema
+                    {backup.type ?? "Sistema"}
                   </Badge>
                 </span>
                 <span className="text-sm">{formatBytes(backup.size)}</span>
@@ -351,15 +423,23 @@ export default function AdminSystemPage() {
                     <Badge className="bg-green-100 text-green-700">Completado</Badge>
                   ) : normalizeStatus(backup.status) === "in-progress" ? (
                     <Badge className="bg-blue-100 text-blue-700">En progreso</Badge>
+                  ) : normalizeStatus(backup.status) === "restoring" ? (
+                    <Badge className="bg-amber-100 text-amber-700">Restaurando</Badge>
                   ) : (
                     <Badge className="bg-red-100 text-red-700">Fallido</Badge>
                   )}
                 </span>
                 <div className="flex justify-end gap-2">
-                  <Button variant="ghost" size="sm">
+                  <Button variant="ghost" size="sm" disabled={!backup.downloadUrl} onClick={() => backup.downloadUrl && window.open(backup.downloadUrl, "_blank")}>
                     <Download className="h-4 w-4" />
                   </Button>
-                  <Button variant="ghost" size="sm" className="text-destructive">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive"
+                    onClick={() => handleDeleteBackup(backup.id)}
+                    disabled={isDeleting === backup.id}
+                  >
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
@@ -382,16 +462,16 @@ export default function AdminSystemPage() {
             Acciones de Mantenimiento
           </CardTitle>
           <CardDescription>
-            Tareas de optimizaciÛn y limpieza del sistema
+            Tareas de optimizaci√≥n y limpieza del sistema
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="flex items-center justify-between p-4 rounded-lg border">
               <div>
-                <p className="font-medium">Limpiar CachÈ</p>
+                <p className="font-medium">Limpiar Cach√©</p>
                 <p className="text-sm text-muted-foreground">
-                  Elimina datos en cachÈ obsoletos
+                  Elimina datos en cach√© obsoletos
                 </p>
               </div>
               <Button variant="outline" onClick={handleClearCache} disabled={isClearingCache}>
@@ -417,7 +497,7 @@ export default function AdminSystemPage() {
               <div>
                 <p className="font-medium">Limpiar Logs Antiguos</p>
                 <p className="text-sm text-muted-foreground">
-                  Elimina logs de m·s de 30 dÌas
+                  Elimina logs de m√°s de 30 d√≠as
                 </p>
               </div>
               <Button variant="outline" onClick={handleCleanupLogs} disabled={isCleaningLogs}>
@@ -428,9 +508,9 @@ export default function AdminSystemPage() {
 
             <div className="flex items-center justify-between p-4 rounded-lg border">
               <div>
-                <p className="font-medium">Regenerar Õndices de B˙squeda</p>
+                <p className="font-medium">Regenerar √çndices de B√∫squeda</p>
                 <p className="text-sm text-muted-foreground">
-                  Reconstruye Ìndices FTS
+                  Reconstruye √≠ndices FTS
                 </p>
               </div>
               <Button variant="outline" onClick={handleReindexSearch} disabled={isReindexing}>
@@ -451,31 +531,29 @@ export default function AdminSystemPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3">
-            {[
-              { name: "Backup diario", schedule: "Todos los dÌas a las 22:00", status: "active" },
-              { name: "Limpieza de cachÈ", schedule: "Cada 6 horas", status: "active" },
-              { name: "SincronizaciÛn MeSH", schedule: "Cada domingo a las 03:00", status: "active" },
-              { name: "Reporte semanal", schedule: "Cada lunes a las 08:00", status: "active" },
-              { name: "VerificaciÛn de integridad", schedule: "Cada dÌa a las 04:00", status: "active" },
-            ].map((task, index) => (
-              <div
-                key={index}
-                className="flex items-center justify-between p-3 rounded-lg bg-muted/30"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="h-2 w-2 rounded-full bg-green-500" />
-                  <div>
-                    <p className="font-medium">{task.name}</p>
-                    <p className="text-sm text-muted-foreground">{task.schedule}</p>
+          {tasks.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No hay tareas programadas.</p>
+          ) : (
+            <div className="space-y-3">
+              {tasks.map((task, index) => (
+                <div
+                  key={index}
+                  className="flex items-center justify-between p-3 rounded-lg bg-muted/30"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="h-2 w-2 rounded-full bg-green-500" />
+                    <div>
+                      <p className="font-medium">{task.name}</p>
+                      <p className="text-sm text-muted-foreground">{task.schedule}</p>
+                    </div>
                   </div>
+                  <Badge variant="outline" className="text-green-600 border-green-300">
+                    {task.status ?? "Activo"}
+                  </Badge>
                 </div>
-                <Badge variant="outline" className="text-green-600 border-green-300">
-                  Activo
-                </Badge>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

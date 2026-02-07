@@ -1,4 +1,4 @@
-"use client"
+ï»¿"use client"
 
 import type React from "react"
 import { useEffect, useState } from "react"
@@ -6,6 +6,7 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/auth-context"
 import { AdminProvider } from "@/contexts/admin-context"
+import { adminSystemApi } from "@/lib/admin-system"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
@@ -36,11 +37,11 @@ import { cn } from "@/lib/utils"
 
 const adminNavItems = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/users", label: "Gestión de Usuarios", icon: Users },
-  { href: "/admin/audit", label: "Auditoría", icon: FileText },
+  { href: "/admin/users", label: "GestiÃ³n de Usuarios", icon: Users },
+  { href: "/admin/audit", label: "AuditorÃ­a", icon: FileText },
   { href: "/admin/system", label: "Sistema", icon: Server },
   { href: "/admin/health", label: "Salud del Sistema", icon: Activity },
-  { href: "/admin/settings", label: "Configuración", icon: Settings },
+  { href: "/admin/settings", label: "ConfiguraciÃ³n", icon: Settings },
 ]
 
 export default function AdminLayout({
@@ -52,6 +53,8 @@ export default function AdminLayout({
   const pathname = usePathname()
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [alertCount, setAlertCount] = useState(0)
+  const [systemStatus, setSystemStatus] = useState<"online" | "warning" | "offline">("online")
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -62,12 +65,37 @@ export default function AdminLayout({
     }
   }, [isAuthenticated, isLoading, router, user])
 
+  useEffect(() => {
+    let isMounted = true
+    const loadAdminStatus = async () => {
+      if (!isAuthenticated || user?.role !== "admin") return
+      try {
+        const [health, alerts] = await Promise.all([
+          adminSystemApi.getHealth(),
+          adminSystemApi.getAlerts(),
+        ])
+        if (!isMounted) return
+        const status =
+          String(health?.status ?? "UP").toUpperCase() === "UP" ? "online" : "warning"
+        setSystemStatus(status)
+        setAlertCount(alerts?.count ?? alerts?.alerts?.length ?? 0)
+      } catch {
+        if (!isMounted) return
+        setSystemStatus("warning")
+      }
+    }
+    loadAdminStatus()
+    return () => {
+      isMounted = false
+    }
+  }, [isAuthenticated, user?.role])
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="animate-pulse flex flex-col items-center gap-4">
           <Shield className="h-12 w-12 text-primary" />
-          <p className="text-muted-foreground">Cargando panel de administración...</p>
+          <p className="text-muted-foreground">Cargando panel de administraciÃ³n...</p>
         </div>
       </div>
     )
@@ -143,9 +171,31 @@ export default function AdminLayout({
             <HardDrive className="h-5 w-5 text-destructive" />
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-foreground">Estado del Sistema</p>
-              <p className="text-xs text-green-600">Operativo</p>
+              <p
+                className={`text-xs ${
+                  systemStatus === "online"
+                    ? "text-green-600"
+                    : systemStatus === "warning"
+                      ? "text-amber-600"
+                      : "text-red-600"
+                }`}
+              >
+                {systemStatus === "online"
+                  ? "Operativo"
+                  : systemStatus === "warning"
+                    ? "Advertencia"
+                    : "No disponible"}
+              </p>
             </div>
-            <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+            <div
+              className={`h-2 w-2 rounded-full animate-pulse ${
+                systemStatus === "online"
+                  ? "bg-green-500"
+                  : systemStatus === "warning"
+                    ? "bg-amber-500"
+                    : "bg-red-500"
+              }`}
+            />
           </div>
         </div>
       </aside>
@@ -166,10 +216,10 @@ export default function AdminLayout({
               </Button>
               <div className="hidden sm:block">
                 <h1 className="text-lg font-semibold text-foreground">
-                  Panel de Administración
+                  Panel de AdministraciÃ³n
                 </h1>
                 <p className="text-xs text-muted-foreground">
-                  Gestión completa del sistema EDUCEARCH
+                  GestiÃ³n completa del sistema EDUCEARCH
                 </p>
               </div>
             </div>
@@ -177,9 +227,11 @@ export default function AdminLayout({
             <div className="flex items-center gap-3">
               <Button variant="ghost" size="icon" className="relative">
                 <Bell className="h-5 w-5" />
-                <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-destructive text-[10px] font-medium text-white flex items-center justify-center">
-                  5
-                </span>
+                {alertCount > 0 && (
+                  <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-destructive text-[10px] font-medium text-white flex items-center justify-center">
+                    {alertCount > 9 ? "9+" : alertCount}
+                  </span>
+                )}
               </Button>
 
               <DropdownMenu>
@@ -202,7 +254,7 @@ export default function AdminLayout({
                   <DropdownMenuSeparator />
                   <DropdownMenuItem>
                     <Settings className="mr-2 h-4 w-4" />
-                    Configuración
+                    ConfiguraciÃ³n
                   </DropdownMenuItem>
                   <DropdownMenuItem>
                     <Database className="mr-2 h-4 w-4" />
@@ -211,7 +263,7 @@ export default function AdminLayout({
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={logout} className="text-destructive">
                     <LogOut className="mr-2 h-4 w-4" />
-                    Cerrar Sesión
+                    Cerrar SesiÃ³n
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

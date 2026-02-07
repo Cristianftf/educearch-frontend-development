@@ -70,10 +70,10 @@ const DEFAULT_CONFIG: SystemConfig = {
       communicate: 80,
     },
     feedbackMessages: {
-      excellent: "Excelente desempeÒo",
+      excellent: "Excelente desempe√±o",
       good: "Buen trabajo",
       fair: "Necesitas mejorar",
-      poor: "Requiere atenciÛn",
+      poor: "Requiere atenci√≥n",
     },
   },
 }
@@ -195,7 +195,7 @@ export function SystemConfigAdvanced() {
       setError(
         err instanceof Error
           ? err.message
-          : "Error al cargar configuraciÛn"
+          : "Error al cargar configuraci√≥n"
       )
       setConfig(DEFAULT_CONFIG)
     } finally {
@@ -235,7 +235,7 @@ export function SystemConfigAdvanced() {
       const payload = toApiConfig(config, apiConfig)
       await adminSystemApi.updateSettings(payload)
       setApiConfig(payload)
-      setSuccess("‚úÖ ConfiguraciÛn guardada exitosamente")
+      setSuccess("√¢≈ì‚Ä¶ Configuraci√≥n guardada exitosamente")
       setTimeout(() => setSuccess(null), 3000)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al guardar")
@@ -260,9 +260,9 @@ export function SystemConfigAdvanced() {
           ...prev,
           pubmed: { ...prev.pubmed, testStatus: "success" },
         }))
-        setSuccess("‚úÖ ConexiÛn a PubMed verificada")
+        setSuccess("√¢≈ì‚Ä¶ Conexi√≥n a PubMed verificada")
       } else {
-        throw new Error("ConexiÛn fallida")
+        throw new Error("Conexi√≥n fallida")
       }
     } catch (err) {
       setConfig((prev) => ({
@@ -270,7 +270,7 @@ export function SystemConfigAdvanced() {
         pubmed: { ...prev.pubmed, testStatus: "failed" },
       }))
       setError(
-        err instanceof Error ? err.message : "Error al probar conexiÛn"
+        err instanceof Error ? err.message : "Error al probar conexi√≥n"
       )
     }
   }
@@ -279,7 +279,7 @@ export function SystemConfigAdvanced() {
     return (
       <div className="flex items-center justify-center p-8">
         <Loader2 className="w-6 h-6 animate-spin text-blue-500 mr-2" />
-        Cargando configuraciÛn...
+        Cargando configuraci√≥n...
       </div>
     )
   }
@@ -304,9 +304,9 @@ export function SystemConfigAdvanced() {
       {/* PubMed Configuration */}
       <Card>
         <CardHeader>
-          <CardTitle>ConfiguraciÛn de PubMed API</CardTitle>
+          <CardTitle>Configuraci√≥n de PubMed API</CardTitle>
           <CardDescription>
-            Gestiona la conexiÛn a PubMed y lÌmites de uso
+            Gestiona la conexi√≥n a PubMed y l√≠mites de uso
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -354,16 +354,16 @@ export function SystemConfigAdvanced() {
               </Button>
             </div>
             <p className="text-xs text-gray-600">
-              {config.pubmed.testStatus === "success" && "‚úÖ ConexiÛn verificada"}
-              {config.pubmed.testStatus === "failed" && "‚ùå ConexiÛn fallida - revisa tu API Key"}
-              {config.pubmed.testStatus === "pending" && "Haz click en Probar para verificar la conexiÛn"}
+              {config.pubmed.testStatus === "success" && "√¢≈ì‚Ä¶ Conexi√≥n verificada"}
+              {config.pubmed.testStatus === "failed" && "√¢¬ù≈í Conexi√≥n fallida - revisa tu API Key"}
+              {config.pubmed.testStatus === "pending" && "Haz click en Probar para verificar la conexi√≥n"}
             </p>
           </div>
 
           {/* Rate Limit */}
           <div className="space-y-2">
             <Label htmlFor="rate-limit">
-              LÌmite de Llamadas por DÌa: <span className="font-semibold">{config.pubmed.rateLimitPerDay.toLocaleString()}</span>
+              L√≠mite de Llamadas por D√≠a: <span className="font-semibold">{config.pubmed.rateLimitPerDay.toLocaleString()}</span>
             </Label>
             <Slider
               value={[config.pubmed.rateLimitPerDay]}
@@ -379,7 +379,7 @@ export function SystemConfigAdvanced() {
               className="w-full"
             />
             <p className="text-xs text-gray-600">
-              Establece un lÌmite diario para evitar sobrecuotas
+              Establece un l√≠mite diario para evitar sobrecuotas
             </p>
           </div>
 
@@ -402,7 +402,7 @@ export function SystemConfigAdvanced() {
               className="w-full"
             />
             <p className="text-xs text-gray-600">
-              Tiempo que se guardan resultados en cachÈ (1-168 horas)
+              Tiempo que se guardan resultados en cach√© (1-168 horas)
             </p>
           </div>
         </CardContent>
@@ -411,9 +411,9 @@ export function SystemConfigAdvanced() {
       {/* AI Models Configuration */}
       <Card>
         <CardHeader>
-          <CardTitle>ConfiguraciÛn de Modelos IA</CardTitle>
+          <CardTitle>Configuraci√≥n de Modelos IA</CardTitle>
           <CardDescription>
-            Ajusta par·metros de los modelos de lenguaje
+            Ajusta par√°metros de los modelos de lenguaje
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -430,9 +430,9 @@ export function SystemConfigAdvanced() {
                 <SelectValue placeholder="Selecciona modelo" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="gpt-4">GPT-4 (m·s preciso)</SelectItem>
+                <SelectItem value="gpt-4">GPT-4 (m√°s preciso)</SelectItem>
                 <SelectItem value="gpt-4-turbo">GPT-4 Turbo (balanceado)</SelectItem>
-                <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo (r·pido)</SelectItem>
+                <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo (r√°pido)</SelectItem>
                 <SelectItem value="claude-3-opus">Claude 3 Opus</SelectItem>
               </SelectContent>
             </Select>
@@ -457,7 +457,7 @@ export function SystemConfigAdvanced() {
               className="w-full"
             />
             <p className="text-xs text-gray-600">
-              0 = determinÌstico, 1 = balanceado, 2 = muy creativo
+              0 = determin√≠stico, 1 = balanceado, 2 = muy creativo
             </p>
           </div>
 
@@ -503,7 +503,7 @@ export function SystemConfigAdvanced() {
               className="w-full"
             />
             <p className="text-xs text-gray-600">
-              M·ximo de tokens que el modelo puede procesar
+              M√°ximo de tokens que el modelo puede procesar
             </p>
           </div>
 
@@ -526,7 +526,7 @@ export function SystemConfigAdvanced() {
               className="w-full"
             />
             <p className="text-xs text-gray-600">
-              M·ximo de tokens que generar· el modelo en respuestas
+              M√°ximo de tokens que generar√° el modelo en respuestas
             </p>
           </div>
         </CardContent>
@@ -535,7 +535,7 @@ export function SystemConfigAdvanced() {
       {/* Pedagogical Configuration */}
       <Card>
         <CardHeader>
-          <CardTitle>ConfiguraciÛn PedagÛgica</CardTitle>
+          <CardTitle>Configuraci√≥n Pedag√≥gica</CardTitle>
           <CardDescription>
             Define umbrales de competencia y mensajes de feedback
           </CardDescription>
@@ -570,7 +570,7 @@ export function SystemConfigAdvanced() {
                     className="w-full"
                   />
                   <p className="text-xs text-gray-600">
-                    PuntuaciÛn mÌnima para considerar esta competencia como dominada
+                    Puntuaci√≥n m√≠nima para considerar esta competencia como dominada
                   </p>
                 </div>
               )
@@ -619,7 +619,7 @@ export function SystemConfigAdvanced() {
         </Button>
         <Button onClick={handleSave} disabled={isSaving} className="gap-2">
           {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
-          {isSaving ? "Guardando..." : "Guardar ConfiguraciÛn"}
+          {isSaving ? "Guardando..." : "Guardar Configuraci√≥n"}
         </Button>
       </div>
     </div>

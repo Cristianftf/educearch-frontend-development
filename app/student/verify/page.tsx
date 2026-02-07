@@ -2,7 +2,8 @@
 
 import React from "react"
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import type { VerificationResult, VerificationStatus } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -44,7 +45,7 @@ const statusConfig: Record<
   { label: string; icon: React.ElementType; color: string; bgColor: string }
 > = {
   verified: {
-    label: 'Evidencia sólida encontrada',
+    label: 'Evidencia sÃ³lida encontrada',
     icon: CheckCircle2,
     color: 'text-success',
     bgColor: 'bg-success/10',
@@ -56,7 +57,7 @@ const statusConfig: Record<
     bgColor: 'bg-warning/10',
   },
   misinformation: {
-    label: 'Posible desinformación',
+    label: 'Posible desinformaciÃ³n',
     icon: XCircle,
     color: 'text-destructive',
     bgColor: 'bg-destructive/10',
@@ -70,6 +71,7 @@ const statusConfig: Record<
 }
 
 export default function VerifyPage() {
+  const router = useRouter()
   const [inputMode, setInputMode] = useState<'text' | 'url'>('text')
   const [claimText, setClaimText] = useState('')
   const [claimUrl, setClaimUrl] = useState('')
@@ -82,6 +84,10 @@ export default function VerifyPage() {
     isVerifying,
     error: verifyError,
   } = useStudentVerify()
+
+  useEffect(() => {
+    loadHistory(1, 10)
+  }, [loadHistory])
 
   const handleVerify = useCallback(async () => {
     const claim = inputMode === 'text' ? claimText : claimUrl
@@ -109,7 +115,7 @@ export default function VerifyPage() {
         await loadHistory(1, 10)
       }
     } catch (err) {
-      setError('Error al verificar. Intenta de nuevo m�s tarde.')
+      setError('Error al verificar. Intenta de nuevo más tarde.')
       console.error('[v0] Verification error:', err)
     }
   }, [inputMode, claimText, claimUrl, verifyClaim, loadHistory])
@@ -126,7 +132,7 @@ export default function VerifyPage() {
           Infodemia Detector
         </h1>
         <p className="text-muted-foreground mt-1">
-          Verifica claims médicos contra la evidencia científica disponible
+          Verifica claims mÃ©dicos contra la evidencia cientÃ­fica disponible
         </p>
       </div>
 
@@ -135,9 +141,9 @@ export default function VerifyPage() {
         <div className="lg:col-span-2 space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Verificar información</CardTitle>
+              <CardTitle className="text-lg">Verificar informaciÃ³n</CardTitle>
               <CardDescription>
-                Ingresa el claim médico que deseas verificar o proporciona una URL
+                Ingresa el claim mÃ©dico que deseas verificar o proporciona una URL
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -156,7 +162,7 @@ export default function VerifyPage() {
                 <TabsContent value="text" className="mt-4 space-y-3">
                   <div className="relative">
                     <Textarea
-                      placeholder="Escribe o pega aquí el claim médico que deseas verificar..."
+                      placeholder="Escribe o pega aquÃ­ el claim mÃ©dico que deseas verificar..."
                       className="min-h-[150px] resize-none"
                       value={claimText}
                       onChange={(e) => setClaimText(e.target.value)}
@@ -170,7 +176,7 @@ export default function VerifyPage() {
 
                 <TabsContent value="url" className="mt-4 space-y-3">
                   <div className="space-y-2">
-                    <Label>URL del artículo o publicación</Label>
+                    <Label>URL del artÃ­culo o publicaciÃ³n</Label>
                     <Input
                       type="url"
                       placeholder="https://ejemplo.com/articulo-salud"
@@ -180,7 +186,7 @@ export default function VerifyPage() {
                     />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Analizaremos el contenido de la página para extraer claims verificables
+                    Analizaremos el contenido de la pÃ¡gina para extraer claims verificables
                   </p>
                 </TabsContent>
               </Tabs>
@@ -209,7 +215,7 @@ export default function VerifyPage() {
                 ) : (
                   <>
                     <ShieldCheck className="mr-2 h-4 w-4" />
-                    Verificar claim médico
+                    Verificar claim mÃ©dico
                   </>
                 )}
               </Button>
@@ -220,7 +226,7 @@ export default function VerifyPage() {
           {safeResult && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">Resultado de la verificación</CardTitle>
+                <CardTitle className="text-lg">Resultado de la verificaciÃ³n</CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
                 {/* Traffic Light */}
@@ -303,7 +309,7 @@ export default function VerifyPage() {
                           ))}
                           {safeResult.supportingEvidence.length === 0 && (
                             <p className="text-sm text-muted-foreground text-center py-4">
-                              No se encontró evidencia a favor
+                              No se encontrÃ³ evidencia a favor
                             </p>
                           )}
                         </div>
@@ -342,7 +348,7 @@ export default function VerifyPage() {
                           ))}
                           {safeResult.contradictingEvidence.length === 0 && (
                             <p className="text-sm text-muted-foreground text-center py-4">
-                              No se encontró evidencia en contra
+                              No se encontrÃ³ evidencia en contra
                             </p>
                           )}
                         </div>
@@ -357,7 +363,7 @@ export default function VerifyPage() {
                     <AccordionTrigger className="text-base">
                       <div className="flex items-center gap-2">
                         <HelpCircle className="h-4 w-4" />
-                        ¿Por qué este resultado?
+                        Â¿Por quÃ© este resultado?
                       </div>
                     </AccordionTrigger>
                     <AccordionContent>
@@ -395,7 +401,7 @@ export default function VerifyPage() {
                   result={safeResult}
                   onSearchClick={(term) => {
                     setClaimText(term)
-                    window.location.href = '/student/search'
+                    router.push('/student/search')
                   }}
                 />
               </CardContent>
@@ -415,16 +421,16 @@ export default function VerifyPage() {
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted-foreground">
               <p>
-                <strong className="text-foreground">Se específico:</strong> Claims concretos
+                <strong className="text-foreground">Se especÃ­fico:</strong> Claims concretos
                 generan mejores resultados.
               </p>
               <p>
                 <strong className="text-foreground">Incluye contexto:</strong> Menciona
-                condiciones, tratamientos o poblaciones específicas.
+                condiciones, tratamientos o poblaciones especÃ­ficas.
               </p>
               <p>
-                <strong className="text-foreground">Evita opiniones:</strong> Enfócate en
-                afirmaciones verificables sobre hechos médicos.
+                <strong className="text-foreground">Evita opiniones:</strong> EnfÃ³cate en
+                afirmaciones verificables sobre hechos mÃ©dicos.
               </p>
             </CardContent>
           </Card>
@@ -479,18 +485,18 @@ export default function VerifyPage() {
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
                 <TrendingUp className="h-5 w-5" />
-                Pirámide de evidencia
+                PirÃ¡mide de evidencia
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-2 text-sm">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-success" />
-                  <span>Nivel 1-2: Revisiones sistemáticas</span>
+                  <span>Nivel 1-2: Revisiones sistemÃ¡ticas</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-chart-1" />
-                  <span>Nivel 3-4: Ensayos clínicos</span>
+                  <span>Nivel 3-4: Ensayos clÃ­nicos</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-warning" />
@@ -498,12 +504,12 @@ export default function VerifyPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-destructive" />
-                  <span>Nivel 7+: Opinión de expertos</span>
+                  <span>Nivel 7+: OpiniÃ³n de expertos</span>
                 </div>
               </div>
               <Button variant="outline" className="w-full mt-4 bg-transparent" size="sm" asChild>
                 <a href="/student/pyramid">
-                  Ver pirámide interactiva
+                  Ver pirÃ¡mide interactiva
                   <ExternalLink className="ml-2 h-3 w-3" />
                 </a>
               </Button>

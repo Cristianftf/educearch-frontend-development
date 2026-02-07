@@ -268,7 +268,9 @@ public class SearchController {
         Integer yearFrom = asInteger(filters.get("yearFrom"));
         Integer yearTo = asInteger(filters.get("yearTo"));
         if (yearFrom != null || yearTo != null) {
-            mapped.put("yearRange", new Integer[] { yearFrom, yearTo });
+            Integer start = yearFrom != null ? yearFrom : yearTo;
+            Integer end = yearTo != null ? yearTo : yearFrom;
+            mapped.put("yearRange", new Integer[] { start, end });
         }
         List<String> studyTypes = asStringList(filters.get("studyTypes"));
         if (!studyTypes.isEmpty()) {
@@ -277,6 +279,10 @@ public class SearchController {
         String language = filters.get("language") != null ? filters.get("language").toString() : null;
         if (language != null && !language.isBlank()) {
             mapped.put("languages", List.of(language));
+        }
+        Integer minSampleSize = asInteger(filters.get("minSampleSize"));
+        if (minSampleSize != null) {
+            mapped.put("minSampleSize", minSampleSize);
         }
         return mapped;
     }

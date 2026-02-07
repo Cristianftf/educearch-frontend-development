@@ -221,17 +221,130 @@ export interface SearchHedge {
 // ============ ADMINISTRACIÓN ============
 
 export interface SystemHealth {
+  status?: string
   cpu: number
   memory: number
+  disk?: number
   dbConnections: number
   cacheHitRatio: number
   apiLatency: {
     p50: number
+    p75?: number
     p95: number
     p99: number
   }
   activeUsers: number
   requestsPerMinute: number
+  services?: SystemServiceStatus[]
+  pubmedUsage?: {
+    used: number
+    limit: number
+    percent: number
+  }
+}
+
+export interface SystemServiceStatus {
+  name: string
+  status: 'online' | 'warning' | 'offline'
+  latency?: number
+  uptime?: string
+  lastCheck?: string
+}
+
+export interface AdminDashboardData {
+  stats: {
+    totalUsers: number
+    students: number
+    professors: number
+    admins: number
+    activeStudents: number
+    searchesToday: number
+    searchesYesterday: number
+    searchesChange: number
+    searchesChangePercent: number
+    usersLast30Days: number
+    usersPrev30Days: number
+    usersChangePercent: number
+  }
+  resources: {
+    cpu: number
+    memory: number
+    disk: number
+    latency: {
+      p50: number
+      p75?: number
+      p95: number
+      p99: number
+    }
+    pubmedUsage: {
+      used: number
+      limit: number
+      percent: number
+    }
+  }
+  systemStatus: {
+    status: string
+    lastCheck: string
+    uptimeMs: number
+  }
+  services: SystemServiceStatus[]
+  alerts: Array<{
+    id: string
+    type: 'info' | 'warning' | 'success' | 'error'
+    message: string
+    timestamp?: string
+  }>
+  activity: {
+    users: Array<{
+      id: string
+      action: string
+      user?: string
+      timestamp: string
+    }>
+    system: Array<{
+      id: string
+      action: string
+      user?: string
+      timestamp: string
+    }>
+    api: Array<{
+      endpoint: string
+      calls: number
+      status: string
+    }>
+  }
+}
+
+export interface SystemOverview {
+  timestamp: string
+  server: {
+    os: string
+    java: string
+    runtime: string
+    uptimeMs: number
+  }
+  database: {
+    engine: string
+    sizeBytes: number
+    connections: number
+    maxConnections: number
+  }
+  redis: {
+    available: boolean
+    usedBytes: number
+    maxBytes: number
+    hitRate: number
+    keys: number
+  }
+  storage?: {
+    totalBytes: number
+    freeBytes: number
+  }
+  scheduledTasks: Array<{
+    name: string
+    schedule: string
+    status: string
+  }>
 }
 
 export interface AuditLog {

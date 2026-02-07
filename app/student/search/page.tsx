@@ -43,6 +43,7 @@ import {
   GripVertical,
   Palette,
   Settings,
+  CheckCircle2,
 } from 'lucide-react'
 import QueryBuilder from '@/components/query-builder'
 import { useStudent } from '@/contexts/student-context'
@@ -60,10 +61,105 @@ const STUDY_TYPES = [
   { id: 'case_report', label: 'Reporte de Caso' },
 ]
 
-interface QueryBlock {
-  id: string
-  type: 'term' | 'operator' | 'group'
-  value: MeshTerm | BooleanOperator | QueryBlock[]
+const STUDY_TYPE_IDS = new Set(STUDY_TYPES.map((type) => type.id))
+const YEAR_MIN = 2000
+const YEAR_MAX = 2026
+
+type NormalizedSearchFilters = Required<
+  Pick<SearchFilters, 'yearRange' | 'studyTypes' | 'minSampleSize'>
+> &
+  Pick<SearchFilters, 'languages'>
+
+const DEFAULT_FILTERS: NormalizedSearchFilters = {
+  yearRange: [2018, 2026],
+  studyTypes: [],
+  minSampleSize: 0,
+}
+
+const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
+const normalizeYearRange = (range?: SearchFilters['yearRange']): [number, number] => {
+  if (!Array.isArray(range) || range.length !== 2) {
+    return DEFAULT_FILTERS.yearRange
+  }
+  const [fromRaw, toRaw] = range
+  const from =
+    typeof fromRaw === 'number' && Number.isFinite(fromRaw) ? fromRaw : DEFAULT_FILTERS.yearRange[0]
+  const to =
+    typeof toRaw === 'number' && Number.isFinite(toRaw) ? toRaw : DEFAULT_FILTERS.yearRange[1]
+  const clampedFrom = clampNumber(from, YEAR_MIN, YEAR_MAX)
+  const clampedTo = clampNumber(to, YEAR_MIN, YEAR_MAX)
+  return clampedFrom <= clampedTo ? [clampedFrom, clampedTo] : [clampedTo, clampedFrom]
+}
+
+const normalizeStudyTypes = (studyTypes?: SearchFilters['studyTypes']) => {
+  if (!Array.isArray(studyTypes)) return []
+  const unique = new Set<string>()
+  for (const entry of studyTypes) {
+    if (typeof entry === 'string' && STUDY_TYPE_IDS.has(entry)) {
+      unique.add(entry)
+    }
+  }
+  return Array.from(unique)
+}
+
+const normalizeFilters = (filters?: SearchFilters): NormalizedSearchFilters => ({
+  yearRange: normalizeYearRange(filters?.yearRange),
+  studyTypes: normalizeStudyTypes(filters?.studyTypes),
+  minSampleSize:
+    typeof filters?.minSampleSize === 'number' && Number.isFinite(filters.minSampleSize)
+      ? clampNumber(filters.minSampleSize, 0, 1000)
+      : DEFAULT_FILTERS.minSampleSize,
+  languages: filters?.languages,
+})
+
+const normalizeStudyTypeValue = (value: string) => {
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  switch (normalized) {
+    case 'systematic_review':
+    case 'systematicreview':
+      return 'systematic_review'
+    case 'meta_analysis':
+    case 'metaanalysis':
+      return 'meta_analysis'
+    case 'rct':
+    case 'randomized_controlled_trial':
+    case 'randomizedcontrolledtrial':
+      return 'rct'
+    case 'cohort':
+    case 'cohort_study':
+    case 'cohortstudy':
+      return 'cohort'
+    case 'case_control':
+    case 'casecontrol':
+      return 'case_control'
+    case 'case_report':
+    case 'casereport':
+      return 'case_report'
+    default:
+      return normalized
+  }
+}
+
+const areOperatorsEqual = (a?: BooleanOperator[], b?: BooleanOperator[]) => {
+  if (a === b) return true
+  if (!a || !b) return false
+  if (a.length !== b.length) return false
+  return a.every((item, index) => item === b[index])
+}
+
+const areTermsEqual = (a?: MeshTerm[], b?: MeshTerm[]) => {
+  if (a === b) return true
+  if (!a || !b) return false
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i]
+    const right = b[i]
+    if (left?.id !== right?.id || left?.term !== right?.term) {
+      return false
+    }
+  }
+  return true
 }
 
 export default function SearchPage() {
@@ -78,30 +174,33 @@ export default function SearchPage() {
     terms: MeshTerm[]
     operators: BooleanOperator[]
   } | null>(null)
-  const DEFAULT_FILTERS: SearchFilters = {
-    yearRange: [2018, 2026],
-    studyTypes: [],
-    minSampleSize: 0,
-  }
-
-  const normalizeFilters = useCallback(
-    (filters?: SearchFilters): SearchFilters => ({
-      yearRange: filters?.yearRange ?? DEFAULT_FILTERS.yearRange,
-      studyTypes: filters?.studyTypes ?? DEFAULT_FILTERS.studyTypes,
-      minSampleSize: filters?.minSampleSize ?? DEFAULT_FILTERS.minSampleSize,
-    }),
-    []
-  )
-
-  const [filters, setFilters] = useState<SearchFilters>(() => normalizeFilters())
+  const [filters, setFilters] = useState<NormalizedSearchFilters>(() => normalizeFilters())
   const { searchHistory, loadHistory, executeSearch: executeSearchHook } = useStudentSearch()
   const [currentSession, setCurrentSession] = useState<SearchSession | null>(null)
   const [isSearching, setIsSearching] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedArticle, setSelectedArticle] = useState<SearchResult | null>(null)
   const [selectedResults, setSelectedResults] = useState<SearchResult[]>([])
+  const [exportMessage, setExportMessage] = useState<string | null>(null)
   const { addActivity, addSavedSearch, setSavedSearches, toggleSearchFavorite } = useStudent()
   const router = useRouter()
+
+  const handleVisualQueryChange = useCallback(
+    (data: { rawQuery: string; terms: MeshTerm[]; operators: BooleanOperator[] }) => {
+      setVisualQuery((prev) => {
+        if (
+          prev &&
+          prev.rawQuery === data.rawQuery &&
+          areTermsEqual(prev.terms, data.terms) &&
+          areOperatorsEqual(prev.operators, data.operators)
+        ) {
+          return prev
+        }
+        return data
+      })
+    },
+    []
+  )
 
   // Debounced MeSH suggestions
   useEffect(() => {
@@ -218,13 +317,28 @@ export default function SearchPage() {
     })
   }, [])
 
+  const addResultSelection = useCallback((result: SearchResult) => {
+    setSelectedResults((prev) => {
+      if (prev.some((item) => item.id === result.id)) {
+        return prev
+      }
+      return [...prev, result]
+    })
+  }, [])
+
   const exportSelection = useCallback(() => {
     if (selectedResults.length === 0) {
       setError('Selecciona al menos un artÃ­culo para exportar.')
       return
     }
     try {
-      localStorage.setItem('search_selection', JSON.stringify(selectedResults))
+      setError(null)
+      localStorage.setItem(
+        'search_selection_v2',
+        JSON.stringify({ version: 2, items: selectedResults })
+      )
+      setExportMessage('SelecciÃ³n enviada a bibliografÃ­as.')
+      setTimeout(() => setExportMessage(null), 2000)
       router.push('/student/bibliography?source=search')
     } catch (err) {
       console.error('[v0] Error exporting selection:', err)
@@ -241,45 +355,37 @@ export default function SearchPage() {
     }
   }, [toggleSearchFavorite, loadHistory])
 
-  const reuseSearch = useCallback(
-    (query: SearchQuery) => {
-      setSelectedTerms(query.terms)
-      setOperators(query.operators)
-      setFilters(normalizeFilters(query.filters))
-    },
-    [normalizeFilters]
-  )
+  const reuseSearch = useCallback((query: SearchQuery) => {
+    setSelectedTerms(query.terms)
+    setOperators(query.operators)
+    setFilters(normalizeFilters(query.filters))
+  }, [])
 
-  const yearRangeValue = useMemo(
-    () => filters.yearRange ?? DEFAULT_FILTERS.yearRange,
-    [filters.yearRange]
-  )
-  const minSampleValue = useMemo(
-    () => [filters.minSampleSize ?? DEFAULT_FILTERS.minSampleSize],
-    [filters.minSampleSize]
-  )
+  const yearRangeValue = filters.yearRange
+  const minSampleValue = [filters.minSampleSize]
 
   const [yearRangeDraft, setYearRangeDraft] = useState<[number, number]>(yearRangeValue)
   const [minSampleDraft, setMinSampleDraft] = useState<number[]>(minSampleValue)
 
   useEffect(() => {
-    if (
-      yearRangeDraft[0] !== yearRangeValue[0] ||
-      yearRangeDraft[1] !== yearRangeValue[1]
-    ) {
-      setYearRangeDraft(yearRangeValue)
-    }
-  }, [yearRangeDraft, yearRangeValue])
+    setYearRangeDraft((prev) =>
+      prev[0] === yearRangeValue[0] && prev[1] === yearRangeValue[1]
+        ? prev
+        : yearRangeValue
+    )
+  }, [yearRangeValue[0], yearRangeValue[1]])
 
   useEffect(() => {
-    if (minSampleDraft[0] !== minSampleValue[0]) {
-      setMinSampleDraft(minSampleValue)
-    }
-  }, [minSampleDraft, minSampleValue])
+    setMinSampleDraft((prev) =>
+      prev[0] === minSampleValue[0]
+        ? prev
+        : minSampleValue
+    )
+  }, [minSampleValue[0]])
 
   const updateYearRange = useCallback((value: [number, number]) => {
     setFilters((prev) => {
-      const current = prev.yearRange ?? DEFAULT_FILTERS.yearRange
+      const current = prev.yearRange
       if (current[0] === value[0] && current[1] === value[1]) {
         return prev
       }
@@ -289,7 +395,7 @@ export default function SearchPage() {
 
   const updateMinSampleSize = useCallback((value: number) => {
     setFilters((prev) => {
-      const current = prev.minSampleSize ?? DEFAULT_FILTERS.minSampleSize
+      const current = prev.minSampleSize
       if (current === value) {
         return prev
       }
@@ -303,6 +409,29 @@ export default function SearchPage() {
     queryMode === 'visual'
       ? (visualQuery?.terms?.length || 0) > 0
       : selectedTerms.length > 0
+
+  const filteredResults = useMemo(() => {
+    if (!currentSession) return []
+    const [yearFrom, yearTo] = filters.yearRange
+    return currentSession.results.filter((result) => {
+      if (result.year < yearFrom || result.year > yearTo) {
+        return false
+      }
+      if (filters.studyTypes.length > 0) {
+        const normalizedStudyType = result.studyType ? normalizeStudyTypeValue(result.studyType) : ''
+        if (!filters.studyTypes.includes(normalizedStudyType)) {
+          return false
+        }
+      }
+      if (filters.minSampleSize > 0) {
+        const sampleSize = result.sampleSize ?? 0
+        if (sampleSize < filters.minSampleSize) {
+          return false
+        }
+      }
+      return true
+    })
+  }, [currentSession, filters.yearRange, filters.studyTypes, filters.minSampleSize])
 
   return (
     <div className="space-y-6">
@@ -332,9 +461,7 @@ export default function SearchPage() {
             <TabsContent value="visual" className="space-y-6">
               <QueryBuilder
                 availableTerms={suggestions}
-                onQueryChange={(data) => {
-                  setVisualQuery(data)
-                }}
+                onQueryChange={handleVisualQueryChange}
               />
             </TabsContent>
 
@@ -466,6 +593,12 @@ export default function SearchPage() {
                   {error}
                 </div>
               )}
+              {exportMessage && (
+                <div className="mt-4 flex items-center gap-2 text-success text-sm">
+                  <CheckCircle2 className="h-4 w-4" />
+                  {exportMessage}
+                </div>
+              )}
 
               <Button
                 className="w-full mt-4"
@@ -496,7 +629,13 @@ export default function SearchPage() {
                   <div>
                     <CardTitle className="text-lg">Resultados</CardTitle>
                     <CardDescription>
-                      {currentSession.totalResults} artículos encontrados
+                      {filteredResults.length} artículos encontrados
+                      {currentSession.totalResults !== filteredResults.length && (
+                        <span className="text-muted-foreground">
+                          {' '}
+                          (de {currentSession.totalResults} totales)
+                        </span>
+                      )}
                     </CardDescription>
                   </div>
                   <Button variant="outline" size="sm" onClick={exportSelection}>
@@ -507,14 +646,14 @@ export default function SearchPage() {
               <CardContent>
                 <ScrollArea className="h-[500px] pr-4">
                   <div className="space-y-4">
-                    {currentSession.results.map((result) => {
+                    {filteredResults.map((result) => {
                       const isSelected = selectedResults.some((item) => item.id === result.id)
                       return (
-                      <Card
-                        key={result.id}
-                        className="cursor-pointer hover:bg-muted/50 transition-colors"
-                        onClick={() => setSelectedArticle(result)}
-                      >
+                        <Card
+                          key={result.id}
+                          className="cursor-pointer hover:bg-muted/50 transition-colors"
+                          onClick={() => setSelectedArticle(result)}
+                        >
                         <CardContent className="p-4">
                           <div className="flex items-start gap-4">
                             <Checkbox
@@ -570,7 +709,8 @@ export default function SearchPage() {
                           </div>
                         </CardContent>
                       </Card>
-                    ))}
+                      )
+                    })}
                   </div>
                 </ScrollArea>
               </CardContent>
@@ -768,7 +908,7 @@ export default function SearchPage() {
                   <Button
                     className="flex-1"
                     onClick={() => {
-                      toggleResultSelection(selectedArticle)
+                      addResultSelection(selectedArticle)
                       setSelectedArticle(null)
                     }}
                   >

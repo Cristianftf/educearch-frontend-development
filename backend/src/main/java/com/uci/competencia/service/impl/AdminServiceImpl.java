@@ -2,9 +2,12 @@ package com.uci.competencia.service.impl;
 
 import com.uci.competencia.model.dto.request.UserBatchImportDTO;
 import com.uci.competencia.model.entity.User;
+import com.uci.competencia.model.entity.SystemLog;
+import com.uci.competencia.model.enums.ActionType;
 import com.uci.competencia.model.enums.Role;
 import com.uci.competencia.repository.UserRepository;
 import com.uci.competencia.repository.SystemLogRepository;
+import com.uci.competencia.repository.SearchSessionRepository;
 import com.uci.competencia.service.AdminService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,10 +15,18 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.CacheManager;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.sql.DataSource;
+import java.io.File;
+import java.lang.management.ManagementFactory;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,9 +40,14 @@ public class AdminServiceImpl implements AdminService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final SystemLogRepository systemLogRepository;
+    private final SearchSessionRepository searchSessionRepository;
+    private final DataSource dataSource;
 
     @Autowired(required = false)
     private CacheManager cacheManager;
+
+    @Autowired(required = false)
+    private RedisConnectionFactory redisConnectionFactory;
     
     // Almacenamiento en memoria para backups (en producción usar BD)
     private static final Map<String, BackupStatus> backupRegistry = new ConcurrentHashMap<>();
@@ -91,11 +107,130 @@ public class AdminServiceImpl implements AdminService {
     @Override
     public Map<String, Object> getSystemHealth() {
         Map<String, Object> health = new HashMap<>();
-        health.put("status", "UP");
-        health.put("database", "CONNECTED");
-        health.put("cache", cacheManager != null ? "AVAILABLE" : "NOT_CONFIGURED");
+        LocalDateTime now = LocalDateTime.now();
+
+        double cpu = getCpuUsagePercent();
+        double memory = getMemoryUsagePercent();
+        double disk = getDiskUsagePercent();
+        int dbConnections = getDatabaseConnectionCount();
+        double cacheHitRatio = getCacheHitRatio();
+        long activeUsers = userRepository.countByActive(true);
+        long requestsPerMinute = getRequestsPerMinute(now);
+
+        Map<String, Object> latency = computeLatencyPercentiles(now.minusHours(24));
+        Map<String, Object> pubmedUsage = buildPubmedUsage(now);
+        List<Map<String, Object>> services = buildServiceStatuses(latency, pubmedUsage);
+
+        String status = dbConnections > 0 ? "UP" : "DEGRADED";
+        health.put("status", status);
         health.put("timestamp", System.currentTimeMillis());
+        health.put("cpu", cpu);
+        health.put("memory", memory);
+        health.put("disk", disk);
+        health.put("dbConnections", dbConnections);
+        health.put("cacheHitRatio", cacheHitRatio);
+        health.put("apiLatency", latency);
+        health.put("activeUsers", activeUsers);
+        health.put("requestsPerMinute", requestsPerMinute);
+        health.put("services", services);
+        health.put("pubmedUsage", pubmedUsage);
+        health.put("cache", cacheManager != null ? "AVAILABLE" : "NOT_CONFIGURED");
+
         return health;
+    }
+
+    @Override
+    public Map<String, Object> getDashboardData() {
+        Map<String, Object> dashboard = new HashMap<>();
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime startToday = now.toLocalDate().atStartOfDay();
+        LocalDateTime startYesterday = startToday.minusDays(1);
+        LocalDateTime startLast30 = now.minusDays(30);
+        LocalDateTime startPrev30 = now.minusDays(60);
+
+        long searchesToday = searchSessionRepository.countByStartedAtBetween(startToday, now);
+        long searchesYesterday = searchSessionRepository.countByStartedAtBetween(startYesterday, startToday);
+        long searchesChange = searchesToday - searchesYesterday;
+        double searchesChangePercent = calculateChangePercent(searchesToday, searchesYesterday);
+
+        long totalUsers = userRepository.count();
+        long totalStudents = countUsersByRole(Role.ROLE_STUDENT);
+        long totalProfessors = countUsersByRole(Role.ROLE_PROFESSOR);
+        long totalAdmins = countUsersByRole(Role.ROLE_ADMIN);
+        long activeStudents = userRepository.countByRoleAndActive(Role.ROLE_STUDENT, true);
+
+        long usersLast30 = userRepository.countByCreatedAtBetween(startLast30, now);
+        long usersPrev30 = userRepository.countByCreatedAtBetween(startPrev30, startLast30);
+        double usersChangePercent = calculateChangePercent(usersLast30, usersPrev30);
+
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("totalUsers", totalUsers);
+        stats.put("students", totalStudents);
+        stats.put("professors", totalProfessors);
+        stats.put("admins", totalAdmins);
+        stats.put("activeStudents", activeStudents);
+        stats.put("searchesToday", searchesToday);
+        stats.put("searchesYesterday", searchesYesterday);
+        stats.put("searchesChange", searchesChange);
+        stats.put("searchesChangePercent", searchesChangePercent);
+        stats.put("usersLast30Days", usersLast30);
+        stats.put("usersPrev30Days", usersPrev30);
+        stats.put("usersChangePercent", usersChangePercent);
+
+        Map<String, Object> health = getSystemHealth();
+        Map<String, Object> latency = safeMap(health.get("apiLatency"));
+        Map<String, Object> pubmedUsage = safeMap(health.get("pubmedUsage"));
+
+        Map<String, Object> resources = new HashMap<>();
+        resources.put("cpu", health.getOrDefault("cpu", 0));
+        resources.put("memory", health.getOrDefault("memory", 0));
+        resources.put("disk", health.getOrDefault("disk", 0));
+        resources.put("latency", latency);
+        resources.put("pubmedUsage", pubmedUsage);
+
+        Map<String, Object> systemStatus = new HashMap<>();
+        systemStatus.put("status", health.getOrDefault("status", "UP"));
+        systemStatus.put("lastCheck", now.toString());
+        systemStatus.put("uptimeMs", getSystemUptime());
+
+        List<Map<String, Object>> alerts = buildRecentAlerts(now.minusHours(24));
+        Map<String, Object> activity = buildRecentActivity();
+        List<Map<String, Object>> services = safeList(health.get("services"));
+
+        dashboard.put("stats", stats);
+        dashboard.put("resources", resources);
+        dashboard.put("systemStatus", systemStatus);
+        dashboard.put("alerts", alerts);
+        dashboard.put("activity", activity);
+        dashboard.put("services", services);
+
+        return dashboard;
+    }
+
+    @Override
+    public Map<String, Object> getSystemOverview() {
+        Map<String, Object> overview = new HashMap<>();
+        LocalDateTime now = LocalDateTime.now();
+
+        Map<String, Object> server = new HashMap<>();
+        server.put("os", System.getProperty("os.name") + " " + System.getProperty("os.version"));
+        server.put("java", System.getProperty("java.version"));
+        server.put("uptimeMs", getSystemUptime());
+        server.put("runtime", System.getProperty("java.runtime.name"));
+
+        Map<String, Object> database = getDatabaseInfo();
+        Map<String, Object> redis = getRedisInfo();
+        Map<String, Object> storage = getStorageInfo();
+        List<Map<String, Object>> tasks = buildScheduledTasks();
+
+        overview.put("timestamp", now.toString());
+        overview.put("server", server);
+        overview.put("database", database);
+        overview.put("redis", redis);
+        overview.put("storage", storage);
+        overview.put("scheduledTasks", tasks);
+
+        return overview;
     }
 
     @Override
@@ -314,6 +449,460 @@ public class AdminServiceImpl implements AdminService {
         memory.put("usedMemory", runtime.totalMemory() - runtime.freeMemory());
         memory.put("maxMemory", runtime.maxMemory());
         return memory;
+    }
+
+    private double getCpuUsagePercent() {
+        try {
+            java.lang.management.OperatingSystemMXBean osBean = ManagementFactory.getOperatingSystemMXBean();
+            if (osBean instanceof com.sun.management.OperatingSystemMXBean) {
+                double load = ((com.sun.management.OperatingSystemMXBean) osBean).getSystemCpuLoad();
+                if (load >= 0) {
+                    return Math.round(load * 1000d) / 10d;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return 0;
+    }
+
+    private double getMemoryUsagePercent() {
+        Map<String, Object> memory = getMemoryUsage();
+        long used = (long) memory.getOrDefault("usedMemory", 0L);
+        long max = (long) memory.getOrDefault("maxMemory", 0L);
+        if (max <= 0) return 0;
+        return Math.round((used * 1000d / max)) / 10d;
+    }
+
+    private double getDiskUsagePercent() {
+        try {
+            File[] roots = File.listRoots();
+            if (roots == null || roots.length == 0) {
+                return 0;
+            }
+            File selected = roots[0];
+            for (File root : roots) {
+                if (root.getTotalSpace() > selected.getTotalSpace()) {
+                    selected = root;
+                }
+            }
+            long total = selected.getTotalSpace();
+            long free = selected.getFreeSpace();
+            if (total <= 0) return 0;
+            double usedPercent = ((double) (total - free)) / total * 100d;
+            return Math.round(usedPercent * 10d) / 10d;
+        } catch (Exception ignored) {
+            return 0;
+        }
+    }
+
+    private Map<String, Object> getStorageInfo() {
+        Map<String, Object> storage = new HashMap<>();
+        try {
+            File[] roots = File.listRoots();
+            if (roots == null || roots.length == 0) {
+                storage.put("totalBytes", 0);
+                storage.put("freeBytes", 0);
+                return storage;
+            }
+            File selected = roots[0];
+            for (File root : roots) {
+                if (root.getTotalSpace() > selected.getTotalSpace()) {
+                    selected = root;
+                }
+            }
+            storage.put("totalBytes", selected.getTotalSpace());
+            storage.put("freeBytes", selected.getFreeSpace());
+        } catch (Exception e) {
+            storage.put("totalBytes", 0);
+            storage.put("freeBytes", 0);
+        }
+        return storage;
+    }
+
+    private int getDatabaseConnectionCount() {
+        try {
+            JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+            Integer count = jdbcTemplate.queryForObject("select count(*) from pg_stat_activity", Integer.class);
+            return count != null ? count : 0;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private int getDatabaseMaxConnections() {
+        try {
+            JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+            Integer max = jdbcTemplate.queryForObject("show max_connections", Integer.class);
+            return max != null ? max : 0;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private Map<String, Object> getDatabaseInfo() {
+        Map<String, Object> db = new HashMap<>();
+        try {
+            JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+            String engine = jdbcTemplate.queryForObject("select version()", String.class);
+            Long size = jdbcTemplate.queryForObject("select pg_database_size(current_database())", Long.class);
+            int connections = getDatabaseConnectionCount();
+            int maxConnections = getDatabaseMaxConnections();
+
+            db.put("engine", engine != null ? engine : "PostgreSQL");
+            db.put("sizeBytes", size != null ? size : 0);
+            db.put("connections", connections);
+            db.put("maxConnections", maxConnections);
+        } catch (Exception e) {
+            db.put("engine", "PostgreSQL");
+            db.put("sizeBytes", 0);
+            db.put("connections", 0);
+            db.put("maxConnections", 0);
+        }
+        return db;
+    }
+
+    private Map<String, Object> getRedisInfo() {
+        Map<String, Object> redis = new HashMap<>();
+        redis.put("available", redisConnectionFactory != null);
+        if (redisConnectionFactory == null) {
+            redis.put("usedBytes", 0);
+            redis.put("maxBytes", 0);
+            redis.put("hitRate", 0);
+            redis.put("keys", 0);
+            return redis;
+        }
+        try (RedisConnection connection = redisConnectionFactory.getConnection()) {
+            Properties stats = connection.info("stats");
+            Properties memory = connection.info("memory");
+            Properties keyspace = connection.info("keyspace");
+
+            long hits = parseLong(stats.getProperty("keyspace_hits"));
+            long misses = parseLong(stats.getProperty("keyspace_misses"));
+            double ratio = hits + misses > 0 ? (hits * 100d) / (hits + misses) : 0;
+
+            long usedBytes = parseLong(memory.getProperty("used_memory"));
+            long maxBytes = parseLong(memory.getProperty("maxmemory"));
+
+            long keys = 0;
+            for (String name : keyspace.stringPropertyNames()) {
+                String value = keyspace.getProperty(name);
+                if (value != null && value.contains("keys=")) {
+                    String[] parts = value.split(",");
+                    for (String part : parts) {
+                        if (part.startsWith("keys=")) {
+                            keys += parseLong(part.replace("keys=", ""));
+                        }
+                    }
+                }
+            }
+
+            redis.put("usedBytes", usedBytes);
+            redis.put("maxBytes", maxBytes);
+            redis.put("hitRate", Math.round(ratio * 10d) / 10d);
+            redis.put("keys", keys);
+        } catch (Exception e) {
+            redis.put("usedBytes", 0);
+            redis.put("maxBytes", 0);
+            redis.put("hitRate", 0);
+            redis.put("keys", 0);
+        }
+        return redis;
+    }
+
+    private double getCacheHitRatio() {
+        Map<String, Object> redis = getRedisInfo();
+        Object value = redis.get("hitRate");
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        return 0;
+    }
+
+    private long getRequestsPerMinute(LocalDateTime now) {
+        try {
+            LocalDateTime start = now.minusMinutes(1);
+            return systemLogRepository.countByTimestampBetween(start, now);
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private Map<String, Object> computeLatencyPercentiles(LocalDateTime start) {
+        Map<String, Object> latency = new HashMap<>();
+        List<Long> responseTimes = systemLogRepository.findResponseTimesSince(
+            start,
+            PageRequest.of(0, 1000, Sort.by(Sort.Direction.DESC, "timestamp"))
+        );
+        if (responseTimes.isEmpty()) {
+            latency.put("p50", 0);
+            latency.put("p75", 0);
+            latency.put("p95", 0);
+            latency.put("p99", 0);
+            return latency;
+        }
+        List<Long> sorted = responseTimes.stream()
+            .filter(Objects::nonNull)
+            .sorted()
+            .collect(Collectors.toList());
+        latency.put("p50", percentile(sorted, 50));
+        latency.put("p75", percentile(sorted, 75));
+        latency.put("p95", percentile(sorted, 95));
+        latency.put("p99", percentile(sorted, 99));
+        return latency;
+    }
+
+    private double percentile(List<Long> values, int percentile) {
+        if (values.isEmpty()) return 0;
+        int index = (int) Math.ceil(percentile / 100.0 * values.size()) - 1;
+        index = Math.min(Math.max(index, 0), values.size() - 1);
+        return values.get(index);
+    }
+
+    private double calculateChangePercent(long current, long previous) {
+        if (previous <= 0) {
+            return current > 0 ? 100 : 0;
+        }
+        double change = ((double) current - previous) / previous * 100d;
+        return Math.round(change * 10d) / 10d;
+    }
+
+    private Map<String, Object> buildPubmedUsage(LocalDateTime now) {
+        Map<String, Object> usage = new HashMap<>();
+        LocalDateTime startToday = now.toLocalDate().atStartOfDay();
+        long used = searchSessionRepository.countByStartedAtBetween(startToday, now);
+        int limit = 0;
+        try {
+            SystemConfiguration config = getSystemConfiguration();
+            if (config != null && config.pubmed != null) {
+                Object limitObj = config.pubmed.getOrDefault("rateLimitPerDay", 0);
+                if (limitObj instanceof Number) {
+                    limit = ((Number) limitObj).intValue();
+                } else if (limitObj != null) {
+                    limit = Integer.parseInt(limitObj.toString());
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        double percent = limit > 0 ? Math.round((used * 1000d / limit)) / 10d : 0;
+        usage.put("used", used);
+        usage.put("limit", limit);
+        usage.put("percent", percent);
+        return usage;
+    }
+
+    private List<Map<String, Object>> buildServiceStatuses(Map<String, Object> latency, Map<String, Object> pubmedUsage) {
+        List<Map<String, Object>> services = new ArrayList<>();
+        String now = LocalDateTime.now().toString();
+
+        services.add(serviceStatus("API Principal", "online", avgLatency(latency), null, now));
+
+        boolean dbOk = getDatabaseConnectionCount() > 0;
+        services.add(serviceStatus("Base de Datos", dbOk ? "online" : "warning", null, null, now));
+
+        boolean cacheOk = cacheManager != null;
+        services.add(serviceStatus("Cache Redis", cacheOk ? "online" : "warning", null, null, now));
+
+        boolean pubmedEnabled = true;
+        try {
+            SystemConfiguration config = getSystemConfiguration();
+            if (config != null && config.pubmed != null) {
+                Object enabled = config.pubmed.getOrDefault("enabled", true);
+                pubmedEnabled = Boolean.parseBoolean(String.valueOf(enabled));
+            }
+        } catch (Exception ignored) {
+        }
+        services.add(serviceStatus("PubMed Gateway", pubmedEnabled ? "online" : "offline", null, null, now));
+
+        boolean ragEnabled = true;
+        try {
+            SystemConfiguration config = getSystemConfiguration();
+            if (config != null && config.rag != null) {
+                Object enabled = config.rag.getOrDefault("enabled", true);
+                ragEnabled = Boolean.parseBoolean(String.valueOf(enabled));
+            }
+        } catch (Exception ignored) {
+        }
+        services.add(serviceStatus("Servicio RAG", ragEnabled ? "online" : "offline", null, null, now));
+
+        return services;
+    }
+
+    private Map<String, Object> serviceStatus(String name, String status, Double latency, String uptime, String lastCheck) {
+        Map<String, Object> service = new HashMap<>();
+        service.put("name", name);
+        service.put("status", status);
+        if (latency != null) {
+            service.put("latency", latency);
+        }
+        service.put("uptime", uptime);
+        service.put("lastCheck", lastCheck);
+        return service;
+    }
+
+    private Double avgLatency(Map<String, Object> latency) {
+        if (latency == null) return null;
+        Object p50 = latency.get("p50");
+        if (p50 instanceof Number) {
+            return ((Number) p50).doubleValue();
+        }
+        return null;
+    }
+
+    private List<Map<String, Object>> buildRecentAlerts(LocalDateTime start) {
+        List<Map<String, Object>> alerts = new ArrayList<>();
+        try {
+            Page<SystemLog> logs = systemLogRepository.findByTimestampAfter(
+                start,
+                PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "timestamp"))
+            );
+            for (SystemLog log : logs.getContent()) {
+                if (log.getLevel() == null) continue;
+                if (!(log.getLevel() == com.uci.competencia.model.enums.LogLevel.WARN
+                    || log.getLevel() == com.uci.competencia.model.enums.LogLevel.ERROR)) {
+                    continue;
+                }
+                Map<String, Object> alert = new HashMap<>();
+                alert.put("id", log.getId());
+                alert.put("type", log.getLevel() == com.uci.competencia.model.enums.LogLevel.ERROR ? "error" : "warning");
+                String message = log.getErrorMessage();
+                if (message == null || message.isBlank()) {
+                    message = log.getAction() != null ? log.getAction().name() : "Evento del sistema";
+                }
+                alert.put("message", message);
+                alert.put("timestamp", log.getTimestamp() != null ? log.getTimestamp().toString() : null);
+                alerts.add(alert);
+                if (alerts.size() >= 4) break;
+            }
+        } catch (Exception ignored) {
+        }
+        return alerts;
+    }
+
+    private Map<String, Object> buildRecentActivity() {
+        Map<String, Object> activity = new HashMap<>();
+        List<Map<String, Object>> userItems = new ArrayList<>();
+        List<Map<String, Object>> systemItems = new ArrayList<>();
+        List<Map<String, Object>> apiItems = new ArrayList<>();
+
+        Page<SystemLog> logs = systemLogRepository.findAll(
+            PageRequest.of(0, 50, Sort.by(Sort.Direction.DESC, "timestamp"))
+        );
+        List<SystemLog> content = logs.getContent();
+        Map<String, String> userNames = resolveUserNames(content);
+
+        for (SystemLog log : content) {
+            if (log.getTimestamp() == null) continue;
+            String userLabel = userNames.getOrDefault(log.getUserId(), log.getUserId());
+            Map<String, Object> item = new HashMap<>();
+            item.put("id", log.getId());
+            item.put("action", log.getAction() != null ? log.getAction().name() : "EVENTO");
+            item.put("user", userLabel);
+            item.put("timestamp", log.getTimestamp().toString());
+
+            ActionType action = log.getAction();
+            if (action == ActionType.CREATE_USER || action == ActionType.UPDATE_USER || action == ActionType.DELETE_USER || action == ActionType.LOGIN || action == ActionType.LOGOUT) {
+                userItems.add(item);
+            } else if (action == ActionType.BACKUP || action == ActionType.RESTORE || action == ActionType.CHANGE_SETTINGS || action == ActionType.GENERATE_REPORT) {
+                systemItems.add(item);
+            } else {
+                Map<String, Object> apiItem = new HashMap<>();
+                apiItem.put("endpoint", log.getEndpoint() != null ? log.getEndpoint() : "API");
+                apiItem.put("calls", 1);
+                apiItem.put("status", log.getResponseStatus() != null && log.getResponseStatus() >= 400 ? "WARN" : "OK");
+                apiItems.add(apiItem);
+            }
+
+            if (userItems.size() >= 6 && systemItems.size() >= 6 && apiItems.size() >= 6) {
+                break;
+            }
+        }
+
+        activity.put("users", userItems);
+        activity.put("system", systemItems);
+        activity.put("api", aggregateApiUsage(apiItems));
+        return activity;
+    }
+
+    private List<Map<String, Object>> aggregateApiUsage(List<Map<String, Object>> raw) {
+        Map<String, Map<String, Object>> grouped = new LinkedHashMap<>();
+        for (Map<String, Object> item : raw) {
+            String endpoint = String.valueOf(item.getOrDefault("endpoint", "API"));
+            Map<String, Object> existing = grouped.computeIfAbsent(endpoint, (key) -> {
+                Map<String, Object> map = new HashMap<>();
+                map.put("endpoint", key);
+                map.put("calls", 0);
+                map.put("status", "OK");
+                return map;
+            });
+            int calls = ((Number) existing.get("calls")).intValue();
+            existing.put("calls", calls + 1);
+            String status = String.valueOf(item.getOrDefault("status", "OK"));
+            if ("WARN".equals(status)) {
+                existing.put("status", "WARN");
+            }
+        }
+        return new ArrayList<>(grouped.values());
+    }
+
+    private Map<String, String> resolveUserNames(List<SystemLog> logs) {
+        Set<String> ids = logs.stream()
+            .map(SystemLog::getUserId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        if (ids.isEmpty()) return Map.of();
+        Map<String, String> names = new HashMap<>();
+        userRepository.findAllById(ids).forEach(user -> {
+            String name = String.format("%s %s",
+                Optional.ofNullable(user.getFirstName()).orElse(""),
+                Optional.ofNullable(user.getLastName()).orElse("")).trim();
+            names.put(user.getId(), name.isBlank() ? user.getEmail() : name);
+        });
+        return names;
+    }
+
+    private List<Map<String, Object>> buildScheduledTasks() {
+        List<Map<String, Object>> tasks = new ArrayList<>();
+        tasks.add(schedule("Backup diario", "Todos los días a las 22:00", "active"));
+        tasks.add(schedule("Limpieza de caché", "Cada 6 horas", "active"));
+        tasks.add(schedule("Sincronización MeSH", "Cada domingo a las 03:00", "active"));
+        tasks.add(schedule("Reporte semanal", "Cada lunes a las 08:00", "active"));
+        tasks.add(schedule("Verificación de integridad", "Cada día a las 04:00", "active"));
+        return tasks;
+    }
+
+    private Map<String, Object> schedule(String name, String schedule, String status) {
+        Map<String, Object> task = new HashMap<>();
+        task.put("name", name);
+        task.put("schedule", schedule);
+        task.put("status", status);
+        return task;
+    }
+
+    private Map<String, Object> safeMap(Object value) {
+        if (value instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) value;
+            return map;
+        }
+        return new HashMap<>();
+    }
+
+    private List<Map<String, Object>> safeList(Object value) {
+        if (value instanceof List) {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> list = (List<Map<String, Object>>) value;
+            return list;
+        }
+        return new ArrayList<>();
+    }
+
+    private long parseLong(String value) {
+        if (value == null) return 0;
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     @Override
@@ -673,9 +1262,36 @@ public class AdminServiceImpl implements AdminService {
     @Override
     public List<Map<String, Object>> getAlerts() {
         log.info("Retrieving alerts list");
-        // En implementación real, esto vendría de una BD
-        // Por ahora retornamos una lista vacía
         List<Map<String, Object>> alerts = new ArrayList<>();
+        try {
+            LocalDateTime start = LocalDateTime.now().minusHours(24);
+            Page<SystemLog> logs = systemLogRepository.findByTimestampAfter(
+                start,
+                PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "timestamp"))
+            );
+            for (SystemLog logItem : logs.getContent()) {
+                if (logItem.getLevel() == null) continue;
+                if (!(logItem.getLevel() == com.uci.competencia.model.enums.LogLevel.WARN
+                    || logItem.getLevel() == com.uci.competencia.model.enums.LogLevel.ERROR)) {
+                    continue;
+                }
+                Map<String, Object> alert = new HashMap<>();
+                alert.put("id", logItem.getId());
+                String condition = logItem.getErrorMessage();
+                if (condition == null || condition.isBlank()) {
+                    condition = logItem.getAction() != null ? logItem.getAction().name() : "SYSTEM_EVENT";
+                }
+                alert.put("condition", condition);
+                alert.put("action", logItem.getAction() != null ? logItem.getAction().name() : "SYSTEM");
+                alert.put("severity", logItem.getLevel() == com.uci.competencia.model.enums.LogLevel.ERROR ? "critical" : "warning");
+                alert.put("isActive", true);
+                alert.put("lastTriggered", logItem.getTimestamp() != null ? logItem.getTimestamp().toString() : null);
+                alerts.add(alert);
+                if (alerts.size() >= 10) break;
+            }
+        } catch (Exception e) {
+            log.warn("Error retrieving alerts: {}", e.getMessage());
+        }
         return alerts;
     }
 
@@ -769,6 +1385,18 @@ public class AdminServiceImpl implements AdminService {
         }
         
         return backups;
+    }
+
+    @Override
+    public void deleteBackup(String backupId) {
+        log.info("Deleting backup: {}", backupId);
+        if (backupId == null) {
+            throw new RuntimeException("Backup not found: null");
+        }
+        BackupStatus removed = backupRegistry.remove(backupId);
+        if (removed == null) {
+            throw new RuntimeException("Backup not found: " + backupId);
+        }
     }
 
     @Override

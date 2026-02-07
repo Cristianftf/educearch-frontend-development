@@ -151,16 +151,20 @@ public class PubMedQueryBuilder {
      * Mapea tipos de estudio a Publication Type de PubMed
      */
     private String mapStudyTypeToPubMed(String studyType) {
-        return switch (studyType.toUpperCase()) {
-            case "SYSTEMATIC_REVIEW" -> "\"systematic review\"[Publication Type]";
-            case "META_ANALYSIS" -> "\"meta-analysis\"[Publication Type]";
-            case "RANDOMIZED_CONTROLLED_TRIAL", "RCT" -> "\"randomized controlled trial\"[Publication Type]";
-            case "COHORT_STUDY" -> "\"cohort studies\"[MeSH]";
-            case "CASE_CONTROL" -> "\"case-control studies\"[MeSH]";
-            case "CROSS_SECTIONAL" -> "\"cross-sectional studies\"[MeSH]";
-            case "CLINICAL_TRIAL" -> "\"clinical trial\"[Publication Type]";
-            case "CASE_REPORT" -> "\"case reports\"[Publication Type]";
-            case "EDITORIAL" -> "\"editorial\"[Publication Type]";
+        if (studyType == null || studyType.isBlank()) {
+            return "\"publication\"[Publication Type]";
+        }
+        String normalized = studyType.trim().toLowerCase().replaceAll("[\\s-]+", "_");
+        return switch (normalized) {
+            case "systematic_review" -> "\"systematic review\"[Publication Type]";
+            case "meta_analysis" -> "\"meta-analysis\"[Publication Type]";
+            case "randomized_controlled_trial", "rct" -> "\"randomized controlled trial\"[Publication Type]";
+            case "cohort", "cohort_study" -> "\"cohort studies\"[MeSH]";
+            case "case_control" -> "\"case-control studies\"[MeSH]";
+            case "cross_sectional" -> "\"cross-sectional studies\"[MeSH]";
+            case "clinical_trial" -> "\"clinical trial\"[Publication Type]";
+            case "case_report" -> "\"case reports\"[Publication Type]";
+            case "editorial" -> "\"editorial\"[Publication Type]";
             default -> "\"" + studyType + "\"[Publication Type]";
         };
     }

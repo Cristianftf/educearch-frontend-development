@@ -79,7 +79,7 @@ type UserFormState = {
 /* const mockUsers: UserRow[] = [
   {
     id: "1",
-    name: "Mar�a Garc�a L�pez",
+    name: "María García López",
     email: "maria.garcia@estudiante.uci.cu",
     role: "student",
     status: "active",
@@ -89,7 +89,7 @@ type UserFormState = {
   },
   {
     id: "2",
-    name: "Dr. Carlos Rodr�guez",
+    name: "Dr. Carlos Rodríguez",
     email: "carlos.rodriguez@uci.cu",
     role: "professor",
     status: "active",
@@ -99,27 +99,27 @@ type UserFormState = {
   },
   {
     id: "3",
-    name: "Ana Torres P�rez",
+    name: "Ana Torres Pérez",
     email: "ana.torres@estudiante.uci.cu",
     role: "student",
     status: "inactive",
-    faculty: "Enfermer�a",
-    lastLogin: "Hace 5 d�as",
+    faculty: "Enfermería",
+    lastLogin: "Hace 5 días",
     createdAt: "2024-02-20",
   },
   {
     id: "4",
-    name: "Dr. Pedro Mart�nez",
+    name: "Dr. Pedro Martínez",
     email: "pedro.martinez@uci.cu",
     role: "professor",
     status: "active",
-    faculty: "Estomatolog�a",
+    faculty: "Estomatología",
     lastLogin: "Hace 1 hora",
     createdAt: "2023-08-15",
   },
   {
     id: "5",
-    name: "Laura S�nchez",
+    name: "Laura Sánchez",
     email: "laura.sanchez@estudiante.uci.cu",
     role: "student",
     status: "pending",
@@ -462,7 +462,7 @@ export default function AdminUsersPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">
-            Gesti�n de Usuarios
+            Gestión de Usuarios
           </h1>
           <p className="text-muted-foreground">
             Administra todos los usuarios del sistema EDUCEARCH
@@ -519,7 +519,7 @@ export default function AdminUsersPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="email">Correo Electr�nico</Label>
+                  <Label htmlFor="email">Correo Electrónico</Label>
                   <Input
                     id="email"
                     type="email"
@@ -555,9 +555,9 @@ export default function AdminUsersPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="medicina">Medicina</SelectItem>
-                      <SelectItem value="enfermeria">Enfermer�a</SelectItem>
-                      <SelectItem value="estomatologia">Estomatolog�a</SelectItem>
-                      <SelectItem value="tecnologia">Tecnolog�a de la Salud</SelectItem>
+                      <SelectItem value="enfermeria">Enfermería</SelectItem>
+                      <SelectItem value="estomatologia">Estomatología</SelectItem>
+                      <SelectItem value="tecnologia">Tecnología de la Salud</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -591,7 +591,7 @@ export default function AdminUsersPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="edit-email">Correo Electr�nico</Label>
+                  <Label htmlFor="edit-email">Correo Electrónico</Label>
                   <Input
                     id="edit-email"
                     type="email"
@@ -627,9 +627,9 @@ export default function AdminUsersPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="medicina">Medicina</SelectItem>
-                      <SelectItem value="enfermeria">Enfermer�a</SelectItem>
-                      <SelectItem value="estomatologia">Estomatolog�a</SelectItem>
-                      <SelectItem value="tecnologia">Tecnolog�a de la Salud</SelectItem>
+                      <SelectItem value="enfermeria">Enfermería</SelectItem>
+                      <SelectItem value="estomatologia">Estomatología</SelectItem>
+                      <SelectItem value="tecnologia">Tecnología de la Salud</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -814,7 +814,7 @@ export default function AdminUsersPage() {
                     Estado
                   </th>
                   <th className="text-left py-3 px-4 font-medium text-muted-foreground">
-                    Último acceso
+                    Ãšltimo acceso
                   </th>
                   <th className="text-right py-3 px-4 font-medium text-muted-foreground">
                     Acciones

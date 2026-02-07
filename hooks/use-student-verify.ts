@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useStudent } from '@/contexts/student-context'
 import { verifyApi } from '@/lib/api'
 import type { VerificationResult } from '@/types'
@@ -18,6 +19,7 @@ interface UseStudentVerifyReturn {
 
 export function useStudentVerify(): UseStudentVerifyReturn {
   const { addActivity, addVerification, verificationHistory, setVerificationHistory, clearVerificationHistory } = useStudent()
+  const queryClient = useQueryClient()
   const [isVerifying, setIsVerifying] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastResult, setLastResult] = useState<VerificationResult | null>(null)
@@ -46,6 +48,7 @@ export function useStudentVerify(): UseStudentVerifyReturn {
 
         // Guardar en historial
         addVerification(result)
+        queryClient.invalidateQueries({ queryKey: ['student', 'verifyHistory'] })
 
         // Registrar actividad
         addActivity({
@@ -71,6 +74,7 @@ export function useStudentVerify(): UseStudentVerifyReturn {
             const simplifiedResult = await fetchSimplifiedVerification(claim, sourceUrl)
             setLastResult(simplifiedResult)
             addVerification(simplifiedResult)
+            queryClient.invalidateQueries({ queryKey: ['student', 'verifyHistory'] })
             return simplifiedResult
           } catch (fallbackErr) {
             const errorMessage = 'Timeout en verificación completa. Intenta con un claim más corto.'
@@ -88,17 +92,20 @@ export function useStudentVerify(): UseStudentVerifyReturn {
         setIsVerifying(false)
       }
     },
-    [addActivity, addVerification]
+    [addActivity, addVerification, queryClient]
   )
 
   const loadHistory = useCallback(async (page = 1, limit = 10) => {
     try {
-      const { verifications } = await verifyApi.getHistory(page, limit)
-      setVerificationHistory(verifications)
+      const data = await queryClient.fetchQuery({
+        queryKey: ['student', 'verifyHistory', page, limit],
+        queryFn: () => verifyApi.getHistory(page, limit),
+      })
+      setVerificationHistory(data.verifications)
     } catch (err) {
       console.error('[useStudentVerify loadHistory]:', err)
     }
-  }, [setVerificationHistory])
+  }, [queryClient, setVerificationHistory])
 
   // Función de fallback para verificación simplificada
   const fetchSimplifiedVerification = useCallback(async (claim: string, _sourceUrl?: string) => {

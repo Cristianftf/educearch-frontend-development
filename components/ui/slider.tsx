@@ -5,38 +5,73 @@ import * as SliderPrimitive from '@radix-ui/react-slider'
 
 import { cn } from '@/lib/utils'
 
+function areArraysEqual(a?: number[], b?: number[]) {
+  if (a === b) return true
+  if (!a || !b) return false
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+function useStableArray(values?: number[]) {
+  const ref = React.useRef<number[] | undefined>(values)
+  if (!areArraysEqual(values, ref.current)) {
+    ref.current = values ? [...values] : values
+  }
+  return ref.current
+}
+
 function Slider({
   className,
   defaultValue,
   value,
   min = 0,
   max = 100,
+  onValueChange,
   ...props
 }: React.ComponentProps<typeof SliderPrimitive.Root>) {
   const isControlled = Array.isArray(value)
-  const sliderValue = isControlled ? value : undefined
-  const sliderDefault = !isControlled
-    ? Array.isArray(defaultValue)
-      ? defaultValue
-      : [min, max]
-    : undefined
+  const sliderValue = useStableArray(isControlled ? value : undefined)
+  const sliderDefault = useStableArray(
+    !isControlled
+      ? Array.isArray(defaultValue)
+        ? defaultValue
+        : [min, max]
+      : undefined
+  )
 
   const _values = React.useMemo(
-    () => sliderValue ?? sliderDefault ?? [min, max],
+    () => {
+      const resolved = sliderValue ?? sliderDefault ?? [min, max]
+      return resolved.length > 0 ? resolved : [min]
+    },
     [sliderValue, sliderDefault, min, max],
+  )
+
+  const handleValueChange = React.useCallback(
+    (nextValue: number[]) => {
+      if (!onValueChange) return
+      if (areArraysEqual(nextValue, sliderValue)) {
+        return
+      }
+      onValueChange(nextValue)
+    },
+    [onValueChange, sliderValue]
   )
 
   return (
     <SliderPrimitive.Root
       data-slot="slider"
-      defaultValue={sliderDefault}
-      value={sliderValue}
+      {...(isControlled ? { value: sliderValue } : { defaultValue: sliderDefault })}
       min={min}
       max={max}
       className={cn(
         'relative flex w-full touch-none items-center select-none data-[disabled]:opacity-50 data-[orientation=vertical]:h-full data-[orientation=vertical]:min-h-44 data-[orientation=vertical]:w-auto data-[orientation=vertical]:flex-col',
         className,
       )}
+      onValueChange={handleValueChange}
       {...props}
     >
       <SliderPrimitive.Track

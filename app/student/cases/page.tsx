@@ -66,6 +66,16 @@ function formatDate(dateString: string): string {
   })
 }
 
+function formatDateTime(dateString: string): string {
+  return new Date(dateString).toLocaleString('es', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 function getDaysRemaining(dueDate: string): number {
   const due = new Date(dueDate)
   const now = new Date()
@@ -82,6 +92,9 @@ export default function CasesPage() {
   const [submissionContent, setSubmissionContent] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [activeTab, setActiveTab] = useState('pending')
+  const [selectedSubmission, setSelectedSubmission] = useState<CaseSubmission | null>(null)
+  const [isLoadingSubmission, setIsLoadingSubmission] = useState(false)
+  const [submissionError, setSubmissionError] = useState<string | null>(null)
 
   useEffect(() => {
     async function loadCases() {
@@ -97,6 +110,42 @@ export default function CasesPage() {
     }
     loadCases()
   }, [])
+
+  useEffect(() => {
+    let isMounted = true
+
+    if (!selectedCase || selectedCase.status === 'active') {
+      setSelectedSubmission(null)
+      setSubmissionError(null)
+      setIsLoadingSubmission(false)
+      return () => {
+        isMounted = false
+      }
+    }
+
+    setIsLoadingSubmission(true)
+    setSubmissionError(null)
+
+    casesApi
+      .getMySubmission(selectedCase.id)
+      .then((submission) => {
+        if (!isMounted) return
+        setSelectedSubmission(submission)
+      })
+      .catch((err) => {
+        console.error('[v0] Error loading submission:', err)
+        if (!isMounted) return
+        setSubmissionError('No se pudo cargar tu entrega')
+      })
+      .finally(() => {
+        if (!isMounted) return
+        setIsLoadingSubmission(false)
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [selectedCase])
 
   const handleSubmit = useCallback(async () => {
     if (!selectedCase || !submissionContent.trim()) return
@@ -446,8 +495,10 @@ export default function CasesPage() {
                   </h4>
                   <ol className="space-y-2 list-decimal list-inside">
                     {selectedCase.guidingQuestions.map((question, idx) => {
-                      const isString = typeof (question as any) === 'string'
-                      let questionText = isString ? (question as string) : question.question
+                      const isString = typeof (question as unknown) === 'string'
+                      let questionText = isString
+                        ? (question as unknown as string)
+                        : question.question
                       if (isString && questionText.trim().startsWith('{')) {
                         try {
                           const parsed = JSON.parse(questionText)
@@ -531,6 +582,98 @@ export default function CasesPage() {
                         )}
                       </Button>
                     </div>
+                  </div>
+                )}
+
+                {/* Submission Detail (completed cases) */}
+                {selectedCase.status !== 'active' && (
+                  <div className="border-t pt-6">
+                    <h4 className="font-medium mb-3">Tu entrega</h4>
+                    {isLoadingSubmission && (
+                      <div className="space-y-2">
+                        <Skeleton className="h-4 w-32" />
+                        <Skeleton className="h-20 w-full" />
+                      </div>
+                    )}
+                    {!isLoadingSubmission && submissionError && (
+                      <div className="flex items-center gap-2 text-destructive text-sm p-3 bg-destructive/10 rounded-lg">
+                        <AlertCircle className="h-4 w-4" />
+                        {submissionError}
+                      </div>
+                    )}
+                    {!isLoadingSubmission && !submissionError && selectedSubmission && (
+                      <div className="space-y-4">
+                        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                          <Badge variant="outline" className="capitalize">
+                            {selectedSubmission.status}
+                          </Badge>
+                          {selectedSubmission.submittedAt && (
+                            <span>Enviado: {formatDateTime(selectedSubmission.submittedAt)}</span>
+                          )}
+                        </div>
+
+                        <div className="p-4 rounded-lg bg-muted text-sm leading-relaxed whitespace-pre-wrap">
+                          {selectedSubmission.content}
+                        </div>
+
+                        {selectedSubmission.evaluation && (
+                          <div className="space-y-3">
+                            <h5 className="font-medium">Evaluación del profesor</h5>
+                            <div className="grid gap-3 sm:grid-cols-3 text-sm">
+                              <div className="p-3 rounded-lg border">
+                                <p className="text-xs text-muted-foreground">Acceso</p>
+                                <p className="text-lg font-semibold">
+                                  {selectedSubmission.evaluation.scores.access}
+                                </p>
+                                {selectedSubmission.evaluation.comments.access && (
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    {selectedSubmission.evaluation.comments.access}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="p-3 rounded-lg border">
+                                <p className="text-xs text-muted-foreground">Procesamiento</p>
+                                <p className="text-lg font-semibold">
+                                  {selectedSubmission.evaluation.scores.process}
+                                </p>
+                                {selectedSubmission.evaluation.comments.process && (
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    {selectedSubmission.evaluation.comments.process}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="p-3 rounded-lg border">
+                                <p className="text-xs text-muted-foreground">Comunicación</p>
+                                <p className="text-lg font-semibold">
+                                  {selectedSubmission.evaluation.scores.communicate}
+                                </p>
+                                {selectedSubmission.evaluation.comments.communicate && (
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    {selectedSubmission.evaluation.comments.communicate}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                            <div className="p-4 rounded-lg bg-muted/50 text-sm">
+                              <p className="text-xs text-muted-foreground">Puntuación global</p>
+                              <p className="text-lg font-semibold">
+                                {selectedSubmission.evaluation.overallScore}
+                              </p>
+                              {selectedSubmission.evaluation.feedback && (
+                                <p className="text-sm text-muted-foreground mt-2">
+                                  {selectedSubmission.evaluation.feedback}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {!isLoadingSubmission && !submissionError && !selectedSubmission && (
+                      <p className="text-sm text-muted-foreground">
+                        No hay entrega registrada para este caso.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

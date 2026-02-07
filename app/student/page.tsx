@@ -2,16 +2,16 @@
 
 import React from "react"
 
-import { useEffect, useState } from 'react'
-import Link from 'next/link'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import dynamic from 'next/dynamic'
+import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/auth-context'
 import { useStudent } from '@/contexts/student-context'
 import { progressApi } from '@/lib/api'
-import type { StudentProgress, Activity, CompetencyType } from '@/types'
+import type { Activity, CompetencyType } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Search,
@@ -19,12 +19,10 @@ import {
   FileText,
   TrendingUp,
   Clock,
-  ArrowRight,
   BookOpen,
   CheckCircle2,
   AlertCircle,
 } from 'lucide-react'
-import { CompetencyProgressChart } from '@/components/competency-progress-chart-enhanced'
 
 const competencyConfig: Record<
   CompetencyType,
@@ -50,6 +48,18 @@ const competencyConfig: Record<
   },
 }
 
+const actionLabels: Record<CompetencyType, string> = {
+  access: 'Practicar búsqueda',
+  process: 'Verificar claim',
+  communicate: 'Nueva bibliografía',
+}
+
+const actionLinks: Record<CompetencyType, string> = {
+  access: '/student/search',
+  process: '/student/verify',
+  communicate: '/student/bibliography',
+}
+
 const levelColors = {
   novice: 'bg-warning/20 text-warning-foreground border-warning',
   intermediate: 'bg-chart-1/20 text-chart-1 border-chart-1',
@@ -61,6 +71,27 @@ const levelLabels = {
   intermediate: 'Intermedio',
   advanced: 'Avanzado',
 }
+
+function CompetencyChartSkeleton() {
+  return (
+    <Card>
+      <CardHeader>
+        <Skeleton className="h-10 w-10 rounded-lg" />
+        <Skeleton className="h-6 w-48 mt-3" />
+        <Skeleton className="h-4 w-full mt-1" />
+      </CardHeader>
+      <CardContent>
+        <Skeleton className="h-2 w-full" />
+        <Skeleton className="h-10 w-full mt-4" />
+      </CardContent>
+    </Card>
+  )
+}
+
+const CompetencyProgressChart = dynamic(
+  () => import('@/components/competency-progress-chart-enhanced').then((m) => m.CompetencyProgressChart),
+  { ssr: false, loading: () => <CompetencyChartSkeleton /> }
+)
 
 function formatTimeAgo(dateString: string): string {
   const date = new Date(dateString)
@@ -93,26 +124,14 @@ function getActivityIcon(type: Activity['type']) {
 export default function StudentDashboard() {
   const { user } = useAuth()
   const { recentActivities } = useStudent()
-  const [progress, setProgress] = useState<StudentProgress | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+
+  const router = useRouter()
   const [activityFilter, setActivityFilter] = useState<Activity['type'] | 'all'>('all')
 
-  useEffect(() => {
-    async function loadProgress() {
-      try {
-        const data = await progressApi.getMyProgress()
-        setProgress(data)
-      } catch (err) {
-        setError('No se pudo cargar tu progreso. Intenta de nuevo más tarde.')
-        console.error('[v0] Error loading progress:', err)
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
-    loadProgress()
-  }, [])
+  const { data: progress, isLoading, error, refetch } = useQuery({
+    queryKey: ['student', 'progress'],
+    queryFn: () => progressApi.getMyProgress(),
+  })
 
   if (isLoading) {
     return <DashboardSkeleton />
@@ -123,8 +142,8 @@ export default function StudentDashboard() {
       <div className="flex flex-col items-center justify-center min-h-[400px] text-center">
         <AlertCircle className="h-12 w-12 text-destructive mb-4" />
         <h2 className="text-lg font-semibold mb-2">Error al cargar</h2>
-        <p className="text-muted-foreground mb-4">{error}</p>
-        <Button onClick={() => window.location.reload()}>Reintentar</Button>
+        <p className="text-muted-foreground mb-4">No se pudo cargar tu progreso. Intenta de nuevo más tarde.</p>
+        <Button onClick={() => refetch()}>Reintentar</Button>
       </div>
     )
   }
@@ -191,25 +210,13 @@ export default function StudentDashboard() {
         {(Object.keys(competencyConfig) as CompetencyType[]).map((type) => {
           const comp = progress?.competencies?.[type]
 
-          const actionLabels: Record<CompetencyType, string> = {
-            access: 'Practicar búsqueda',
-            process: 'Verificar claim',
-            communicate: 'Nueva bibliografía',
-          }
-
-          const actionLinks: Record<CompetencyType, string> = {
-            access: '/student/search',
-            process: '/student/verify',
-            communicate: '/student/bibliography',
-          }
-
           return comp ? (
             <CompetencyProgressChart
               key={type}
               competencyType={type}
               competencyData={comp}
               onActionClick={() => {
-                window.location.href = actionLinks[type]
+                router.push(actionLinks[type])
               }}
               actionLabel={actionLabels[type]}
             />

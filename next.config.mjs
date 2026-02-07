@@ -6,6 +6,9 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  experimental: {
+    workerThreads: true,
+  },
   async rewrites() {
     return [
       {
