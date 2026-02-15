@@ -2,9 +2,24 @@ import type { User, UserRole } from '@/types'
 import { api } from './api-client'
 
 export const adminUsersApi = {
-  getAll: (page = 1, limit = 50, filters?: { role?: UserRole; status?: string }) =>
-    api.get<{ users: User[]; total: number; page: number; limit: number; totalPages: number }>(
-      `/admin/users?page=${page}&limit=${limit}${filters?.role ? `&role=${filters.role}` : ''}${filters?.status ? `&status=${filters.status}` : ''}`
+  getAll: (page = 1, limit = 50, filters?: { role?: UserRole; status?: string; search?: string }) =>
+    api.get<{
+      users: User[]
+      total: number
+      page: number
+      limit: number
+      totalPages: number
+      stats?: {
+        totalUsers: number
+        students: number
+        professors: number
+        admins: number
+        active: number
+        inactive: number
+        pending: number
+      }
+    }>(
+      `/admin/users?page=${page}&limit=${limit}${filters?.role ? `&role=${filters.role}` : ''}${filters?.status ? `&status=${filters.status}` : ''}${filters?.search ? `&search=${encodeURIComponent(filters.search)}` : ''}`
     ),
 
   getById: (id: string) => api.get<User>(`/admin/users/${id}`),

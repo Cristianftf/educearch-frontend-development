@@ -55,6 +55,8 @@ export default function ProfessorSearchPage() {
       try {
         const res = await searchApi.getMeshSuggestions(searchTerm)
         setSuggestions(res)
+      } catch {
+        setSuggestions([])
       } finally {
         setIsLoadingSuggestions(false)
       }
@@ -85,11 +87,16 @@ export default function ProfessorSearchPage() {
     setIsSearching(true)
     setError(null)
     try {
-      const query: Omit<SearchQuery, "id" | "createdAt"> = {
+      const query: SearchQuery = {
+        id:
+          typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `prof-query-${Date.now()}`,
         terms: activeTerms,
         operators: activeOperators,
         filters,
         rawQuery: activeRawQuery,
+        createdAt: new Date().toISOString(),
       }
       const session = await searchApi.execute(query)
       setResults(session.results)

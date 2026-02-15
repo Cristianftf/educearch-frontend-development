@@ -2,6 +2,7 @@ package com.uci.competencia.controller.api;
 
 import com.uci.competencia.model.dto.response.CaseStudyDTO;
 import com.uci.competencia.model.dto.response.CaseSubmissionDTO;
+import com.uci.competencia.model.dto.response.StudentAssignmentOptionDTO;
 import com.uci.competencia.model.enums.CaseStatus;
 import com.uci.competencia.service.CaseService;
 import lombok.extern.slf4j.Slf4j;
@@ -13,6 +14,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/cases")
@@ -32,6 +34,7 @@ public class CaseController {
     public ResponseEntity<List<CaseStudyDTO>> getAllCases(
             @RequestParam(required = false) String status) {
         CaseStatus caseStatus = null;
+        String professorId = getCurrentUserId();
         if (status != null && !status.isBlank()) {
             try {
                 caseStatus = CaseStatus.valueOf(status.toUpperCase());
@@ -40,8 +43,19 @@ public class CaseController {
                 return ResponseEntity.badRequest().build();
             }
         }
-        List<CaseStudyDTO> cases = caseService.getAllCases(caseStatus);
+        List<CaseStudyDTO> cases = caseService.getProfessorCases(professorId, caseStatus);
         return ResponseEntity.ok(cases);
+    }
+
+    /**
+     * Obtener estudiantes asignables a casos (Profesores)
+     * GET /api/cases/students
+     */
+    @GetMapping("/students")
+    @PreAuthorize("hasRole('PROFESSOR')")
+    public ResponseEntity<List<StudentAssignmentOptionDTO>> getAssignableStudents() {
+        List<StudentAssignmentOptionDTO> students = caseService.getAssignableStudents();
+        return ResponseEntity.ok(students);
     }
 
     /**
@@ -51,9 +65,19 @@ public class CaseController {
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('PROFESSOR', 'STUDENT')")
     public ResponseEntity<CaseStudyDTO> getCaseById(@PathVariable String id) {
-        return caseService.getCaseById(id)
-            .map(ResponseEntity::ok)
-            .orElse(ResponseEntity.notFound().build());
+        Optional<CaseStudyDTO> caseStudy = caseService.getCaseById(id);
+        if (caseStudy.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        String currentUserId = getCurrentUserId();
+        if (hasRole("ROLE_PROFESSOR") && !caseService.isCaseOwnedByProfessor(id, currentUserId)) {
+            return ResponseEntity.status(403).build();
+        }
+        if (hasRole("ROLE_STUDENT") && !caseService.isStudentAssignedToCase(id, currentUserId)) {
+            return ResponseEntity.status(403).build();
+        }
+        return ResponseEntity.ok(caseStudy.get());
     }
 
     /**
@@ -75,6 +99,9 @@ public class CaseController {
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('PROFESSOR')")
     public ResponseEntity<CaseStudyDTO> updateCase(@PathVariable String id, @RequestBody CaseStudyDTO caseStudy) {
+        if (!isCaseOwnedByCurrentProfessor(id)) {
+            return ResponseEntity.status(403).build();
+        }
         CaseStudyDTO updated = caseService.updateCase(id, caseStudy);
         return ResponseEntity.ok(updated);
     }
@@ -86,6 +113,9 @@ public class CaseController {
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('PROFESSOR')")
     public ResponseEntity<Void> deleteCase(@PathVariable String id) {
+        if (!isCaseOwnedByCurrentProfessor(id)) {
+            return ResponseEntity.status(403).build();
+        }
         caseService.deleteCase(id);
         return ResponseEntity.noContent().build();
     }
@@ -99,6 +129,9 @@ public class CaseController {
     public ResponseEntity<CaseStudyDTO> assignStudents(
             @PathVariable String id,
             @RequestBody AssignStudentsRequest request) {
+        if (!isCaseOwnedByCurrentProfessor(id)) {
+            return ResponseEntity.status(403).build();
+        }
         CaseStudyDTO updated = caseService.assignStudents(id, request.getStudentIds());
         return ResponseEntity.ok(updated);
     }
@@ -110,6 +143,9 @@ public class CaseController {
     @GetMapping("/{caseId}/submissions")
     @PreAuthorize("hasRole('PROFESSOR')")
     public ResponseEntity<List<CaseSubmissionDTO>> getCaseSubmissions(@PathVariable String caseId) {
+        if (!isCaseOwnedByCurrentProfessor(caseId)) {
+            return ResponseEntity.status(403).build();
+        }
         List<CaseSubmissionDTO> submissions = caseService.getCaseSubmissions(caseId);
         return ResponseEntity.ok(submissions);
     }
@@ -176,6 +212,20 @@ public class CaseController {
             return ((UserDetails) principal).getUsername();
         }
         return principal.toString();
+    }
+
+    private boolean hasRole(String role) {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getAuthorities() == null) {
+            return false;
+        }
+        return authentication.getAuthorities().stream()
+            .anyMatch(authority -> role.equals(authority.getAuthority()));
+    }
+
+    private boolean isCaseOwnedByCurrentProfessor(String caseId) {
+        String professorId = getCurrentUserId();
+        return caseService.isCaseOwnedByProfessor(caseId, professorId);
     }
 
     // DTOs auxiliares

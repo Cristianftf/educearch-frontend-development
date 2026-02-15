@@ -2,6 +2,7 @@ package com.uci.competencia.service;
 
 import com.uci.competencia.model.dto.response.CaseStudyDTO;
 import com.uci.competencia.model.dto.response.CaseSubmissionDTO;
+import com.uci.competencia.model.dto.response.StudentAssignmentOptionDTO;
 import com.uci.competencia.model.enums.CaseStatus;
 
 import java.util.List;
@@ -12,7 +13,13 @@ public interface CaseService {
     // Case Study Management (Professor)
     List<CaseStudyDTO> getAllCases(CaseStatus status);
 
+    List<CaseStudyDTO> getProfessorCases(String professorIdentifier, CaseStatus status);
+
     Optional<CaseStudyDTO> getCaseById(String id);
+
+    boolean isCaseOwnedByProfessor(String caseId, String professorIdentifier);
+
+    boolean isStudentAssignedToCase(String caseId, String studentIdentifier);
 
     CaseStudyDTO createCase(CaseStudyDTO caseStudy, String professorId);
 
@@ -28,6 +35,8 @@ public interface CaseService {
     List<CaseStudyDTO> getAssignedCases(String studentId);
 
     List<CaseStudyDTO> getAssignedCasesByStatus(String studentId, CaseStatus status);
+
+    List<StudentAssignmentOptionDTO> getAssignableStudents();
 
     // Case Submissions
     CaseSubmissionDTO submitCase(String caseId, String studentId, CaseSubmissionDTO submission);

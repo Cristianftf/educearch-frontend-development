@@ -42,6 +42,11 @@ public interface AdminService {
     Page<User> getUsersByRoleAndStatus(Role role, boolean active, Pageable pageable);
 
     /**
+     * Buscar usuarios con filtros combinables y paginación
+     */
+    Page<User> searchUsers(Role role, Boolean active, String search, Pageable pageable);
+
+    /**
      * Obtener usuario por ID
      */
     User getUserById(String id);

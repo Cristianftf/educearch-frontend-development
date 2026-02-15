@@ -53,6 +53,12 @@ export interface ProfessorAnalyticsOverview {
 export interface StudentProgress {
   userId: string
   competencies: Record<CompetencyType, CompetencyProgress>
+  casesCompleted?: number
+  totalCases?: number
+  averageGrade?: number
+  hoursSpent?: number
+  activityStats?: Record<string, number>
+  recommendations?: string[]
   totalSearches: number
   totalVerifications: number
   totalBibliographies: number
@@ -177,6 +183,14 @@ export interface CaseStudy {
   startDate?: string
   dueDate?: string
   assignedStudents: string[]
+}
+
+export interface CaseAssignableStudent {
+  id: string
+  email: string
+  username: string
+  fullName: string
+  active: boolean
 }
 
 export interface GuidingQuestion {

@@ -1,6 +1,14 @@
 'use client'
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from 'react'
 import type {
   CompetencyType,
   CompetencyProgress,
@@ -17,26 +25,26 @@ interface StudentContextType {
 
   // Actividades
   recentActivities: Activity[]
-  setRecentActivities: (activities: Activity[]) => void
+  setRecentActivities: Dispatch<SetStateAction<Activity[]>>
   addActivity: (activity: Activity) => void
   clearActivities: () => void
 
   // Búsquedas guardadas
   savedSearches: SearchQuery[]
-  setSavedSearches: (searches: SearchQuery[]) => void
+  setSavedSearches: Dispatch<SetStateAction<SearchQuery[]>>
   addSavedSearch: (search: SearchQuery) => void
   removeSavedSearch: (searchId: string) => void
   toggleSearchFavorite: (searchId: string) => void
 
   // Verificaciones
   verificationHistory: VerificationResult[]
-  setVerificationHistory: (items: VerificationResult[]) => void
+  setVerificationHistory: Dispatch<SetStateAction<VerificationResult[]>>
   addVerification: (verification: VerificationResult) => void
   clearVerificationHistory: () => void
 
   // Bibliografías
   bibliographies: Bibliography[]
-  setBibliographies: (items: Bibliography[]) => void
+  setBibliographies: Dispatch<SetStateAction<Bibliography[]>>
   addBibliography: (bibliography: Bibliography) => void
   removeBibliography: (bibliographyId: string) => void
 

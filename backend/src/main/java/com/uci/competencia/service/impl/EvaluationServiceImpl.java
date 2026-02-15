@@ -2,8 +2,10 @@ package com.uci.competencia.service.impl;
 
 import com.uci.competencia.model.dto.response.EvaluationDTO;
 import com.uci.competencia.model.entity.CaseSubmission;
+import com.uci.competencia.model.entity.CaseStudy;
 import com.uci.competencia.model.entity.Evaluation;
 import com.uci.competencia.model.enums.SubmissionStatus;
+import com.uci.competencia.repository.CaseStudyRepository;
 import com.uci.competencia.repository.CaseSubmissionRepository;
 import com.uci.competencia.repository.EvaluationRepository;
 import com.uci.competencia.service.EvaluationService;
@@ -24,6 +26,7 @@ public class EvaluationServiceImpl implements EvaluationService {
 
     private final EvaluationRepository evaluationRepository;
     private final CaseSubmissionRepository caseSubmissionRepository;
+    private final CaseStudyRepository caseStudyRepository;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -31,12 +34,22 @@ public class EvaluationServiceImpl implements EvaluationService {
         log.info("Getting pending evaluations for professor: {}", professorId);
 
         try {
+            Set<String> professorCaseIds = caseStudyRepository.findByCreatedBy(professorId).stream()
+                    .map(CaseStudy::getId)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
+
+            if (professorCaseIds.isEmpty()) {
+                return List.of();
+            }
+
             // Obtener todas las submissions pendientes
             List<CaseSubmission> pendingSubmissions = caseSubmissionRepository
                     .findByStatus(SubmissionStatus.PENDING);
 
             // Filtrar para no incluir evaluaciones ya realizadas
             List<Map<String, Object>> pendingEvaluations = pendingSubmissions.stream()
+                    .filter(submission -> professorCaseIds.contains(submission.getCaseId()))
                     .filter(submission -> {
                         // Verificar si esta submission ya tiene evaluación
                         Optional<Evaluation> existing = evaluationRepository

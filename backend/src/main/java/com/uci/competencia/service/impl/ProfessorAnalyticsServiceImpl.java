@@ -1,297 +1,345 @@
 package com.uci.competencia.service.impl;
 
 import com.uci.competencia.exception.ResourceNotFoundException;
+import com.uci.competencia.model.dto.response.CaseStudyDTO;
 import com.uci.competencia.model.dto.response.ProfessorAnalyticsDTO;
 import com.uci.competencia.model.dto.response.StudentProgressDTO;
-import com.uci.competencia.model.dto.response.CaseStudyDTO;
 import com.uci.competencia.model.entity.CaseStudy;
+import com.uci.competencia.model.entity.SearchSession;
 import com.uci.competencia.model.entity.User;
+import com.uci.competencia.model.enums.CaseDifficulty;
+import com.uci.competencia.model.enums.CaseStatus;
 import com.uci.competencia.repository.CaseStudyRepository;
+import com.uci.competencia.repository.SearchSessionRepository;
 import com.uci.competencia.repository.UserRepository;
 import com.uci.competencia.service.ProgressService;
 import com.uci.competencia.service.ProfessorAnalyticsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
+@Transactional(readOnly = true)
 public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService {
 
     private static final double LOW_PROGRESS_THRESHOLD = 60.0;
+    private static final double PROBLEMATIC_ERROR_RATE_THRESHOLD = 0.25;
+    private static final int MIN_OCCURRENCES_FOR_PROBLEMATIC = 2;
+    private static final Pattern TERM_PATTERN = Pattern.compile("[\\p{L}\\p{N}]{3,}");
+    private static final Set<String> STOP_WORDS = Set.of(
+        "and", "or", "not", "the", "for", "with", "from", "that",
+        "los", "las", "del", "con", "para", "por", "una", "uno", "unos", "unas",
+        "de", "la", "el", "en", "y", "o", "no"
+    );
     private static final Map<String, Double> EMPTY_COMPETENCY_MAP = Map.of(
         "access", 0.0,
         "process", 0.0,
         "communicate", 0.0
     );
-    
+
     private final CaseStudyRepository caseStudyRepository;
     private final UserRepository userRepository;
+    private final SearchSessionRepository searchSessionRepository;
     private final ProgressService progressService;
-    
+
     @Override
     public ProfessorAnalyticsDTO getAnalyticsOverview(String professorId) {
         log.info("Generating analytics overview for professor: {}", professorId);
-        
+
         ProfessorAnalyticsDTO dto = new ProfessorAnalyticsDTO();
-        
-        // 1. Obtener todos los casos del profesor
-        List<CaseStudy> professorCases = caseStudyRepository.findByCreatedBy(professorId);
-        
-        // 2. Obtener IDs únicos de estudiantes asignados
-        Set<String> studentIds = professorCases.stream()
-            .flatMap(c -> c.getAssignedStudents().stream())
-            .collect(Collectors.toSet());
-        
+        List<CaseStudy> professorCases = getProfessorCasesForIdentifier(professorId);
+        Set<String> studentIds = collectAssignedStudentIds(professorCases);
+
         dto.setStudentCount(studentIds.size());
-        
-        // 3. Calcular progreso promedio
-        Map<String, Double> avgProgress = calculateAverageProgress(studentIds);
-        dto.setAverageProgress(avgProgress);
-        
-        // 4. Obtener estudiantes con bajo rendimiento
-        List<ProfessorAnalyticsDTO.StudentSummaryDTO> lowProgress = 
-            getLowProgressStudents(studentIds, LOW_PROGRESS_THRESHOLD);
-        dto.setLowProgressStudents(lowProgress);
-        
-        // 5. Términos de búsqueda comunes (placeholder)
-        dto.setCommonSearchTerms(Collections.emptyList());
-        
-        // 6. Términos problemáticos (placeholder)
-        dto.setProblematicTerms(Collections.emptyList());
-        
-        // 7. Competencias de estudiantes
-        List<ProfessorAnalyticsDTO.StudentCompetencyDetailsDTO> competencies = 
-            getStudentCompetencies(studentIds);
-        dto.setStudentCompetencies(competencies);
-        
+        dto.setAverageProgress(calculateAverageProgress(studentIds));
+        dto.setLowProgressStudents(getLowProgressStudents(studentIds, LOW_PROGRESS_THRESHOLD));
+        dto.setCommonSearchTerms(getCommonSearchTerms(studentIds));
+        dto.setProblematicTerms(getProblematicTerms(studentIds));
+        dto.setStudentCompetencies(getStudentCompetencies(studentIds));
+
         log.info("Analytics overview generated for {} students", studentIds.size());
-        
         return dto;
     }
-    
+
     @Override
     public StudentProgressDTO getStudentAnalytics(String studentId) {
         log.info("Getting analytics for student: {}", studentId);
         return progressService.getStudentProgress(studentId);
     }
-    
+
     private Map<String, Double> calculateAverageProgress(Set<String> studentIds) {
-        Map<String, Double> result = new HashMap<>();
-        result.put("access", 0.0);
-        result.put("process", 0.0);
-        result.put("communicate", 0.0);
-        
-        if (studentIds.isEmpty()) return result;
-        
-        try {
-            // Para cada estudiante, obtener su progreso real
-            Map<String, Double> accessScores = new HashMap<>();
-            Map<String, Double> processScores = new HashMap<>();
-            Map<String, Double> communicateScores = new HashMap<>();
-            
-            for (String studentId : studentIds) {
-                try {
-                    StudentProgressDTO progress = progressService.getStudentProgress(studentId);
-                    if (progress != null && progress.getCompetencies() != null) {
-                        Map<String, ?> competencies = progress.getCompetencies();
-
-                        Double accessScore = getScore(competencies.get("access"));
-                        if (accessScore != null) {
-                            accessScores.put(studentId, accessScore);
-                        }
-
-                        Double processScore = getScore(competencies.get("process"));
-                        if (processScore != null) {
-                            processScores.put(studentId, processScore);
-                        }
-
-                        Double communicateScore = getScore(competencies.get("communicate"));
-                        if (communicateScore != null) {
-                            communicateScores.put(studentId, communicateScore);
-                        }
-                    }
-                } catch (Exception e) {
-                    log.warn("Could not get progress for student: {}", studentId, e);
-                }
-            }
-            
-            // Calcular promedios con valores reales
-            if (!accessScores.isEmpty()) {
-                double avg = accessScores.values().stream()
-                    .mapToDouble(Double::doubleValue)
-                    .average()
-                    .orElse(0.0);
-                result.put("access", avg);
-            }
-
-            if (!processScores.isEmpty()) {
-                double avg = processScores.values().stream()
-                    .mapToDouble(Double::doubleValue)
-                    .average()
-                    .orElse(0.0);
-                result.put("process", avg);
-            }
-
-            if (!communicateScores.isEmpty()) {
-                double avg = communicateScores.values().stream()
-                    .mapToDouble(Double::doubleValue)
-                    .average()
-                    .orElse(0.0);
-                result.put("communicate", avg);
-            }
-            
-            log.info("Average progress calculated: access={}, process={}, communicate={}", 
-                     result.get("access"), result.get("process"), result.get("communicate"));
-            
-        } catch (Exception e) {
-            log.error("Error calculating average progress", e);
+        if (studentIds.isEmpty()) {
+            return new HashMap<>(EMPTY_COMPETENCY_MAP);
         }
-        
-        return result;
+
+        double accessTotal = 0.0;
+        double processTotal = 0.0;
+        double communicateTotal = 0.0;
+        int studentCount = 0;
+
+        for (String studentId : studentIds) {
+            try {
+                StudentProgressDTO progress = progressService.getStudentProgress(studentId);
+                Map<String, Double> scores = extractCompetencyScores(progress);
+                accessTotal += scores.get("access");
+                processTotal += scores.get("process");
+                communicateTotal += scores.get("communicate");
+                studentCount++;
+            } catch (Exception e) {
+                log.warn("Could not get progress for student {}", studentId, e);
+            }
+        }
+
+        if (studentCount == 0) {
+            return new HashMap<>(EMPTY_COMPETENCY_MAP);
+        }
+
+        Map<String, Double> averages = new HashMap<>();
+        averages.put("access", accessTotal / studentCount);
+        averages.put("process", processTotal / studentCount);
+        averages.put("communicate", communicateTotal / studentCount);
+        return averages;
     }
-    
+
     private List<ProfessorAnalyticsDTO.StudentSummaryDTO> getLowProgressStudents(
-            Set<String> studentIds, Double threshold) {
-        
-        return studentIds.stream()
-            .map(studentId -> {
-                try {
-                    User user = userRepository.findById(studentId).orElse(null);
-                    if (user == null) return null;
-
-                    StudentProgressDTO progress = progressService.getStudentProgress(studentId);
-                    Double avgScore = 0.0;
-                    
-                    // Calcular promedio real de competencias
-                    if (progress != null && progress.getCompetencies() != null) {
-                        Map<String, ?> competencies = progress.getCompetencies();
-                        double total = 0;
-                        int count = 0;
-
-                        for (var entry : competencies.entrySet()) {
-                            Double score = getScore(entry.getValue());
-                            if (score != null) {
-                                total += score;
-                                count++;
-                            }
-                        }
-
-                        if (count > 0) {
-                            avgScore = total / count;
-                        }
-                    }
-
-                    if (avgScore < threshold) {
-                        return new ProfessorAnalyticsDTO.StudentSummaryDTO(
-                            user.getId(),
-                            user.getFirstName() + " " + user.getLastName(),
-                            user.getEmail(),
-                            user.getAvatar(),
-                            avgScore
-                        );
-                    }
-                    return null;
-                } catch (Exception e) {
-                    log.warn("Error getting progress for student: {}", studentId, e);
-                    return null;
+        Set<String> studentIds,
+        Double threshold
+    ) {
+        List<ProfessorAnalyticsDTO.StudentSummaryDTO> result = new ArrayList<>();
+        for (String studentId : studentIds) {
+            try {
+                User user = userRepository.findById(studentId).orElse(null);
+                if (user == null) {
+                    continue;
                 }
-            })
-            .filter(Objects::nonNull)
-            .collect(Collectors.toList());
-    }
-    
-    private List<ProfessorAnalyticsDTO.StudentCompetencyDetailsDTO> getStudentCompetencies(
-            Set<String> studentIds) {
-        
-        return studentIds.stream()
-            .map(studentId -> {
-                try {
-                    User user = userRepository.findById(studentId).orElse(null);
-                    if (user == null) return null;
-                    
-                    StudentProgressDTO progress = progressService.getStudentProgress(studentId);
-                    
-                    Map<String, Double> scores = new HashMap<>();
-                    double total = 0;
-                    int count = 0;
-                    
-                    if (progress != null && progress.getCompetencies() != null) {
-                        Map<String, ?> competencies = progress.getCompetencies();
+                StudentProgressDTO progress = progressService.getStudentProgress(studentId);
+                Map<String, Double> scores = extractCompetencyScores(progress);
+                double averageScore = (scores.get("access") + scores.get("process") + scores.get("communicate")) / 3.0;
 
-                        for (var entry : competencies.entrySet()) {
-                            String key = entry.getKey();
-                            Double score = getScore(entry.getValue());
-                            if (score == null) {
-                                score = 0.0;
-                            }
-                            scores.put(key, score);
-                            total += score;
-                            count++;
-                        }
-                    }
-                    
-                    return new ProfessorAnalyticsDTO.StudentCompetencyDetailsDTO(
+                if (averageScore < threshold) {
+                    result.add(new ProfessorAnalyticsDTO.StudentSummaryDTO(
                         user.getId(),
                         user.getFirstName() + " " + user.getLastName(),
                         user.getEmail(),
                         user.getAvatar(),
-                        scores,
-                        count > 0 ? total / count : 0.0
-                    );
-                } catch (Exception e) {
-                    log.warn("Error getting competencies for student: {}", studentId, e);
-                    return null;
+                        averageScore
+                    ));
                 }
-            })
-            .filter(Objects::nonNull)
+            } catch (Exception e) {
+                log.warn("Error getting low-progress candidate {}", studentId, e);
+            }
+        }
+        return result;
+    }
+
+    private List<ProfessorAnalyticsDTO.StudentCompetencyDetailsDTO> getStudentCompetencies(Set<String> studentIds) {
+        List<ProfessorAnalyticsDTO.StudentCompetencyDetailsDTO> result = new ArrayList<>();
+        for (String studentId : studentIds) {
+            try {
+                User user = userRepository.findById(studentId).orElse(null);
+                if (user == null) {
+                    continue;
+                }
+                StudentProgressDTO progress = progressService.getStudentProgress(studentId);
+                Map<String, Double> scores = extractCompetencyScores(progress);
+                double averageScore = (scores.get("access") + scores.get("process") + scores.get("communicate")) / 3.0;
+
+                result.add(new ProfessorAnalyticsDTO.StudentCompetencyDetailsDTO(
+                    user.getId(),
+                    user.getFirstName() + " " + user.getLastName(),
+                    user.getEmail(),
+                    user.getAvatar(),
+                    scores,
+                    averageScore
+                ));
+            } catch (Exception e) {
+                log.warn("Error getting competency details for student {}", studentId, e);
+            }
+        }
+        return result;
+    }
+
+    private List<ProfessorAnalyticsDTO.SearchTermFrequencyDTO> getCommonSearchTerms(Set<String> studentIds) {
+        if (studentIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<SearchSession> sessions;
+        try {
+            sessions = searchSessionRepository.findByUser_IdInOrderByStartedAtDesc(studentIds);
+        } catch (Exception e) {
+            log.warn("Could not fetch common terms for student IDs {}", studentIds, e);
+            return Collections.emptyList();
+        }
+        if (sessions.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        Map<String, Integer> counts = new HashMap<>();
+        for (SearchSession session : sessions) {
+            for (String term : extractQueryTerms(session.getOriginalQuery())) {
+                counts.merge(term, 1, Integer::sum);
+            }
+        }
+
+        return counts.entrySet().stream()
+            .sorted(Map.Entry.<String, Integer>comparingByValue(Comparator.reverseOrder()))
+            .limit(10)
+            .map(entry -> new ProfessorAnalyticsDTO.SearchTermFrequencyDTO(entry.getKey(), entry.getValue()))
             .collect(Collectors.toList());
+    }
+
+    private List<ProfessorAnalyticsDTO.ProblematicTermDTO> getProblematicTerms(Set<String> studentIds) {
+        if (studentIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<SearchSession> sessions;
+        try {
+            sessions = searchSessionRepository.findByUser_IdInOrderByStartedAtDesc(studentIds);
+        } catch (Exception e) {
+            log.warn("Could not fetch problematic terms for student IDs {}", studentIds, e);
+            return Collections.emptyList();
+        }
+        if (sessions.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        Map<String, Integer> occurrences = new HashMap<>();
+        Map<String, Integer> failures = new HashMap<>();
+
+        for (SearchSession session : sessions) {
+            Set<String> termsInSession = new HashSet<>(extractQueryTerms(session.getOriginalQuery()));
+            boolean isFailure = session.getResultsCount() == null || session.getResultsCount() <= 0;
+            for (String term : termsInSession) {
+                occurrences.merge(term, 1, Integer::sum);
+                if (isFailure) {
+                    failures.merge(term, 1, Integer::sum);
+                }
+            }
+        }
+
+        List<ProfessorAnalyticsDTO.ProblematicTermDTO> result = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : occurrences.entrySet()) {
+            String term = entry.getKey();
+            int total = entry.getValue();
+            int failed = failures.getOrDefault(term, 0);
+            if (total < MIN_OCCURRENCES_FOR_PROBLEMATIC) {
+                continue;
+            }
+            double errorRate = (double) failed / total;
+            if (errorRate < PROBLEMATIC_ERROR_RATE_THRESHOLD) {
+                continue;
+            }
+            result.add(new ProfessorAnalyticsDTO.ProblematicTermDTO(term, errorRate));
+        }
+
+        result.sort((a, b) -> Double.compare(
+            b.getErrorRate() != null ? b.getErrorRate() : 0.0,
+            a.getErrorRate() != null ? a.getErrorRate() : 0.0
+        ));
+        if (result.size() > 10) {
+            return result.subList(0, 10);
+        }
+        return result;
+    }
+
+    private List<String> extractQueryTerms(String rawQuery) {
+        if (rawQuery == null || rawQuery.isBlank()) {
+            return Collections.emptyList();
+        }
+        List<String> terms = new ArrayList<>();
+        Matcher matcher = TERM_PATTERN.matcher(rawQuery.toLowerCase(Locale.ROOT));
+        while (matcher.find()) {
+            String term = matcher.group();
+            if (term == null || term.isBlank()) {
+                continue;
+            }
+            if (STOP_WORDS.contains(term)) {
+                continue;
+            }
+            terms.add(term);
+        }
+        return terms;
+    }
+
+    private Map<String, Double> extractCompetencyScores(StudentProgressDTO progress) {
+        Map<String, Double> scores = new HashMap<>(EMPTY_COMPETENCY_MAP);
+        if (progress == null || progress.getCompetencies() == null) {
+            return scores;
+        }
+
+        scores.put("access", getScoreOrDefault(progress.getCompetencies().get("access"), 0.0));
+        scores.put("process", getScoreOrDefault(progress.getCompetencies().get("process"), 0.0));
+        scores.put("communicate", getScoreOrDefault(progress.getCompetencies().get("communicate"), 0.0));
+        return scores;
     }
 
     @Override
     public List<StudentProgressDTO> getProfessorStudents(String professorId) {
         log.info("Getting students for professor: {}", professorId);
-        
-        List<CaseStudy> professorCases = caseStudyRepository.findByCreatedBy(professorId);
-        
-        Set<String> studentIds = professorCases.stream()
-            .flatMap(c -> c.getAssignedStudents().stream())
-            .collect(Collectors.toSet());
-        
-        return studentIds.stream()
-            .map(progressService::getStudentProgress)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toList());
+
+        List<CaseStudy> professorCases = getProfessorCasesForIdentifier(professorId);
+        Set<String> studentIds = collectAssignedStudentIds(professorCases);
+
+        List<StudentProgressDTO> result = new ArrayList<>();
+        for (String studentId : studentIds) {
+            try {
+                StudentProgressDTO progress = progressService.getStudentProgress(studentId);
+                if (progress != null) {
+                    result.add(progress);
+                }
+            } catch (Exception e) {
+                log.warn("Error getting progress for student {}", studentId, e);
+            }
+        }
+        return result;
     }
 
     @Override
     public List<CaseStudyDTO> getProfessorCases(String professorId) {
         log.info("Getting cases for professor: {}", professorId);
-        
-        List<CaseStudy> cases = caseStudyRepository.findByCreatedBy(professorId);
-        
-        return cases.stream()
-            .map(this::convertToDTO)
-            .collect(Collectors.toList());
+
+        List<CaseStudy> cases = getProfessorCasesForIdentifier(professorId);
+        return cases.stream().map(this::convertToDTO).collect(Collectors.toList());
     }
 
     @Override
+    @Transactional
     public CaseStudyDTO createCaseStudy(CaseStudyDTO caseData, String professorId) {
         log.info("Creating case study for professor: {}", professorId);
-        
-        userRepository.findById(professorId)
+
+        User professor = findUserByIdentifier(professorId)
             .orElseThrow(() -> new ResourceNotFoundException("Professor not found: " + professorId));
-        
+
         CaseStudy caseStudy = new CaseStudy();
         caseStudy.setTitle(caseData.getTitle());
         caseStudy.setScenario(caseData.getScenario());
-        caseStudy.setCreatedBy(professorId);
-        // createdAt is set automatically by @CreationTimestamp
-        
+        caseStudy.setCreatedBy(professor.getEmail() != null ? professor.getEmail() : professor.getId());
+        caseStudy.setDifficulty(CaseDifficulty.NOVICE);
+        caseStudy.setStatus(CaseStatus.DRAFT);
+        caseStudy.setRequiredArticles(caseData.getRequiredArticles() != null ? caseData.getRequiredArticles() : List.of());
+        caseStudy.setOptionalArticles(caseData.getOptionalArticles() != null ? caseData.getOptionalArticles() : List.of());
+        caseStudy.setGuidingQuestions(caseData.getGuidingQuestions() != null ? caseData.getGuidingQuestions() : List.of());
+        caseStudy.setAssignedStudents(caseData.getAssignedStudents() != null ? caseData.getAssignedStudents() : List.of());
+
         CaseStudy savedCase = caseStudyRepository.save(caseStudy);
         return convertToDTO(savedCase);
     }
@@ -303,31 +351,27 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
         dto.setScenario(caseStudy.getScenario());
         dto.setDifficulty(caseStudy.getDifficulty() != null ? caseStudy.getDifficulty().toString() : null);
         dto.setStatus(caseStudy.getStatus() != null ? caseStudy.getStatus().toString() : null);
-        dto.setRequiredArticles(caseStudy.getRequiredArticles());
-        dto.setOptionalArticles(caseStudy.getOptionalArticles());
-        dto.setGuidingQuestions(caseStudy.getGuidingQuestions());
+        dto.setRequiredArticles(copyList(caseStudy.getRequiredArticles()));
+        dto.setOptionalArticles(copyList(caseStudy.getOptionalArticles()));
+        dto.setGuidingQuestions(copyList(caseStudy.getGuidingQuestions()));
         dto.setCreatedBy(caseStudy.getCreatedBy());
         dto.setCreatedAt(caseStudy.getCreatedAt());
+        dto.setStartDate(caseStudy.getStartDate());
         dto.setDueDate(caseStudy.getDueDate());
-        // Note: rubric conversion would need additional logic for RubricItemDTO
+        dto.setAssignedStudents(copyList(caseStudy.getAssignedStudents()));
         return dto;
     }
 
     @Override
     public Map<String, Object> getClassPerformanceMetrics(String professorId) {
         log.info("Calculating class performance metrics for professor: {}", professorId);
-        
+
         Map<String, Object> performance = new HashMap<>();
-        
+
         try {
-            // Obtener casos del profesor
-            List<CaseStudy> professorCases = caseStudyRepository.findByCreatedBy(professorId);
-            
-            // Obtener estudiantes asignados
-            Set<String> studentIds = professorCases.stream()
-                .flatMap(c -> c.getAssignedStudents().stream())
-                .collect(Collectors.toSet());
-            
+            List<CaseStudy> professorCases = getProfessorCasesForIdentifier(professorId);
+            Set<String> studentIds = collectAssignedStudentIds(professorCases);
+
             if (studentIds.isEmpty()) {
                 performance.put("averageScore", 0.0);
                 performance.put("completionRate", 0.0);
@@ -336,56 +380,28 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
                 performance.put("studentCount", 0);
                 return performance;
             }
-            
-            // Calcular métricas
+
             List<Map<String, Object>> studentMetrics = new ArrayList<>();
             double totalScore = 0;
-            double accessTotal = 0, processTotal = 0, commTotal = 0;
+            double accessTotal = 0;
+            double processTotal = 0;
+            double commTotal = 0;
             int completedCount = 0;
-            
+
             for (String studentId : studentIds) {
                 try {
                     StudentProgressDTO progress = progressService.getStudentProgress(studentId);
                     if (progress != null) {
                         User user = userRepository.findById(studentId).orElse(null);
                         if (user != null) {
-                            double studentAvg = 0;
-                            Map<String, ?> competencies = progress.getCompetencies();
-                            
-                            if (competencies != null) {
-                                double compTotal = 0;
-                                int compCount = 0;
-                                
-                                // Extraer scores de cada competencia
-                                if (competencies.containsKey("access")) {
-                                    double score = getScoreOrDefault(competencies.get("access"), 0.0);
-                                    accessTotal += score;
-                                    compTotal += score;
-                                    compCount++;
-                                }
-                                
-                                if (competencies.containsKey("process")) {
-                                    double score = getScoreOrDefault(competencies.get("process"), 0.0);
-                                    processTotal += score;
-                                    compTotal += score;
-                                    compCount++;
-                                }
-                                
-                                if (competencies.containsKey("communicate")) {
-                                    double score = getScoreOrDefault(competencies.get("communicate"), 0.0);
-                                    commTotal += score;
-                                    compTotal += score;
-                                    compCount++;
-                                }
-                                
-                                if (compCount > 0) {
-                                    studentAvg = compTotal / compCount;
-                                    completedCount++;
-                                }
-                            }
-                            
+                            Map<String, Double> scores = extractCompetencyScores(progress);
+                            double studentAvg = (scores.get("access") + scores.get("process") + scores.get("communicate")) / 3.0;
                             totalScore += studentAvg;
-                            
+                            accessTotal += scores.get("access");
+                            processTotal += scores.get("process");
+                            commTotal += scores.get("communicate");
+                            completedCount++;
+
                             studentMetrics.add(Map.of(
                                 "id", studentId,
                                 "name", user.getFirstName() + " " + user.getLastName(),
@@ -394,15 +410,12 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
                         }
                     }
                 } catch (Exception e) {
-                    log.warn("Error getting metrics for student: {}", studentId, e);
+                    log.warn("Error getting metrics for student {}", studentId, e);
                 }
             }
-            
-            // Calcular promedios
+
             double avgScore = completedCount > 0 ? totalScore / completedCount : 0.0;
             double completionRate = (completedCount * 100.0) / studentIds.size();
-            
-            // Distribución de competencias
             Map<String, Double> competencyDist = completedCount > 0
                 ? Map.of(
                     "access", accessTotal / completedCount,
@@ -410,24 +423,18 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
                     "communicate", commTotal / completedCount
                 )
                 : EMPTY_COMPETENCY_MAP;
-            
-            // Top estudiantes (ordenar por score descendente y tomar los 5 mejores)
+
             List<Map<String, Object>> topStudents = studentMetrics.stream()
                 .sorted((a, b) -> Double.compare((Double) b.get("score"), (Double) a.get("score")))
                 .limit(5)
                 .collect(Collectors.toList());
-            
-            // Construir respuesta
+
             performance.put("averageScore", Math.round(avgScore * 100.0) / 100.0);
             performance.put("completionRate", Math.round(completionRate * 100.0) / 100.0);
             performance.put("competencyDistribution", competencyDist);
             performance.put("topStudents", topStudents);
             performance.put("studentCount", studentIds.size());
             performance.put("completedCount", completedCount);
-            
-            log.info("Class performance metrics calculated: avgScore={}, completionRate={}", 
-                     avgScore, completionRate);
-            
         } catch (Exception e) {
             log.error("Error calculating class performance metrics", e);
             performance.put("averageScore", 0.0);
@@ -435,7 +442,7 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
             performance.put("competencyDistribution", EMPTY_COMPETENCY_MAP);
             performance.put("topStudents", List.of());
         }
-        
+
         return performance;
     }
 
@@ -461,5 +468,137 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
     private double getScoreOrDefault(Object competency, double fallback) {
         Double score = getScore(competency);
         return score != null ? score : fallback;
+    }
+
+    private <T> List<T> copyList(List<T> source) {
+        if (source == null || source.isEmpty()) {
+            return List.of();
+        }
+        return new ArrayList<>(source);
+    }
+
+    private List<CaseStudy> getProfessorCasesForIdentifier(String professorId) {
+        Set<String> professorIdentifiers = resolveProfessorIdentifiers(professorId);
+        if (professorIdentifiers.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, CaseStudy> merged = new HashMap<>();
+        for (String identifier : professorIdentifiers) {
+            try {
+                List<CaseStudy> cases = caseStudyRepository.findByCreatedBy(identifier);
+                for (CaseStudy caseStudy : cases) {
+                    if (caseStudy == null || caseStudy.getId() == null) {
+                        continue;
+                    }
+                    merged.put(caseStudy.getId(), caseStudy);
+                }
+            } catch (Exception e) {
+                log.warn("Could not fetch cases for professor identifier {}", identifier, e);
+            }
+        }
+        return new ArrayList<>(merged.values());
+    }
+
+    private Set<String> collectAssignedStudentIds(List<CaseStudy> cases) {
+        Set<String> rawStudentRefs = cases.stream()
+            .filter(Objects::nonNull)
+            .flatMap(c -> c.getAssignedStudents() != null
+                ? c.getAssignedStudents().stream()
+                : java.util.stream.Stream.<String>empty())
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        return resolveStudentIds(rawStudentRefs);
+    }
+
+    private Set<String> resolveProfessorIdentifiers(String professorId) {
+        if (professorId == null || professorId.isBlank()) {
+            return Set.of();
+        }
+
+        Set<String> identifiers = new LinkedHashSet<>();
+        identifiers.add(professorId.trim());
+
+        findUserByIdentifier(professorId).ifPresent(user -> addUserIdentifiers(identifiers, user));
+        return identifiers;
+    }
+
+    private Optional<User> findUserByIdentifier(String identifier) {
+        if (identifier == null || identifier.isBlank()) {
+            return Optional.empty();
+        }
+
+        String normalized = identifier.trim();
+        try {
+            Optional<User> byId = userRepository.findById(normalized);
+            if (byId.isPresent()) {
+                return byId;
+            }
+        } catch (Exception e) {
+            log.debug("Identifier {} is not a direct user ID", normalized);
+        }
+
+        Optional<User> byEmail = userRepository.findByEmail(normalized);
+        if (byEmail.isPresent()) {
+            return byEmail;
+        }
+
+        return userRepository.findByUsername(normalized);
+    }
+
+    private void addUserIdentifiers(Set<String> target, User user) {
+        if (user == null) {
+            return;
+        }
+        if (user.getId() != null && !user.getId().isBlank()) {
+            target.add(user.getId());
+        }
+        if (user.getEmail() != null && !user.getEmail().isBlank()) {
+            target.add(user.getEmail());
+        }
+        if (user.getUsername() != null && !user.getUsername().isBlank()) {
+            target.add(user.getUsername());
+        }
+    }
+
+    private Set<String> resolveStudentIds(Set<String> rawStudentReferences) {
+        if (rawStudentReferences == null || rawStudentReferences.isEmpty()) {
+            return Set.of();
+        }
+
+        Set<String> resolved = new LinkedHashSet<>();
+        for (String reference : rawStudentReferences) {
+            resolveStudentId(reference).ifPresent(resolved::add);
+        }
+        return resolved;
+    }
+
+    private Optional<String> resolveStudentId(String reference) {
+        if (reference == null || reference.isBlank()) {
+            return Optional.empty();
+        }
+        String normalized = reference.trim();
+
+        try {
+            Optional<User> byId = userRepository.findById(normalized);
+            if (byId.isPresent()) {
+                return Optional.of(byId.get().getId());
+            }
+        } catch (Exception e) {
+            log.debug("Student reference {} is not a direct user ID", normalized);
+        }
+
+        Optional<User> byEmail = userRepository.findByEmail(normalized);
+        if (byEmail.isPresent()) {
+            return Optional.of(byEmail.get().getId());
+        }
+
+        Optional<User> byUsername = userRepository.findByUsername(normalized);
+        if (byUsername.isPresent()) {
+            return Optional.of(byUsername.get().getId());
+        }
+
+        log.warn("Skipping unresolved student reference in professor analytics: {}", normalized);
+        return Optional.empty();
     }
 }

@@ -28,6 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { RoleHelpPanel } from '@/components/role-help-panel'
 import {
   BookOpen,
   Search,
@@ -238,6 +239,7 @@ export default function StudentLayout({
         {/* Page content */}
         <main className="p-4 sm:p-6 lg:p-8">{children}</main>
       </div>
+      <RoleHelpPanel role="student" />
     </div>
     <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
       <DialogContent>

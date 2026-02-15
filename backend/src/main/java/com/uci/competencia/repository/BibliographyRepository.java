@@ -34,4 +34,6 @@ public interface BibliographyRepository extends JpaRepository<Bibliography, Stri
      * Obtiene bibliografías por formato
      */
     List<Bibliography> findByUserIdAndFormat(String userId, String format);
+
+    long countByUserId(String userId);
 }

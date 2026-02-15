@@ -21,6 +21,8 @@ public interface CaseSubmissionRepository extends JpaRepository<CaseSubmission, 
 
     Optional<CaseSubmission> findByCaseIdAndStudentId(String caseId, String studentId);
 
+    List<CaseSubmission> findByCaseIdAndStudentIdInOrderBySubmittedAtDesc(String caseId, List<String> studentIds);
+
     Optional<CaseSubmission> findByCaseIdAndStudentIdAndStatus(String caseId, String studentId, SubmissionStatus status);
 
     List<CaseSubmission> findByStatus(SubmissionStatus status);

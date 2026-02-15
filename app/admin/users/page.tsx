@@ -32,7 +32,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Label } from "@/components/ui/label"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CSVUserImporter } from "@/components/csv-user-importer"
 import { adminUsersApi } from "@/lib/api"
 import {
@@ -45,13 +44,10 @@ import {
   UserCheck,
   UserX,
   Mail,
-  Download,
   Upload,
-  Filter,
   GraduationCap,
   BookOpen,
   Shield,
-  Calendar,
   Clock,
   ChevronLeft,
   ChevronRight,
@@ -62,7 +58,7 @@ type UserRow = {
   name: string
   email: string
   role: "student" | "professor" | "admin"
-  status: "active" | "inactive" | "pending"
+  status: "active" | "inactive"
   faculty: string
   lastLogin: string
   createdAt: string
@@ -131,6 +127,14 @@ type UserFormState = {
 
 const PAGE_SIZE = 20
 
+type UserStats = {
+  students: number
+  professors: number
+  admins: number
+  active: number
+  inactive: number
+}
+
 const toUserRow = (user: any): UserRow => {
   const name =
     user?.name ||
@@ -138,13 +142,13 @@ const toUserRow = (user: any): UserRow => {
     user?.email ||
     "Sin nombre"
   const status: UserRow["status"] =
-    typeof user?.status === "string"
-      ? user.status
+    typeof user?.status === "string" && user.status.toLowerCase() === "active"
+      ? "active"
       : typeof user?.isActive === "boolean"
         ? user.isActive
           ? "active"
           : "inactive"
-        : "pending"
+        : "inactive"
 
   const roleValue = String(user?.role ?? "student").toLowerCase()
   const role: UserRow["role"] = roleValue.includes("admin")
@@ -179,6 +183,13 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<UserRow[]>([])
   const [total, setTotal] = useState(0)
   const [totalPages, setTotalPages] = useState(1)
+  const [stats, setStats] = useState<UserStats>({
+    students: 0,
+    professors: 0,
+    admins: 0,
+    active: 0,
+    inactive: 0,
+  })
   const [isLoading, setIsLoading] = useState(false)
   const [isMutating, setIsMutating] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -197,24 +208,36 @@ export default function AdminUsersPage() {
     try {
       const response = await adminUsersApi.getAll(currentPage, PAGE_SIZE, {
         role: roleFilter !== "all" ? (roleFilter as any) : undefined,
-        status:
-          statusFilter !== "all" && statusFilter !== "pending"
-            ? statusFilter
-            : undefined,
+        status: statusFilter !== "all" ? statusFilter : undefined,
+        search: searchQuery || undefined,
       })
       const normalized = response.users.map(toUserRow)
       setUsers(normalized)
       setTotal(response.total)
       setTotalPages(response.totalPages || Math.max(1, Math.ceil(response.total / PAGE_SIZE)))
+      setStats({
+        students: Number(response.stats?.students ?? 0),
+        professors: Number(response.stats?.professors ?? 0),
+        admins: Number(response.stats?.admins ?? 0),
+        active: Number(response.stats?.active ?? 0),
+        inactive: Number(response.stats?.inactive ?? 0),
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cargar usuarios")
       setUsers([])
       setTotal(0)
       setTotalPages(1)
+      setStats({
+        students: 0,
+        professors: 0,
+        admins: 0,
+        active: 0,
+        inactive: 0,
+      })
     } finally {
       setIsLoading(false)
     }
-  }, [currentPage, roleFilter, statusFilter])
+  }, [currentPage, roleFilter, statusFilter, searchQuery])
 
   const resetForm = () => {
     setFormState({ name: "", email: "", role: "student", faculty: "" })
@@ -353,8 +376,23 @@ export default function AdminUsersPage() {
     }
   }
 
-  const handleBulkEmail = () => {
-    setInfo("Funcionalidad de correo masivo no disponible en backend.")
+  const handleBulkEmail = (targetIds?: string[]) => {
+    const ids = targetIds && targetIds.length > 0 ? targetIds : selectedUsers
+    const emails = users
+      .filter((user) => ids.includes(user.id))
+      .map((user) => user.email)
+      .filter(Boolean)
+
+    if (emails.length === 0) {
+      setInfo("No hay correos válidos seleccionados.")
+      return
+    }
+
+    const bcc = encodeURIComponent(emails.join(","))
+    const subject = encodeURIComponent("Comunicado del administrador")
+    const body = encodeURIComponent("")
+    window.location.href = `mailto:?bcc=${bcc}&subject=${subject}&body=${body}`
+    setInfo(`Se abrió el cliente de correo con ${emails.length} destinatario(s).`)
   }
 
   useEffect(() => {
@@ -368,17 +406,6 @@ export default function AdminUsersPage() {
   useEffect(() => {
     setSelectedUsers((prev) => prev.filter((id) => users.some((u) => u.id === id)))
   }, [users])
-
-  const filteredUsers = useMemo(() => {
-    return users.filter((user) => {
-      const matchesSearch =
-        user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        user.email.toLowerCase().includes(searchQuery.toLowerCase())
-      const matchesRole = roleFilter === "all" || user.role === roleFilter
-      const matchesStatus = statusFilter === "all" || user.status === statusFilter
-      return matchesSearch && matchesRole && matchesStatus
-    })
-  }, [users, searchQuery, roleFilter, statusFilter])
 
   const pages = useMemo(() => {
     const maxPages = 5
@@ -396,10 +423,10 @@ export default function AdminUsersPage() {
   }
 
   const toggleAllUsers = () => {
-    if (selectedUsers.length === filteredUsers.length) {
+    if (selectedUsers.length === users.length) {
       setSelectedUsers([])
     } else {
-      setSelectedUsers(filteredUsers.map((u) => u.id))
+      setSelectedUsers(users.map((u) => u.id))
     }
   }
 
@@ -430,31 +457,13 @@ export default function AdminUsersPage() {
     const variants: Record<string, { label: string; className: string }> = {
       active: { label: "Activo", className: "bg-green-100 text-green-700" },
       inactive: { label: "Inactivo", className: "bg-gray-100 text-gray-700" },
-      pending: { label: "Pendiente", className: "bg-amber-100 text-amber-700" },
     }
-    const { label, className } = variants[status] || variants.pending
+    const { label, className } = variants[status] || variants.inactive
     return <Badge className={className}>{label}</Badge>
   }
 
-  const totalOnPage = filteredUsers.length
-  const displayTotal = searchQuery ? filteredUsers.length : total
-  const stats = useMemo(() => {
-    return filteredUsers.reduce(
-      (acc, user) => {
-        acc[user.role] += 1
-        acc[user.status] += 1
-        return acc
-      },
-      {
-        student: 0,
-        professor: 0,
-        admin: 0,
-        active: 0,
-        inactive: 0,
-        pending: 0,
-      }
-    )
-  }, [filteredUsers])
+  const totalOnPage = users.length
+  const displayTotal = total
 
   return (
     <div className="space-y-6">
@@ -655,7 +664,7 @@ export default function AdminUsersPage() {
               <GraduationCap className="h-5 w-5 text-blue-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold">{stats.student}</p>
+              <p className="text-2xl font-bold">{stats.students}</p>
               <p className="text-sm text-muted-foreground">Estudiantes</p>
             </div>
           </CardContent>
@@ -666,7 +675,7 @@ export default function AdminUsersPage() {
               <BookOpen className="h-5 w-5 text-purple-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold">{stats.professor}</p>
+              <p className="text-2xl font-bold">{stats.professors}</p>
               <p className="text-sm text-muted-foreground">Profesores</p>
             </div>
           </CardContent>
@@ -677,7 +686,7 @@ export default function AdminUsersPage() {
               <Shield className="h-5 w-5 text-red-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold">{stats.admin}</p>
+              <p className="text-2xl font-bold">{stats.admins}</p>
               <p className="text-sm text-muted-foreground">Administradores</p>
             </div>
           </CardContent>
@@ -688,8 +697,8 @@ export default function AdminUsersPage() {
               <Clock className="h-5 w-5 text-amber-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold">{stats.pending}</p>
-              <p className="text-sm text-muted-foreground">Pendientes</p>
+              <p className="text-2xl font-bold">{stats.inactive}</p>
+              <p className="text-sm text-muted-foreground">Inactivos</p>
             </div>
           </CardContent>
         </Card>
@@ -728,7 +737,6 @@ export default function AdminUsersPage() {
                   <SelectItem value="all">Todos</SelectItem>
                   <SelectItem value="active">Activo</SelectItem>
                   <SelectItem value="inactive">Inactivo</SelectItem>
-                  <SelectItem value="pending">Pendiente</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -753,7 +761,7 @@ export default function AdminUsersPage() {
                   <UserX className="mr-2 h-4 w-4" />
                   Desactivar
                 </Button>
-                <Button variant="outline" size="sm" onClick={handleBulkEmail}>
+                <Button variant="outline" size="sm" onClick={() => handleBulkEmail()}>
                   <Mail className="mr-2 h-4 w-4" />
                   Enviar correo
                 </Button>
@@ -797,7 +805,7 @@ export default function AdminUsersPage() {
                 <tr className="border-b">
                   <th className="text-left py-3 px-4">
                     <Checkbox
-                      checked={selectedUsers.length === filteredUsers.length && filteredUsers.length > 0}
+                      checked={selectedUsers.length === users.length && users.length > 0}
                       onCheckedChange={toggleAllUsers}
                     />
                   </th>
@@ -822,7 +830,7 @@ export default function AdminUsersPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredUsers.map((user) => (
+                {users.map((user) => (
                   <tr key={user.id} className="border-b last:border-0 hover:bg-muted/50">
                     <td className="py-3 px-4">
                       <Checkbox
@@ -867,7 +875,7 @@ export default function AdminUsersPage() {
                             <Edit className="mr-2 h-4 w-4" />
                             Editar
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleBulkEmail()}>
+                          <DropdownMenuItem onClick={() => handleBulkEmail([user.id])}>
                             <Mail className="mr-2 h-4 w-4" />
                             Enviar correo
                           </DropdownMenuItem>

@@ -77,6 +77,19 @@ export default function ProfessorDashboard() {
     return Math.round((access + process + communicate) / 3)
   }, [dashboardData])
 
+  const handleSendReminderAll = useCallback(() => {
+    if (!dashboardData?.lowProgressStudents?.length) return
+    const emails = dashboardData.lowProgressStudents
+      .map((student) => student.email)
+      .filter((email) => typeof email === 'string' && email.includes('@'))
+    if (emails.length === 0) return
+    const subject = encodeURIComponent('Seguimiento de progreso academico')
+    const body = encodeURIComponent(
+      'Hola,\n\nEste es un recordatorio para reforzar tu progreso en las competencias de busqueda y evaluacion de evidencia.\n\nSaludos.'
+    )
+    window.location.href = `mailto:${emails.join(',')}?subject=${subject}&body=${body}`
+  }, [dashboardData])
+
   if (isLoading) {
     return <DashboardSkeleton />
   }
@@ -179,9 +192,7 @@ export default function ProfessorDashboard() {
           students={dashboardData.studentCompetencies}
           isLoading={isLoading}
           lowProgressThreshold={60}
-          onStudentClick={(student) => {
-            console.log('Ver detalles del estudiante:', student)
-          }}
+          onStudentClick={() => undefined}
         />
       )}
 
@@ -289,7 +300,12 @@ export default function ProfessorDashboard() {
             )}
 
             {dashboardData?.lowProgressStudents && dashboardData.lowProgressStudents.length > 0 && (
-              <Button variant="outline" className="w-full mt-4 bg-transparent" size="sm">
+              <Button
+                variant="outline"
+                className="w-full mt-4 bg-transparent"
+                size="sm"
+                onClick={handleSendReminderAll}
+              >
                 Enviar recordatorio a todos
               </Button>
             )}
@@ -368,14 +384,14 @@ export default function ProfessorDashboard() {
             <div>
               <h4 className="text-sm font-medium mb-3">Términos más buscados</h4>
               <div className="flex flex-wrap gap-2">
-                {dashboardData?.commonSearchTerms?.slice(0, 6).map((item) => (
-                  <Badge key={item.term} variant="secondary" className="gap-1">
-                    {item.term}
-                    <span className="text-xs text-muted-foreground">({item.count})</span>
-                  </Badge>
-                )) || (
-                  <p className="text-sm text-muted-foreground">Sin datos disponibles</p>
-                )}
+                {dashboardData?.commonSearchTerms && dashboardData.commonSearchTerms.length > 0
+                  ? dashboardData.commonSearchTerms.slice(0, 6).map((item) => (
+                      <Badge key={item.term} variant="secondary" className="gap-1">
+                        {item.term}
+                        <span className="text-xs text-muted-foreground">({item.count})</span>
+                      </Badge>
+                    ))
+                  : <p className="text-sm text-muted-foreground">Sin datos disponibles</p>}
               </div>
             </div>
 

@@ -50,7 +50,8 @@ public class SearchHedgesController {
     @GetMapping("/{id}")
     public ResponseEntity<SearchHedgeDTO> getHedgeById(@PathVariable String id) {
         log.info("Getting hedge with id: {}", id);
-        return hedgeService.getHedgeById(id)
+        String professorId = SecurityUtils.getCurrentUserId();
+        return hedgeService.getHedgeById(id, professorId)
             .map(ResponseEntity::ok)
             .orElse(ResponseEntity.notFound().build());
     }
@@ -81,7 +82,8 @@ public class SearchHedgesController {
             @PathVariable String id,
             @RequestBody SearchHedgeDTO hedge) {
         log.info("Updating hedge with id: {}", id);
-        SearchHedgeDTO updated = hedgeService.updateHedge(id, hedge);
+        String professorId = SecurityUtils.getCurrentUserId();
+        SearchHedgeDTO updated = hedgeService.updateHedge(id, hedge, professorId);
         return ResponseEntity.ok(updated);
     }
     
@@ -94,7 +96,8 @@ public class SearchHedgesController {
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteHedge(@PathVariable String id) {
         log.info("Deleting hedge with id: {}", id);
-        hedgeService.deleteHedge(id);
+        String professorId = SecurityUtils.getCurrentUserId();
+        hedgeService.deleteHedge(id, professorId);
         return ResponseEntity.noContent().build();
     }
     

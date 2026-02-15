@@ -46,6 +46,11 @@ public class CaseStudyDTO {
     @JsonFormat(shape = JsonFormat.Shape.STRING, 
                 pattern = "yyyy-MM-dd'T'HH:mm:ss'Z'",
                 timezone = "UTC")
+    private LocalDateTime startDate;
+
+    @JsonFormat(shape = JsonFormat.Shape.STRING, 
+                pattern = "yyyy-MM-dd'T'HH:mm:ss'Z'",
+                timezone = "UTC")
     private LocalDateTime dueDate;
     
     

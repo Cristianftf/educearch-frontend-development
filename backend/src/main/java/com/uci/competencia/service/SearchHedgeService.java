@@ -21,7 +21,7 @@ public interface SearchHedgeService {
      * @param id ID del hedge
      * @return Optional del SearchHedgeDTO
      */
-    Optional<SearchHedgeDTO> getHedgeById(String id);
+    Optional<SearchHedgeDTO> getHedgeById(String id, String professorId);
     
     /**
      * Crea un nuevo hedge de búsqueda
@@ -37,13 +37,13 @@ public interface SearchHedgeService {
      * @param hedge Nuevos datos del hedge
      * @return SearchHedgeDTO actualizado
      */
-    SearchHedgeDTO updateHedge(String id, SearchHedgeDTO hedge);
+    SearchHedgeDTO updateHedge(String id, SearchHedgeDTO hedge, String professorId);
     
     /**
      * Elimina un hedge de búsqueda
      * @param id ID del hedge a eliminar
      */
-    void deleteHedge(String id);
+    void deleteHedge(String id, String professorId);
     
     /**
      * Obtiene todas las categorías disponibles

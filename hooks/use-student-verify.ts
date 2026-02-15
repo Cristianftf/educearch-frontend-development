@@ -39,7 +39,7 @@ export function useStudentVerify(): UseStudentVerifyReturn {
           signal: controller.signal,
           headers: {
             'X-Student-Level': 'intermediate', // Podría venir del contexto del estudiante
-            'X-Prefer-Fast': true // Priorizar velocidad sobre precisión
+            'X-Prefer-Fast': 'true' // Priorizar velocidad sobre precisión
           }
         })
 

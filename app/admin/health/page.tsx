@@ -21,6 +21,23 @@ import {
   MemoryStick,
 } from "lucide-react"
 
+const formatRelative = (iso?: string) => {
+  if (!iso) return "Sin datos"
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return "Sin datos"
+
+  const diffMs = Date.now() - date.getTime()
+  const diffMinutes = Math.floor(diffMs / 60000)
+  if (diffMinutes < 1) return "hace segundos"
+  if (diffMinutes < 60) return `hace ${diffMinutes} min`
+
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24) return `hace ${diffHours} h`
+
+  const diffDays = Math.floor(diffHours / 24)
+  return `hace ${diffDays} dia${diffDays === 1 ? "" : "s"}`
+}
+
 export default function AdminHealthPage() {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [cpuUsage, setCpuUsage] = useState(0)

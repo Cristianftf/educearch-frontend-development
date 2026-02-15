@@ -1,11 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/auth-context'
 import { ProfessorProvider } from '@/contexts/professor-context'
 import { cn } from '@/lib/utils'
+import { RoleHelpPanel } from '@/components/role-help-panel'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
@@ -47,9 +48,32 @@ export default function ProfessorLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { user, logout } = useAuth()
+  const { user, logout, isAuthenticated, isLoading } = useAuth()
   const pathname = usePathname()
+  const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      router.push('/login')
+      return
+    }
+    if (!isLoading && isAuthenticated && user?.role !== 'professor') {
+      router.push(`/${user?.role}`)
+    }
+  }, [isAuthenticated, isLoading, router, user?.role])
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <p className="text-muted-foreground">Cargando panel de profesor...</p>
+      </div>
+    )
+  }
+
+  if (!isAuthenticated || user?.role !== 'professor') {
+    return null
+  }
 
   const getInitials = (name: string) => {
     return name
@@ -198,6 +222,7 @@ export default function ProfessorLayout({
         {/* Page content */}
         <main className="p-4 sm:p-6 lg:p-8">{children}</main>
       </div>
+      <RoleHelpPanel role="professor" />
     </div>
     </ProfessorProvider>
   )

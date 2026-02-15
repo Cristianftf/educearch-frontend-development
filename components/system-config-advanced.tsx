@@ -137,7 +137,12 @@ const toApiConfig = (uiConfig: SystemConfig, base?: AdminSystemConfiguration | n
   const mergeThreshold = (key: "access" | "process" | "communicate", value: number) => {
     const existing = baseThresholds[key]
     if (existing && typeof existing === "object") {
-      return { ...(existing as object), advanced: value }
+      const typed = existing as Partial<Record<"novice" | "intermediate" | "advanced", unknown>>
+      return {
+        novice: numberOr(typed.novice, value),
+        intermediate: numberOr(typed.intermediate, value),
+        advanced: value,
+      }
     }
     return value
   }

@@ -3,7 +3,9 @@ import { api } from './api-client'
 
 export const hedgesApi = {
   getAll: (category?: string) =>
-    api.get<SearchHedge[]>(`/hedges${category ? `?category=${category}` : ''}`),
+    api
+      .get<SearchHedge[]>(`/hedges${category ? `?category=${category}` : ''}`)
+      .then((hedges) => (category ? hedges.filter((hedge) => hedge.category === category) : hedges)),
 
   getCategories: () => api.get<string[]>('/hedges/categories'),
 

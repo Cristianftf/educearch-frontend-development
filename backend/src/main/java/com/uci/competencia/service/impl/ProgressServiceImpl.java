@@ -2,12 +2,17 @@ package com.uci.competencia.service.impl;
 
 import com.uci.competencia.model.dto.response.ActivityDTO;
 import com.uci.competencia.model.dto.response.StudentProgressDTO;
+import com.uci.competencia.model.entity.CaseSubmission;
 import com.uci.competencia.model.entity.CompetencyProgress;
+import com.uci.competencia.model.entity.Evaluation;
 import com.uci.competencia.model.entity.SearchSession;
 import com.uci.competencia.model.entity.VerificationResult;
-import com.uci.competencia.repository.CompetencyProgressRepository;
+import com.uci.competencia.model.enums.SubmissionStatus;
 import com.uci.competencia.repository.BibliographyRepository;
+import com.uci.competencia.repository.CaseStudyRepository;
 import com.uci.competencia.repository.CaseSubmissionRepository;
+import com.uci.competencia.repository.CompetencyProgressRepository;
+import com.uci.competencia.repository.EvaluationRepository;
 import com.uci.competencia.repository.SearchSessionRepository;
 import com.uci.competencia.repository.VerificationResultRepository;
 import com.uci.competencia.service.ProgressService;
@@ -17,8 +22,15 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @Slf4j
@@ -39,23 +51,26 @@ public class ProgressServiceImpl implements ProgressService {
     @Autowired
     private CaseSubmissionRepository caseSubmissionRepository;
 
+    @Autowired
+    private CaseStudyRepository caseStudyRepository;
+
+    @Autowired
+    private EvaluationRepository evaluationRepository;
+
     private static final int RECENT_ACTIVITY_LIMIT = 10;
 
     @Override
     public StudentProgressDTO getStudentProgress(String studentId) {
         log.debug("Fetching progress for student: {}", studentId);
 
-        // Obtener datos de competencia del estudiante
         CompetencyProgress competencyProgress = competencyProgressRepository
             .findByStudentId(studentId)
             .orElse(createDefaultProgress(studentId));
 
-        // Crear el DTO de respuesta
         StudentProgressDTO dto = new StudentProgressDTO();
         dto.setStudentId(studentId);
         dto.setUserId(studentId);
 
-        // Construir mapa de competencias con valores Double
         Map<String, StudentProgressDTO.CompetencyProgressDTO> competencies = new HashMap<>();
         competencies.put(
             "access",
@@ -72,7 +87,6 @@ public class ProgressServiceImpl implements ProgressService {
 
         dto.setCompetencies(competencies);
 
-        // Calcular progreso general
         Double overallProgress = competencies.values().stream()
             .map(StudentProgressDTO.CompetencyProgressDTO::getScore)
             .filter(Objects::nonNull)
@@ -81,31 +95,48 @@ public class ProgressServiceImpl implements ProgressService {
             .orElse(0.0);
         dto.setOverallProgress(overallProgress);
 
-        // Totales de actividades
-        Map<String, Integer> activityStats = new HashMap<>();
-        int totalSearches = competencyProgress.getTotalSearches() != null ? competencyProgress.getTotalSearches() : 0;
-        int totalVerifications = competencyProgress.getTotalVerifications() != null ? competencyProgress.getTotalVerifications() : 0;
-        int totalBibliographies = competencyProgress.getBibliographiesGenerated() != null ? competencyProgress.getBibliographiesGenerated() : 0;
+        int totalSearches = Math.toIntExact(searchSessionRepository.countByUser_Id(studentId));
+        int totalVerifications = Math.toIntExact(verificationResultRepository.countByUser_Id(studentId));
+        int totalBibliographies = Math.toIntExact(bibliographyRepository.countByUserId(studentId));
 
+        if (totalSearches == 0 && competencyProgress.getTotalSearches() != null) {
+            totalSearches = competencyProgress.getTotalSearches();
+        }
+        if (totalVerifications == 0 && competencyProgress.getTotalVerifications() != null) {
+            totalVerifications = competencyProgress.getTotalVerifications();
+        }
+        if (totalBibliographies == 0 && competencyProgress.getBibliographiesGenerated() != null) {
+            totalBibliographies = competencyProgress.getBibliographiesGenerated();
+        }
+
+        List<CaseSubmission> submissions = caseSubmissionRepository.findByStudentId(studentId);
+        int totalCases = caseStudyRepository.findByAssignedStudent(studentId).size();
+        int casesCompleted = (int) submissions.stream()
+            .filter(submission -> submission.getStatus() == SubmissionStatus.REVIEWED
+                || submission.getStatus() == SubmissionStatus.EVALUATED)
+            .map(CaseSubmission::getCaseId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .count();
+
+        Map<String, Integer> activityStats = new HashMap<>();
         activityStats.put("searches", totalSearches);
         activityStats.put("verifications", totalVerifications);
         activityStats.put("bibliographies", totalBibliographies);
+        activityStats.put("casesCompleted", casesCompleted);
+        activityStats.put("casesAssigned", totalCases);
+
         dto.setActivityStats(activityStats);
         dto.setTotalSearches(totalSearches);
         dto.setTotalVerifications(totalVerifications);
         dto.setTotalBibliographies(totalBibliographies);
         dto.setRecentActivities(buildRecentActivities(studentId));
 
-        // Casos completados (por defecto 0 hasta que se implemente)
-        dto.setCasesCompleted(0);
-        dto.setTotalCases(0);
-        
-        // Promedio de calificaciones y horas
-        dto.setAverageGrade(0.0);
-        dto.setHoursSpent(0.0);
-
-        // Recomendaciones (por ahora vacía, puede expandirse)
-        dto.setRecommendations(new ArrayList<>());
+        dto.setCasesCompleted(casesCompleted);
+        dto.setTotalCases(totalCases);
+        dto.setAverageGrade(calculateAverageGrade(submissions));
+        dto.setHoursSpent(calculateHoursSpent(studentId));
+        dto.setRecommendations(buildRecommendations(competencies, totalCases, casesCompleted, totalSearches));
 
         log.debug("Student progress retrieved successfully for: {}", studentId);
         return dto;
@@ -125,10 +156,6 @@ public class ProgressServiceImpl implements ProgressService {
         }
     }
 
-
-    /**
-     * Crea un progreso por defecto para estudiantes sin datos
-     */
     private CompetencyProgress createDefaultProgress(String studentId) {
         CompetencyProgress progress = new CompetencyProgress();
         progress.setAccessScore(0.0);
@@ -155,8 +182,85 @@ public class ProgressServiceImpl implements ProgressService {
         );
     }
 
+    private double calculateAverageGrade(List<CaseSubmission> submissions) {
+        if (submissions == null || submissions.isEmpty()) {
+            return 0.0;
+        }
+
+        List<String> submissionIds = submissions.stream()
+            .map(CaseSubmission::getId)
+            .filter(Objects::nonNull)
+            .toList();
+
+        if (submissionIds.isEmpty()) {
+            return 0.0;
+        }
+
+        List<Evaluation> evaluations = evaluationRepository.findBySubmissionIdIn(submissionIds);
+        if (evaluations.isEmpty()) {
+            return 0.0;
+        }
+
+        return evaluations.stream()
+            .map(Evaluation::getOverallScore)
+            .filter(Objects::nonNull)
+            .mapToInt(Integer::intValue)
+            .average()
+            .orElse(0.0);
+    }
+
+    private double calculateHoursSpent(String studentId) {
+        PageRequest page = PageRequest.of(0, 200, Sort.by(Sort.Direction.DESC, "startedAt"));
+        List<SearchSession> sessions = searchSessionRepository.findByUser_Id(studentId, page).getContent();
+        if (sessions.isEmpty()) {
+            return 0.0;
+        }
+
+        double minutes = 0.0;
+        for (SearchSession session : sessions) {
+            LocalDateTime start = session.getStartedAt();
+            LocalDateTime end = session.getCompletedAt();
+            if (start == null || end == null || end.isBefore(start)) {
+                continue;
+            }
+            long sessionMinutes = Duration.between(start, end).toMinutes();
+            if (sessionMinutes < 0) {
+                continue;
+            }
+            // Avoid unrealistic outliers
+            minutes += Math.min(sessionMinutes, 240);
+        }
+        return Math.round((minutes / 60.0) * 100.0) / 100.0;
+    }
+
+    private List<String> buildRecommendations(
+        Map<String, StudentProgressDTO.CompetencyProgressDTO> competencies,
+        int totalCases,
+        int casesCompleted,
+        int totalSearches
+    ) {
+        List<String> recommendations = new ArrayList<>();
+        if (competencies.get("access") != null && competencies.get("access").getScore() < 60) {
+            recommendations.add("Reforzar formulacion de estrategias de busqueda y uso de terminos MeSH.");
+        }
+        if (competencies.get("process") != null && competencies.get("process").getScore() < 60) {
+            recommendations.add("Practicar evaluacion critica de evidencia y deteccion de sesgos.");
+        }
+        if (competencies.get("communicate") != null && competencies.get("communicate").getScore() < 60) {
+            recommendations.add("Mejorar estructura del reporte y formato de citacion bibliografica.");
+        }
+        if (totalCases > 0 && casesCompleted == 0) {
+            recommendations.add("Priorizar la entrega del primer caso asignado para activar seguimiento docente.");
+        }
+        if (totalSearches == 0) {
+            recommendations.add("Realizar busquedas guiadas para iniciar historial de aprendizaje.");
+        }
+        return recommendations;
+    }
+
     private List<ActivityDTO> buildRecentActivities(String studentId) {
         List<ActivityEntry> entries = new ArrayList<>();
+
         PageRequest page = PageRequest.of(0, RECENT_ACTIVITY_LIMIT, Sort.by(Sort.Direction.DESC, "startedAt"));
         searchSessionRepository.findByUser_Id(studentId, page).forEach(session -> {
             LocalDateTime timestamp = session.getCompletedAt() != null ? session.getCompletedAt() : session.getStartedAt();
@@ -200,7 +304,7 @@ public class ProgressServiceImpl implements ProgressService {
                 new ActivityDTO(
                     bib.getId(),
                     "export",
-                    "Bibliograf\u00eda generada: " + safeText(bib.getName(), "Sin t\u00edtulo"),
+                    "Bibliografia generada: " + safeText(bib.getName(), "Sin titulo"),
                     toTimestamp(timestamp),
                     Map.of(
                         "format", safeText(bib.getFormat(), "apa"),
@@ -241,13 +345,13 @@ public class ProgressServiceImpl implements ProgressService {
     }
 
     private String buildSearchDescription(SearchSession session) {
-        String query = safeText(session.getOriginalQuery(), "b\u00fasqueda");
-        return "B\u00fasqueda ejecutada: " + truncate(query, 60);
+        String query = safeText(session.getOriginalQuery(), "busqueda");
+        return "Busqueda ejecutada: " + truncate(query, 60);
     }
 
     private String buildVerificationDescription(VerificationResult result) {
-        String claim = safeText(result.getClaimText(), "verificaci\u00f3n");
-        return "Verificaci\u00f3n realizada: " + truncate(claim, 60);
+        String claim = safeText(result.getClaimText(), "verificacion");
+        return "Verificacion realizada: " + truncate(claim, 60);
     }
 
     private String toTimestamp(LocalDateTime timestamp) {
@@ -278,3 +382,4 @@ public class ProgressServiceImpl implements ProgressService {
         }
     }
 }
+

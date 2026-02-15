@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { evaluationApi, casesApi } from '@/lib/api'
@@ -12,33 +12,18 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Slider } from '@/components/ui/slider'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
   ArrowLeft,
-  ArrowRight,
-  Save,
   CheckCircle2,
-  Loader2,
   FileText,
   MessageSquare,
-  Mic,
-  MicOff,
-  BookOpen,
   Search,
   ShieldCheck,
-  Users,
   Calendar,
   Clock,
-  Star,
 } from 'lucide-react'
 
 interface RubricScore {
@@ -49,48 +34,49 @@ interface RubricScore {
 
 interface CompetencyFeedback {
   competency: CompetencyType
-  score: number
   comment: string
 }
 
 const competencyConfig: Record<CompetencyType, { label: string; icon: React.ElementType; description: string }> = {
   access: {
-    label: 'Acceso a la información',
+    label: 'Acceso a la informaciÃ³n',
     icon: Search,
-    description: 'Uso de operadores booleanos, Términos MeSH y estrategias de Búsqueda',
+    description: 'Uso de operadores booleanos, TÃ©rminos MeSH y estrategias de BÃºsqueda',
   },
   process: {
-    label: 'Procesamiento de información',
+    label: 'Procesamiento de informaciÃ³n',
     icon: ShieldCheck,
-    description: 'evaluación crítica de la evidencia, identificación de sesgos',
+    description: 'evaluaciÃ³n crÃ­tica de la evidencia, identificaciÃ³n de sesgos',
   },
   communicate: {
-    label: 'Comunicación de información',
+    label: 'ComunicaciÃ³n de informaciÃ³n',
     icon: FileText,
-    description: 'Formato de bibliografía, citación correcta, presentación',
+    description: 'Formato de bibliografÃ­a, citaciÃ³n correcta, presentaciÃ³n',
   },
 }
 
 const quickFeedbackTemplates = {
   access: [
     'Excelente uso de operadores booleanos',
-    'Considerar añadir más Términos MeSH específicos',
-    'Buena estrategia de Búsqueda, podría ampliarse',
+    'Considerar aÃ±adir mÃ¡s TÃ©rminos MeSH especÃ­ficos',
+    'Buena estrategia de BÃºsqueda, podrÃ­a ampliarse',
     'Falta uso de filtros por tipo de estudio',
   ],
   process: [
-    'Correcta identificación de niveles de evidencia',
-    'Revisar evaluación de conflictos de interés',
-    'Buen análisis crítico de metodología',
-    'Mejorar identificación de sesgos',
+    'Correcta identificaciÃ³n de niveles de evidencia',
+    'Revisar evaluaciÃ³n de conflictos de interÃ©s',
+    'Buen anÃ¡lisis crÃ­tico de metodologÃ­a',
+    'Mejorar identificaciÃ³n de sesgos',
   ],
   communicate: [
-    'bibliografía correctamente formateada',
+    'bibliografÃ­a correctamente formateada',
     'Revisar formato de citas in-texto',
-    'Excelente presentación de resultados',
+    'Excelente presentaciÃ³n de resultados',
     'Corregir errores en formato Vancouver',
   ],
 }
+
+const COMPETENCIES: CompetencyType[] = ['access', 'process', 'communicate']
 
 export default function EvaluationDetailPage() {
   const params = useParams()
@@ -101,17 +87,15 @@ export default function EvaluationDetailPage() {
   const [caseStudy, setCaseStudy] = useState<CaseStudy | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
-  const [isRecording, setIsRecording] = useState(false)
 
   // Evaluation state
   const [rubricScores, setRubricScores] = useState<RubricScore[]>([])
   const [competencyFeedback, setCompetencyFeedback] = useState<CompetencyFeedback[]>([
-    { competency: 'access', score: 0, comment: '' },
-    { competency: 'process', score: 0, comment: '' },
-    { competency: 'communicate', score: 0, comment: '' },
+    { competency: 'access', comment: '' },
+    { competency: 'process', comment: '' },
+    { competency: 'communicate', comment: '' },
   ])
   const [generalFeedback, setGeneralFeedback] = useState('')
-  const [totalScore, setTotalScore] = useState(0)
 
   useEffect(() => {
     async function loadData() {
@@ -143,18 +127,52 @@ export default function EvaluationDetailPage() {
     loadData()
   }, [submissionId])
 
-  // Calculate total score whenever rubric scores change
-  useEffect(() => {
-    if (!caseStudy?.rubric) return
+  const rubricById = useMemo(
+    () => new Map((caseStudy?.rubric ?? []).map((item) => [item.id, item])),
+    [caseStudy]
+  )
 
-    const total = rubricScores.reduce((sum, rubricScore) => {
-      const rubricItem = caseStudy.rubric?.find((r) => r.id === rubricScore.criteriaId)
-      if (!rubricItem) return sum
-      return sum + (rubricScore.score / 100) * rubricItem.maxPoints
-    }, 0)
+  const totalMaxPoints = useMemo(
+    () => (caseStudy?.rubric ?? []).reduce((sum, item) => sum + item.maxPoints, 0),
+    [caseStudy]
+  )
 
-    setTotalScore(Math.round(total))
-  }, [rubricScores, caseStudy])
+  const earnedPoints = useMemo(
+    () =>
+      rubricScores.reduce((sum, rubricScore) => {
+        const rubricItem = rubricById.get(rubricScore.criteriaId)
+        if (!rubricItem) return sum
+        return sum + (rubricScore.score / 100) * rubricItem.maxPoints
+      }, 0),
+    [rubricScores, rubricById]
+  )
+
+  const competencyScores = useMemo(() => {
+    const totals: Record<CompetencyType, number> = { access: 0, process: 0, communicate: 0 }
+    const earned: Record<CompetencyType, number> = { access: 0, process: 0, communicate: 0 }
+
+    for (const rubricScore of rubricScores) {
+      const rubricItem = rubricById.get(rubricScore.criteriaId)
+      if (!rubricItem) continue
+      totals[rubricItem.competency] += rubricItem.maxPoints
+      earned[rubricItem.competency] += (rubricScore.score / 100) * rubricItem.maxPoints
+    }
+
+    return {
+      access: totals.access > 0 ? Math.round((earned.access / totals.access) * 100) : 0,
+      process: totals.process > 0 ? Math.round((earned.process / totals.process) * 100) : 0,
+      communicate: totals.communicate > 0 ? Math.round((earned.communicate / totals.communicate) * 100) : 0,
+    } as Record<CompetencyType, number>
+  }, [rubricScores, rubricById])
+
+  const overallScorePercent = useMemo(() => {
+    if (totalMaxPoints <= 0) {
+      return Math.round(
+        (competencyScores.access + competencyScores.process + competencyScores.communicate) / 3
+      )
+    }
+    return Math.round((earnedPoints / totalMaxPoints) * 100)
+  }, [earnedPoints, totalMaxPoints, competencyScores])
 
   const updateRubricScore = useCallback((criteriaId: string, updates: Partial<RubricScore>) => {
     setRubricScores((prev) =>
@@ -188,14 +206,6 @@ export default function EvaluationDetailPage() {
 
     setIsSaving(true)
     try {
-      const scores = competencyFeedback.reduce(
-        (acc, item) => {
-          acc[item.competency] = item.score
-          return acc
-        },
-        { access: 0, process: 0, communicate: 0 } as Record<CompetencyType, number>
-      )
-
       const comments = competencyFeedback.reduce(
         (acc, item) => {
           acc[item.competency] = item.comment
@@ -207,9 +217,9 @@ export default function EvaluationDetailPage() {
       await evaluationApi.submit(submissionId, {
         submissionId,
         professorId: '',
-        scores,
+        scores: competencyScores,
         comments,
-        overallScore: totalScore,
+        overallScore: overallScorePercent,
         feedback: generalFeedback,
       })
       router.push('/professor/evaluations')
@@ -218,12 +228,15 @@ export default function EvaluationDetailPage() {
     } finally {
       setIsSaving(false)
     }
-  }, [submission, submissionId, rubricScores, competencyFeedback, generalFeedback, totalScore, router])
-
-  const toggleRecording = useCallback(() => {
-    setIsRecording((prev) => !prev)
-    // In a real app, this would start/stop audio recording
-  }, [])
+  }, [
+    submission,
+    submissionId,
+    competencyFeedback,
+    competencyScores,
+    overallScorePercent,
+    generalFeedback,
+    router,
+  ])
 
   if (isLoading) {
     return <EvaluationSkeleton />
@@ -258,13 +271,9 @@ export default function EvaluationDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={handleSave} disabled={isSaving}>
-            {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-            Guardar borrador
-          </Button>
           <Button onClick={handleSave} disabled={isSaving}>
             <CheckCircle2 className="mr-2 h-4 w-4" />
-            Finalizar evaluación
+            Guardar evaluacion
           </Button>
         </div>
       </div>
@@ -292,10 +301,10 @@ export default function EvaluationDetailPage() {
               </div>
             </div>
             <div className="text-right">
-              <p className="text-sm text-muted-foreground">puntuación total</p>
-              <p className="text-3xl font-bold">{totalScore}</p>
+              <p className="text-sm text-muted-foreground">puntuaciÃ³n total</p>
+              <p className="text-3xl font-bold">{overallScorePercent}%</p>
               <p className="text-xs text-muted-foreground">
-                de {caseStudy.rubric?.reduce((sum, r) => sum + r.maxPoints, 0) || 100} pts
+                {Math.round(earnedPoints)} de {totalMaxPoints || 100} pts
               </p>
             </div>
           </div>
@@ -313,8 +322,8 @@ export default function EvaluationDetailPage() {
             <Tabs defaultValue="content">
               <TabsList className="mb-4">
                 <TabsTrigger value="content">Contenido</TabsTrigger>
-                <TabsTrigger value="bibliography">bibliografía</TabsTrigger>
-                <TabsTrigger value="searches">Búsquedas</TabsTrigger>
+                <TabsTrigger value="bibliography">bibliografÃ­a</TabsTrigger>
+                <TabsTrigger value="searches">BÃºsquedas</TabsTrigger>
               </TabsList>
 
               <TabsContent value="content">
@@ -337,7 +346,7 @@ export default function EvaluationDetailPage() {
                     </pre>
                   ) : (
                     <p className="text-muted-foreground italic">
-                      No se incluy? bibliografía
+                      No se incluy? bibliografÃ­a
                     </p>
                   )}
                 </ScrollArea>
@@ -345,17 +354,17 @@ export default function EvaluationDetailPage() {
 
               <TabsContent value="searches">
                 <ScrollArea className="h-[500px] border rounded-lg p-4">
-                  {submission.searchQueries && submission.searchQueries.length > 0 ? (
+                  {submission.selectedArticles && submission.selectedArticles.length > 0 ? (
                     <div className="space-y-3">
-                      {submission.searchQueries.map((query, idx) => (
-                        <div key={idx} className="p-3 rounded-lg bg-muted">
-                          <p className="font-mono text-sm">{query}</p>
+                      {submission.selectedArticles.map((articleId) => (
+                        <div key={articleId} className="p-3 rounded-lg bg-muted">
+                          <p className="font-mono text-sm">{articleId}</p>
                         </div>
                       ))}
                     </div>
                   ) : (
                     <p className="text-muted-foreground italic">
-                      No se registraron Búsquedas
+                      No se registraron BÃºsquedas
                     </p>
                   )}
                 </ScrollArea>
@@ -367,7 +376,7 @@ export default function EvaluationDetailPage() {
         {/* Right: Evaluation Rubric */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">rúbrica de evaluación</CardTitle>
+            <CardTitle className="text-lg">rÃºbrica de evaluaciÃ³n</CardTitle>
           </CardHeader>
           <CardContent>
             <ScrollArea className="h-[540px] pr-4">
@@ -393,7 +402,7 @@ export default function EvaluationDetailPage() {
 
                       <div className="space-y-2">
                         <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground">puntuación</span>
+                          <span className="text-muted-foreground">puntuaciÃ³n</span>
                           <span>{scoreData?.score || 0}%</span>
                         </div>
                         <Slider
@@ -412,9 +421,9 @@ export default function EvaluationDetailPage() {
                       </div>
 
                       <div className="space-y-2">
-                        <Label className="text-xs">Retroalimentación</Label>
+                        <Label className="text-xs">RetroalimentaciÃ³n</Label>
                         <Textarea
-                          placeholder="Añade comentarios específicos..."
+                          placeholder="AÃ±ade comentarios especÃ­ficos..."
                           className="min-h-[60px] text-sm"
                           value={scoreData?.feedback || ''}
                           onChange={(e) =>
@@ -434,14 +443,14 @@ export default function EvaluationDetailPage() {
       {/* Competency Feedback */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Retroalimentación por competencia</CardTitle>
+          <CardTitle className="text-lg">RetroalimentaciÃ³n por competencia</CardTitle>
           <CardDescription>
-            Proporciona comentarios específicos para cada ?rea de competencia
+            Proporciona comentarios especÃ­ficos para cada ?rea de competencia
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-6 lg:grid-cols-3">
-            {(Object.keys(competencyConfig) as CompetencyType[]).map((comp) => {
+            {COMPETENCIES.map((comp) => {
               const Icon = competencyConfig[comp].icon
               const feedback = competencyFeedback.find((fb) => fb.competency === comp)
 
@@ -455,10 +464,13 @@ export default function EvaluationDetailPage() {
                     <CardDescription className="text-xs">
                       {competencyConfig[comp].description}
                     </CardDescription>
+                    <Badge variant="outline" className="w-fit mt-2">
+                      {competencyScores[comp]}%
+                    </Badge>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <Textarea
-                      placeholder="Escribe tu Retroalimentación..."
+                      placeholder="Escribe tu RetroalimentaciÃ³n..."
                       className="min-h-[100px] text-sm"
                       value={feedback?.comment || ''}
                       onChange={(e) =>
@@ -490,12 +502,12 @@ export default function EvaluationDetailPage() {
         </CardContent>
       </Card>
 
-      {/* General Feedback and Audio */}
+      {/* General Feedback */}
       <Card>
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
             <MessageSquare className="h-5 w-5" />
-            Retroalimentación general
+            RetroalimentaciÃ³n general
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -505,32 +517,6 @@ export default function EvaluationDetailPage() {
             value={generalFeedback}
             onChange={(e) => setGeneralFeedback(e.target.value)}
           />
-
-          <div className="flex items-center gap-4">
-            <Button
-              variant={isRecording ? 'destructive' : 'outline'}
-              onClick={toggleRecording}
-              className="gap-2"
-            >
-              {isRecording ? (
-                <>
-                  <MicOff className="h-4 w-4" />
-                  Detener grabación
-                </>
-              ) : (
-                <>
-                  <Mic className="h-4 w-4" />
-                  Grabar audio
-                </>
-              )}
-            </Button>
-            {isRecording && (
-              <div className="flex items-center gap-2 text-sm text-destructive">
-                <span className="w-2 h-2 bg-destructive rounded-full animate-pulse" />
-                Grabando...
-              </div>
-            )}
-          </div>
         </CardContent>
       </Card>
     </div>
@@ -557,3 +543,5 @@ function EvaluationSkeleton() {
     </div>
   )
 }
+
+

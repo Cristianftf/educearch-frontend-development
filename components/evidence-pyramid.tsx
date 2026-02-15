@@ -339,7 +339,7 @@ export function EvidencePyramid({
             <Checkbox
               id="conflicts"
               checked={showConflictsOnly}
-              onCheckedChange={setShowConflictsOnly}
+              onCheckedChange={(checked) => setShowConflictsOnly(checked === true)}
             />
             <Label htmlFor="conflicts" className="text-sm">
               Mostrar solo estudios con conflictos de interés

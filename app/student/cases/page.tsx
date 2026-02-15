@@ -1,7 +1,8 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect, useCallback } from 'react'
 import { casesApi } from '@/lib/api'
+import { ApiHttpError } from '@/lib/api-client'
 import type { CaseStudy, CaseSubmission, CaseDifficulty } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -93,14 +94,42 @@ export default function CasesPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [activeTab, setActiveTab] = useState('pending')
   const [selectedSubmission, setSelectedSubmission] = useState<CaseSubmission | null>(null)
+  const [submissionsByCaseId, setSubmissionsByCaseId] = useState<Record<string, CaseSubmission>>({})
   const [isLoadingSubmission, setIsLoadingSubmission] = useState(false)
   const [submissionError, setSubmissionError] = useState<string | null>(null)
+
+  const loadCasesAndSubmissions = useCallback(async () => {
+    const assignedCases = await casesApi.getAssigned()
+    setCases(assignedCases)
+
+    const pairs = await Promise.all(
+      assignedCases.map(async (caseStudy) => {
+        try {
+          const submission = await casesApi.getMySubmission(caseStudy.id)
+          return [caseStudy.id, submission] as const
+        } catch (err) {
+          if (err instanceof ApiHttpError && err.status === 404) {
+            return null
+          }
+          console.error('[v0] Error loading case submission:', err)
+          return null
+        }
+      })
+    )
+
+    const nextMap: Record<string, CaseSubmission> = {}
+    pairs.forEach((entry) => {
+      if (!entry) return
+      const [caseId, submission] = entry
+      nextMap[caseId] = submission
+    })
+    setSubmissionsByCaseId(nextMap)
+  }, [])
 
   useEffect(() => {
     async function loadCases() {
       try {
-        const assignedCases = await casesApi.getAssigned()
-        setCases(assignedCases)
+        await loadCasesAndSubmissions()
       } catch (err) {
         setError('No se pudieron cargar los casos asignados')
         console.error('[v0] Error loading cases:', err)
@@ -109,13 +138,23 @@ export default function CasesPage() {
       }
     }
     loadCases()
-  }, [])
+  }, [loadCasesAndSubmissions])
 
   useEffect(() => {
     let isMounted = true
 
-    if (!selectedCase || selectedCase.status === 'active') {
+    if (!selectedCase) {
       setSelectedSubmission(null)
+      setSubmissionError(null)
+      setIsLoadingSubmission(false)
+      return () => {
+        isMounted = false
+      }
+    }
+
+    const cachedSubmission = submissionsByCaseId[selectedCase.id]
+    if (cachedSubmission) {
+      setSelectedSubmission(cachedSubmission)
       setSubmissionError(null)
       setIsLoadingSubmission(false)
       return () => {
@@ -131,10 +170,15 @@ export default function CasesPage() {
       .then((submission) => {
         if (!isMounted) return
         setSelectedSubmission(submission)
+        setSubmissionsByCaseId((prev) => ({ ...prev, [selectedCase.id]: submission }))
       })
       .catch((err) => {
-        console.error('[v0] Error loading submission:', err)
         if (!isMounted) return
+        if (err instanceof ApiHttpError && err.status === 404) {
+          setSelectedSubmission(null)
+          return
+        }
+        console.error('[v0] Error loading submission:', err)
         setSubmissionError('No se pudo cargar tu entrega')
       })
       .finally(() => {
@@ -145,7 +189,7 @@ export default function CasesPage() {
     return () => {
       isMounted = false
     }
-  }, [selectedCase])
+  }, [selectedCase, submissionsByCaseId])
 
   const handleSubmit = useCallback(async () => {
     if (!selectedCase || !submissionContent.trim()) return
@@ -161,11 +205,10 @@ export default function CasesPage() {
       if (user?.id) {
         submission.studentId = user.id
       }
-      await casesApi.submit(selectedCase.id, submission as CaseSubmission)
-
-      // Refresh cases
-      const assignedCases = await casesApi.getAssigned()
-      setCases(assignedCases)
+      const createdSubmission = await casesApi.submit(selectedCase.id, submission as CaseSubmission)
+      setSubmissionsByCaseId((prev) => ({ ...prev, [selectedCase.id]: createdSubmission }))
+      setSelectedSubmission(createdSubmission)
+      await loadCasesAndSubmissions()
       setSelectedCase(null)
       setSubmissionContent('')
     } catch (err) {
@@ -173,10 +216,13 @@ export default function CasesPage() {
     } finally {
       setIsSubmitting(false)
     }
-  }, [selectedCase, submissionContent, user])
+  }, [selectedCase, submissionContent, user, loadCasesAndSubmissions])
 
-  const pendingCases = cases.filter((c) => c.status === 'active')
-  const completedCases = cases.filter((c) => c.status === 'archived')
+  const pendingCases = cases.filter((c) => !submissionsByCaseId[c.id])
+  const completedCases = cases.filter((c) => Boolean(submissionsByCaseId[c.id]))
+  const selectedCaseSubmission = selectedCase
+    ? submissionsByCaseId[selectedCase.id] ?? selectedSubmission
+    : selectedSubmission
 
   if (isLoading) {
     return <CasesSkeleton />
@@ -308,7 +354,7 @@ export default function CasesPage() {
                         <div className="flex items-center gap-4 text-muted-foreground">
                           <span className="flex items-center gap-1">
                             <BookOpen className="h-4 w-4" />
-                            {caseStudy.requiredArticles.length} artículos
+                            {caseStudy.requiredArticles.length} artÃ­culos
                           </span>
                           <span className="flex items-center gap-1">
                             <Target className="h-4 w-4" />
@@ -323,7 +369,7 @@ export default function CasesPage() {
                           >
                             <Calendar className="h-3 w-3" />
                             {daysRemaining > 0
-                              ? `${daysRemaining} días`
+                              ? `${daysRemaining} dÃ­as`
                               : daysRemaining === 0
                                 ? 'Hoy'
                                 : 'Vencido'}
@@ -353,7 +399,7 @@ export default function CasesPage() {
                 <CheckCircle2 className="h-12 w-12 mx-auto mb-4 text-success" />
                 <h3 className="text-lg font-medium mb-2">No hay casos pendientes</h3>
                 <p className="text-muted-foreground">
-                  Has completado todos tus casos asignados. ¡Excelente trabajo!
+                  Has completado todos tus casos asignados. Â¡Excelente trabajo!
                 </p>
               </CardContent>
             </Card>
@@ -406,7 +452,7 @@ export default function CasesPage() {
                 <FolderOpen className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
                 <h3 className="text-lg font-medium mb-2">No hay casos completados</h3>
                 <p className="text-muted-foreground">
-                  Completa tus casos pendientes para verlos aquí
+                  Completa tus casos pendientes para verlos aquÃ­
                 </p>
               </CardContent>
             </Card>
@@ -448,7 +494,7 @@ export default function CasesPage() {
                 <div>
                   <h4 className="font-medium mb-2 flex items-center gap-2">
                     <FileText className="h-4 w-4" />
-                    Escenario clínico
+                    Escenario clÃ­nico
                   </h4>
                   <div className="p-4 rounded-lg bg-muted text-sm leading-relaxed">
                     {selectedCase.scenario}
@@ -459,7 +505,7 @@ export default function CasesPage() {
                 <div>
                   <h4 className="font-medium mb-2 flex items-center gap-2">
                     <BookOpen className="h-4 w-4" />
-                    Artículos requeridos ({selectedCase.requiredArticles.length})
+                    ArtÃ­culos requeridos ({selectedCase.requiredArticles.length})
                   </h4>
                   <div className="space-y-2">
                     {selectedCase.requiredArticles.map((articleId, idx) => (
@@ -470,7 +516,7 @@ export default function CasesPage() {
                         <span className="text-sm font-medium text-muted-foreground">
                           {idx + 1}.
                         </span>
-                        <span className="text-sm">Artículo ID: {articleId}</span>
+                        <span className="text-sm">ArtÃ­culo ID: {articleId}</span>
                         <Button variant="outline" size="sm" className="ml-auto bg-transparent" asChild>
                           <a
                             href={`https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(
@@ -479,7 +525,7 @@ export default function CasesPage() {
                             target="_blank"
                             rel="noopener noreferrer"
                           >
-                            Ver artículo
+                            Ver artÃ­culo
                           </a>
                         </Button>
                       </div>
@@ -491,7 +537,7 @@ export default function CasesPage() {
                 <div>
                   <h4 className="font-medium mb-2 flex items-center gap-2">
                     <MessageSquare className="h-4 w-4" />
-                    Preguntas guía
+                    Preguntas guÃ­a
                   </h4>
                   <ol className="space-y-2 list-decimal list-inside">
                     {selectedCase.guidingQuestions.map((question, idx) => {
@@ -526,7 +572,7 @@ export default function CasesPage() {
                 <div>
                   <h4 className="font-medium mb-2 flex items-center gap-2">
                     <Target className="h-4 w-4" />
-                    Criterios de evaluación
+                    Criterios de evaluaciÃ³n
                   </h4>
                   <div className="space-y-2">
                     {selectedCase.rubric.map((item, idx) => (
@@ -548,7 +594,7 @@ export default function CasesPage() {
                 </div>
 
                 {/* Submission Form (only for active cases) */}
-                {selectedCase.status === 'active' && (
+                {!selectedCaseSubmission && (
                   <div className="border-t pt-6">
                     <h4 className="font-medium mb-3">Tu entrega</h4>
                     <div className="space-y-4">
@@ -556,7 +602,7 @@ export default function CasesPage() {
                         <Label htmlFor="submission">Respuesta</Label>
                         <Textarea
                           id="submission"
-                          placeholder="Escribe tu análisis del caso, respondiendo las preguntas guía..."
+                          placeholder="Escribe tu anÃ¡lisis del caso, respondiendo las preguntas guÃ­a..."
                           className="min-h-[200px] mt-2"
                           value={submissionContent}
                           onChange={(e) => setSubmissionContent(e.target.value)}
@@ -586,7 +632,7 @@ export default function CasesPage() {
                 )}
 
                 {/* Submission Detail (completed cases) */}
-                {selectedCase.status !== 'active' && (
+                {selectedCaseSubmission && (
                   <div className="border-t pt-6">
                     <h4 className="font-medium mb-3">Tu entrega</h4>
                     {isLoadingSubmission && (
@@ -601,67 +647,67 @@ export default function CasesPage() {
                         {submissionError}
                       </div>
                     )}
-                    {!isLoadingSubmission && !submissionError && selectedSubmission && (
+                    {!isLoadingSubmission && !submissionError && selectedCaseSubmission && (
                       <div className="space-y-4">
                         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                           <Badge variant="outline" className="capitalize">
-                            {selectedSubmission.status}
+                            {selectedCaseSubmission.status}
                           </Badge>
-                          {selectedSubmission.submittedAt && (
-                            <span>Enviado: {formatDateTime(selectedSubmission.submittedAt)}</span>
+                          {selectedCaseSubmission.submittedAt && (
+                            <span>Enviado: {formatDateTime(selectedCaseSubmission.submittedAt)}</span>
                           )}
                         </div>
 
                         <div className="p-4 rounded-lg bg-muted text-sm leading-relaxed whitespace-pre-wrap">
-                          {selectedSubmission.content}
+                          {selectedCaseSubmission.content}
                         </div>
 
-                        {selectedSubmission.evaluation && (
+                        {selectedCaseSubmission.evaluation && (
                           <div className="space-y-3">
-                            <h5 className="font-medium">Evaluación del profesor</h5>
+                            <h5 className="font-medium">EvaluaciÃ³n del profesor</h5>
                             <div className="grid gap-3 sm:grid-cols-3 text-sm">
                               <div className="p-3 rounded-lg border">
                                 <p className="text-xs text-muted-foreground">Acceso</p>
                                 <p className="text-lg font-semibold">
-                                  {selectedSubmission.evaluation.scores.access}
+                                  {selectedCaseSubmission.evaluation.scores.access}
                                 </p>
-                                {selectedSubmission.evaluation.comments.access && (
+                                {selectedCaseSubmission.evaluation.comments.access && (
                                   <p className="text-xs text-muted-foreground mt-1">
-                                    {selectedSubmission.evaluation.comments.access}
+                                    {selectedCaseSubmission.evaluation.comments.access}
                                   </p>
                                 )}
                               </div>
                               <div className="p-3 rounded-lg border">
                                 <p className="text-xs text-muted-foreground">Procesamiento</p>
                                 <p className="text-lg font-semibold">
-                                  {selectedSubmission.evaluation.scores.process}
+                                  {selectedCaseSubmission.evaluation.scores.process}
                                 </p>
-                                {selectedSubmission.evaluation.comments.process && (
+                                {selectedCaseSubmission.evaluation.comments.process && (
                                   <p className="text-xs text-muted-foreground mt-1">
-                                    {selectedSubmission.evaluation.comments.process}
+                                    {selectedCaseSubmission.evaluation.comments.process}
                                   </p>
                                 )}
                               </div>
                               <div className="p-3 rounded-lg border">
-                                <p className="text-xs text-muted-foreground">Comunicación</p>
+                                <p className="text-xs text-muted-foreground">ComunicaciÃ³n</p>
                                 <p className="text-lg font-semibold">
-                                  {selectedSubmission.evaluation.scores.communicate}
+                                  {selectedCaseSubmission.evaluation.scores.communicate}
                                 </p>
-                                {selectedSubmission.evaluation.comments.communicate && (
+                                {selectedCaseSubmission.evaluation.comments.communicate && (
                                   <p className="text-xs text-muted-foreground mt-1">
-                                    {selectedSubmission.evaluation.comments.communicate}
+                                    {selectedCaseSubmission.evaluation.comments.communicate}
                                   </p>
                                 )}
                               </div>
                             </div>
                             <div className="p-4 rounded-lg bg-muted/50 text-sm">
-                              <p className="text-xs text-muted-foreground">Puntuación global</p>
+                              <p className="text-xs text-muted-foreground">PuntuaciÃ³n global</p>
                               <p className="text-lg font-semibold">
-                                {selectedSubmission.evaluation.overallScore}
+                                {selectedCaseSubmission.evaluation.overallScore}
                               </p>
-                              {selectedSubmission.evaluation.feedback && (
+                              {selectedCaseSubmission.evaluation.feedback && (
                                 <p className="text-sm text-muted-foreground mt-2">
-                                  {selectedSubmission.evaluation.feedback}
+                                  {selectedCaseSubmission.evaluation.feedback}
                                 </p>
                               )}
                             </div>
@@ -669,7 +715,7 @@ export default function CasesPage() {
                         )}
                       </div>
                     )}
-                    {!isLoadingSubmission && !submissionError && !selectedSubmission && (
+                    {!isLoadingSubmission && !submissionError && !selectedCaseSubmission && (
                       <p className="text-sm text-muted-foreground">
                         No hay entrega registrada para este caso.
                       </p>
@@ -725,3 +771,4 @@ function CasesSkeleton() {
     </div>
   )
 }
+

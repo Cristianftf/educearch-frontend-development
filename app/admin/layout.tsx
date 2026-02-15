@@ -7,6 +7,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/auth-context"
 import { AdminProvider } from "@/contexts/admin-context"
 import { adminSystemApi } from "@/lib/admin-system"
+import { RoleHelpPanel } from "@/components/role-help-panel"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
@@ -274,6 +275,7 @@ export default function AdminLayout({
         {/* Page content */}
         <main className="p-4 md:p-6">{children}</main>
       </div>
+      <RoleHelpPanel role="admin" />
     </div>
     </AdminProvider>
   )

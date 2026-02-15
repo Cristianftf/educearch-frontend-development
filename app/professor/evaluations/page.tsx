@@ -382,16 +382,6 @@ export default function ProfessorEvaluationsPage() {
                     {/* Actions */}
                     <div className="flex gap-3">
                       <Button
-                        variant="outline"
-                        className="flex-1 bg-transparent"
-                        onClick={() => {
-                          // Save as draft logic
-                        }}
-                      >
-                        <Save className="mr-2 h-4 w-4" />
-                        Guardar borrador
-                      </Button>
-                      <Button
                         className="flex-1"
                         onClick={handleSubmitEvaluation}
                         disabled={isSubmitting}

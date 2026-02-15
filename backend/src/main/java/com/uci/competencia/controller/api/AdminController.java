@@ -5,6 +5,7 @@ import com.uci.competencia.model.dto.response.AuditLogDTO;
 import com.uci.competencia.model.dto.response.UserDTO;
 import com.uci.competencia.model.entity.SystemLog;
 import com.uci.competencia.model.entity.User;
+import com.uci.competencia.model.enums.LogLevel;
 import com.uci.competencia.model.enums.Role;
 import com.uci.competencia.repository.SystemLogRepository;
 import com.uci.competencia.service.AdminService;
@@ -24,7 +25,9 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.*;
@@ -47,51 +50,47 @@ public class AdminController {
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "50") int limit,
             @RequestParam(required = false) String role,
-            @RequestParam(required = false) String status) {
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String search) {
 
-        log.info("Getting users list - page: {}, limit: {}, role: {}, status: {}", page, limit, role, status);
+        log.info("Getting users list - page: {}, limit: {}, role: {}, status: {}, search: {}", page, limit, role, status, search);
 
-        Pageable pageable = PageRequest.of(page - 1, limit);
+        if (page < 1) page = 1;
+        if (limit < 1) limit = 50;
+        if (limit > 200) limit = 200;
+
+        Pageable pageable = PageRequest.of(page - 1, limit, Sort.by(Sort.Direction.DESC, "createdAt"));
         Page<User> userPage;
 
-        boolean hasRole = role != null && !role.isEmpty();
-        boolean hasStatus = status != null && !status.isEmpty();
+        Role parsedRole = null;
+        Boolean active = null;
 
-        if (hasStatus && "pending".equalsIgnoreCase(status)) {
+        if (status != null && !status.isEmpty() && "pending".equalsIgnoreCase(status)) {
             userPage = Page.empty(pageable);
-        } else if (hasRole && hasStatus) {
-            Role userRole;
-            try {
-                userRole = parseRole(role);
-            } catch (IllegalArgumentException e) {
-                Map<String, Object> error = new HashMap<>();
-                error.put("error", "Invalid role");
-                error.put("message", e.getMessage());
-                return ResponseEntity.badRequest().body(error);
-            }
-            boolean active = "active".equalsIgnoreCase(status);
-            userPage = adminService.getUsersByRoleAndStatus(userRole, active, pageable);
-        } else if (hasRole) {
-            Role userRole;
-            try {
-                userRole = parseRole(role);
-            } catch (IllegalArgumentException e) {
-                Map<String, Object> error = new HashMap<>();
-                error.put("error", "Invalid role");
-                error.put("message", e.getMessage());
-                return ResponseEntity.badRequest().body(error);
-            }
-            userPage = adminService.getUsersByRole(userRole, pageable);
-        } else if (hasStatus) {
-            boolean active = "active".equalsIgnoreCase(status);
-            userPage = adminService.getUsersByStatus(active, pageable);
         } else {
-            userPage = adminService.getAllUsers(pageable);
+            if (role != null && !role.isEmpty()) {
+                try {
+                    parsedRole = parseRole(role);
+                } catch (IllegalArgumentException e) {
+                    Map<String, Object> error = new HashMap<>();
+                    error.put("error", "Invalid role");
+                    error.put("message", e.getMessage());
+                    return ResponseEntity.badRequest().body(error);
+                }
+            }
+            if (status != null && !status.isEmpty()) {
+                active = "active".equalsIgnoreCase(status);
+            }
+            userPage = adminService.searchUsers(parsedRole, active, search, pageable);
         }
 
         List<UserDTO> userDTOs = userPage.getContent().stream()
                 .map(this::convertToUserDTO)
                 .collect(Collectors.toList());
+
+        Map<String, Object> systemStats = adminService.getSystemStatistics();
+        @SuppressWarnings("unchecked")
+        Map<String, Long> usersByRole = (Map<String, Long>) systemStats.getOrDefault("usersByRole", Map.of());
 
         Map<String, Object> response = new HashMap<>();
         response.put("users", userDTOs);
@@ -99,6 +98,15 @@ public class AdminController {
         response.put("page", page);
         response.put("limit", limit);
         response.put("totalPages", userPage.getTotalPages());
+        response.put("stats", Map.of(
+            "totalUsers", asLong(systemStats.get("totalUsers")),
+            "students", usersByRole.getOrDefault("STUDENT", 0L),
+            "professors", usersByRole.getOrDefault("PROFESSOR", 0L),
+            "admins", usersByRole.getOrDefault("ADMIN", 0L),
+            "active", asLong(systemStats.get("activeUsers")),
+            "inactive", asLong(systemStats.get("inactiveUsers")),
+            "pending", 0
+        ));
 
         return ResponseEntity.ok(response);
     }
@@ -222,7 +230,7 @@ public class AdminController {
             UserBatchImportDTO importDTO = parser.parse(file);
             importDTO.setUpdateExisting(updateExisting);
 
-            // Ejecutar importación
+            // Ejecutar importacion
             AdminService.BatchImportResult result = adminService.importUsersBatch(importDTO);
             
             log.info("Import completed: created={}, updated={}, failed={}", 
@@ -245,7 +253,7 @@ public class AdminController {
             errorResult.created = 0;
             errorResult.updated = 0;
             errorResult.failed = 1;
-            errorResult.errors = List.of("Error durante la importación: " + e.getMessage());
+            errorResult.errors = List.of("Error durante la importacion: " + e.getMessage());
             errorResult.warnings = List.of();
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResult);
         }
@@ -330,34 +338,21 @@ public class AdminController {
             page, limit, level, userId, action, search, startDate, endDate);
 
         try {
-            // Validar límites
+            // Validar limites
             if (page < 1) page = 1;
             if (limit < 1) limit = 100;
-            if (limit > 500) limit = 500; // Límite máximo para evitar carga
+            if (limit > 500) limit = 500; // Limite maximo para evitar carga
 
-            // Construir especificación de búsqueda dinámicamente
-            Specification<SystemLog> spec = (root, query, cb) -> cb.conjunction();
+            // Construir especificacion de busqueda dinamicamente
+            Specification<SystemLog> baseSpec = (root, query, cb) -> cb.conjunction();
 
-            // Filtro por nivel
-            if (level != null && !level.isEmpty()) {
-                try {
-                    spec = spec.and(SystemLogSpecifications.hasLevel(
-                        com.uci.competencia.model.enums.LogLevel.valueOf(level.toUpperCase())
-                    ));
-                } catch (IllegalArgumentException e) {
-                    log.warn("Invalid log level: {}", level);
-                }
-            }
-
-            // Filtro por usuario
             if (userId != null && !userId.isEmpty()) {
-                spec = spec.and(SystemLogSpecifications.hasUserId(userId));
+                baseSpec = baseSpec.and(SystemLogSpecifications.hasUserId(userId));
             }
 
-            // Filtro por acción
             if (action != null && !action.isEmpty()) {
                 try {
-                    spec = spec.and(SystemLogSpecifications.hasAction(
+                    baseSpec = baseSpec.and(SystemLogSpecifications.hasAction(
                         com.uci.competencia.model.enums.ActionType.valueOf(action.toUpperCase())
                     ));
                 } catch (IllegalArgumentException e) {
@@ -366,38 +361,54 @@ public class AdminController {
             }
 
             if (search != null && !search.isEmpty()) {
-                spec = spec.and(SystemLogSpecifications.containsSearch(search));
+                baseSpec = baseSpec.and(SystemLogSpecifications.containsSearch(search));
             }
 
-            // Filtro por rango de tiempo
-            DateTimeFormatter formatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
-            LocalDateTime start = null;
-            LocalDateTime end = null;
+            LocalDateTime start = parseDateParam(startDate, false);
+            LocalDateTime end = parseDateParam(endDate, true);
+            if (startDate != null && !startDate.isBlank() && start == null) {
+                log.warn("Invalid startDate format: {}. Use yyyy-MM-dd or yyyy-MM-ddTHH:mm:ss", startDate);
+            }
+            if (endDate != null && !endDate.isBlank() && end == null) {
+                log.warn("Invalid endDate format: {}. Use yyyy-MM-dd or yyyy-MM-ddTHH:mm:ss", endDate);
+            }
+            baseSpec = baseSpec.and(SystemLogSpecifications.fromTimestamp(start));
+            baseSpec = baseSpec.and(SystemLogSpecifications.toTimestamp(end));
 
-            try {
-                if (startDate != null && !startDate.isEmpty()) {
-                    start = LocalDateTime.parse(startDate, formatter);
-                    spec = spec.and(SystemLogSpecifications.fromTimestamp(start));
+            Specification<SystemLog> filteredSpec = baseSpec;
+            if (level != null && !level.isEmpty()) {
+                try {
+                    filteredSpec = filteredSpec.and(SystemLogSpecifications.hasLevel(LogLevel.valueOf(level.toUpperCase())));
+                } catch (IllegalArgumentException e) {
+                    log.warn("Invalid log level: {}", level);
                 }
-                if (endDate != null && !endDate.isEmpty()) {
-                    end = LocalDateTime.parse(endDate, formatter);
-                    spec = spec.and(SystemLogSpecifications.toTimestamp(end));
-                }
-            } catch (DateTimeParseException e) {
-                log.warn("Invalid date format. Use ISO-8601 format (yyyy-MM-ddTHH:mm:ss): {}", e.getMessage());
             }
 
             // Configurar paginación y ordenamiento
-            Sort.Direction sortDirection = Sort.Direction.valueOf(order.toUpperCase());
-            Pageable pageable = PageRequest.of(page - 1, limit, Sort.by(sortDirection, orderBy));
+            Sort.Direction sortDirection;
+            try {
+                sortDirection = Sort.Direction.valueOf(order.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                sortDirection = Sort.Direction.DESC;
+            }
+            String safeOrderBy = switch (orderBy) {
+                case "timestamp", "level", "responseStatus", "action" -> orderBy;
+                default -> "timestamp";
+            };
+            Pageable pageable = PageRequest.of(page - 1, limit, Sort.by(sortDirection, safeOrderBy));
 
             // Ejecutar búsqueda
-            Page<SystemLog> logPage = systemLogRepository.findAll(spec, pageable);
+            Page<SystemLog> logPage = systemLogRepository.findAll(filteredSpec, pageable);
 
             // Convertir a DTOs
             List<AuditLogDTO> logDTOs = logPage.getContent().stream()
                 .map(this::convertToAuditLogDTO)
                 .collect(Collectors.toList());
+
+            Map<String, Object> stats = new HashMap<>();
+            stats.put("info", systemLogRepository.count(baseSpec.and(SystemLogSpecifications.hasLevel(LogLevel.INFO))));
+            stats.put("warn", systemLogRepository.count(baseSpec.and(SystemLogSpecifications.hasLevel(LogLevel.WARN))));
+            stats.put("error", systemLogRepository.count(baseSpec.and(SystemLogSpecifications.hasLevel(LogLevel.ERROR))));
 
             // Construir respuesta
             Map<String, Object> response = new HashMap<>();
@@ -407,6 +418,7 @@ public class AdminController {
             response.put("limit", limit);
             response.put("totalPages", logPage.getTotalPages());
             response.put("hasMore", logPage.hasNext());
+            response.put("stats", stats);
 
             log.info("Audit logs retrieved: {} records from {} total", logDTOs.size(), logPage.getTotalElements());
 
@@ -627,7 +639,7 @@ public class AdminController {
             
             Map<String, Object> response = new HashMap<>();
             response.put("success", isConnected);
-            response.put("message", isConnected ? "Conexión exitosa a PubMed" : "No se pudo conectar a PubMed");
+            response.put("message", isConnected ? "Conexion exitosa a PubMed" : "No se pudo conectar a PubMed");
             response.put("timestamp", LocalDateTime.now());
             
             return ResponseEntity.ok(response);
@@ -635,7 +647,7 @@ public class AdminController {
             log.error("Error testing PubMed connection: {}", e.getMessage());
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("success", false);
-            errorResponse.put("message", "Error al probar conexión PubMed: " + e.getMessage());
+            errorResponse.put("message", "Error al probar conexion PubMed: " + e.getMessage());
             errorResponse.put("timestamp", LocalDateTime.now());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
         }
@@ -657,12 +669,12 @@ public class AdminController {
             // Validar formato
             if (!format.matches("pdf|excel|json|csv")) {
                 Map<String, Object> errorResponse = new HashMap<>();
-                errorResponse.put("error", "Formato no válido");
+                errorResponse.put("error", "Formato no valido");
                 errorResponse.put("message", "Use: pdf, excel, json o csv");
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
             }
 
-            // Preparar parámetros de filtro
+            // Preparar parametros de filtro
             Map<String, Object> filters = new HashMap<>();
             if (startDate != null && !startDate.isEmpty()) filters.put("startDate", startDate);
             if (endDate != null && !endDate.isEmpty()) filters.put("endDate", endDate);
@@ -821,11 +833,43 @@ public class AdminController {
         }
     }
 
+    private long asLong(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        if (value == null) {
+            return 0;
+        }
+        try {
+            return Long.parseLong(value.toString());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    private LocalDateTime parseDateParam(String value, boolean endOfDay) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            if (value.contains("T")) {
+                return LocalDateTime.parse(value, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+            }
+            LocalDate date = LocalDate.parse(value, DateTimeFormatter.ISO_LOCAL_DATE);
+            return endOfDay ? LocalDateTime.of(date, LocalTime.MAX) : date.atStartOfDay();
+        } catch (DateTimeParseException e) {
+            return null;
+        }
+    }
+
     private UserDTO convertToUserDTO(User user) {
         UserDTO dto = new UserDTO();
         dto.setId(user.getId());
         dto.setEmail(user.getEmail());
-        dto.setName(user.getFirstName() + " " + user.getLastName());
+        String fullName = (String.format("%s %s",
+            Optional.ofNullable(user.getFirstName()).orElse(""),
+            Optional.ofNullable(user.getLastName()).orElse(""))).trim();
+        dto.setName(fullName.isBlank() ? user.getEmail() : fullName);
         dto.setFirstName(user.getFirstName());
         dto.setLastName(user.getLastName());
         dto.setRole(user.getRole().name().toLowerCase().replace("role_", ""));

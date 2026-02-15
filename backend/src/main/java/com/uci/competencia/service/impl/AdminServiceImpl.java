@@ -9,6 +9,7 @@ import com.uci.competencia.repository.UserRepository;
 import com.uci.competencia.repository.SystemLogRepository;
 import com.uci.competencia.repository.SearchSessionRepository;
 import com.uci.competencia.service.AdminService;
+import com.uci.competencia.service.specification.UserSpecifications;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,6 +18,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -71,6 +73,14 @@ public class AdminServiceImpl implements AdminService {
     @Override
     public Page<User> getUsersByRoleAndStatus(Role role, boolean active, Pageable pageable) {
         return userRepository.findByRoleAndActive(role, active, pageable);
+    }
+
+    @Override
+    public Page<User> searchUsers(Role role, Boolean active, String search, Pageable pageable) {
+        Specification<User> spec = Specification.where(UserSpecifications.hasRole(role))
+            .and(UserSpecifications.hasActive(active))
+            .and(UserSpecifications.containsSearch(search));
+        return userRepository.findAll(spec, pageable);
     }
 
     @Override
@@ -405,13 +415,14 @@ public class AdminServiceImpl implements AdminService {
             usersByRole.put("STUDENT", countUsersByRole(Role.ROLE_STUDENT));
             
             // Contar usuarios activos/inactivos
-            long activeUsers = userRepository.count();
+            long activeUsers = userRepository.countByActive(true);
+            long inactiveUsers = Math.max(0, totalUsers - activeUsers);
             
             // Información del sistema
             stats.put("totalUsers", totalUsers);
             stats.put("usersByRole", usersByRole);
             stats.put("activeUsers", activeUsers);
-            stats.put("inactiveUsers", 0);
+            stats.put("inactiveUsers", inactiveUsers);
             stats.put("timestamp", LocalDateTime.now());
             stats.put("uptime", getSystemUptime());
             stats.put("memoryUsage", getMemoryUsage());
@@ -433,7 +444,7 @@ public class AdminServiceImpl implements AdminService {
      */
     private long countUsersByRole(Role role) {
         try {
-            return userRepository.findByRole(role, org.springframework.data.domain.PageRequest.of(0, 1)).getTotalElements();
+            return userRepository.countByRole(role);
         } catch (Exception e) {
             log.warn("Error counting users with role {}: {}", role, e.getMessage());
             return 0;
@@ -1476,13 +1487,17 @@ public class AdminServiceImpl implements AdminService {
     @Override
     public void optimizeDatabase() {
         log.info("Database optimization requested");
-        // Placeholder: in production, execute VACUUM/REINDEX via maintenance job or DBA tooling.
+        JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+        jdbcTemplate.execute("ANALYZE");
     }
 
     @Override
     public void rebuildSearchIndexes() {
         log.info("Search index rebuild requested");
-        // Placeholder: hook into FTS/indexing pipeline when available.
+        JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+        jdbcTemplate.execute("REINDEX INDEX IF EXISTS idx_search_sessions_query_text");
+        jdbcTemplate.execute("REINDEX INDEX IF EXISTS idx_system_logs_timestamp");
+        jdbcTemplate.execute("REINDEX INDEX IF EXISTS idx_system_logs_user_id");
     }
 
     @Override

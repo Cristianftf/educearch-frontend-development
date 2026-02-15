@@ -1,5 +1,19 @@
 // ============ HTTP CLIENT ============
 
+export class ApiHttpError extends Error {
+  readonly status: number
+  readonly statusText: string
+  readonly endpoint: string
+
+  constructor(endpoint: string, status: number, statusText: string) {
+    super(`API Error: ${status} ${statusText}`)
+    this.name = 'ApiHttpError'
+    this.endpoint = endpoint
+    this.status = status
+    this.statusText = statusText
+  }
+}
+
 class ApiClient {
   private baseUrl: string
   private token: string | null = null
@@ -15,6 +29,10 @@ class ApiClient {
 
   setUserRole(role: string | null) {
     this.userRole = role
+  }
+
+  getUserRole(): string | null {
+    return this.userRole
   }
 
   private buildHeaders(options: RequestInit = {}): HeadersInit {
@@ -63,7 +81,7 @@ class ApiClient {
           window.location.href = '/login'
         }
       }
-      throw new Error(`API Error: ${response.status} ${response.statusText}`)
+      throw new ApiHttpError(endpoint, response.status, response.statusText)
     }
 
     if (responseType === 'blob') {

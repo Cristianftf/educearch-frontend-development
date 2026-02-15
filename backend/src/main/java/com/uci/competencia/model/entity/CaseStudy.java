@@ -63,6 +63,8 @@ public class CaseStudy {
     @CreationTimestamp
     private LocalDateTime createdAt;
 
+    private LocalDateTime startDate;
+
     private LocalDateTime dueDate;
 
     @ElementCollection

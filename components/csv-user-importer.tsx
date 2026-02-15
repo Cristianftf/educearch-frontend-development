@@ -245,7 +245,7 @@ export function CSVUserImporter() {
 
       const stats: ImportStats = {
         total: importedUsers.length,
-        imported: response.imported || validUsers.length,
+        imported: response.created || validUsers.length,
         updated: response.updated || 0,
         failed: response.failed || 0,
         errors: response.errors || [],

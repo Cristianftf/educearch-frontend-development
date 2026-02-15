@@ -10,5 +10,6 @@ import java.util.Optional;
 @Repository
 public interface EvaluationRepository extends JpaRepository<Evaluation, String> {
     Optional<Evaluation> findBySubmissionId(String submissionId);
+    List<Evaluation> findBySubmissionIdIn(List<String> submissionIds);
     List<Evaluation> findByProfessorId(String professorId);
 }

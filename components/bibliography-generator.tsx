@@ -3,6 +3,7 @@
 import React, { useState, useCallback } from 'react'
 import {
   DndContext,
+  DragStartEvent,
   DragEndEvent,
   DragOverlay,
   PointerSensor,

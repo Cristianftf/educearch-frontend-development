@@ -1,14 +1,13 @@
 ﻿"use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { adminAuditApi } from "@/lib/api"
-import { adminReportApi } from "@/lib/admin-report"
+import { exportAuditLogsClient } from "@/lib/admin-audit-export"
 import type { AuditLog } from "@/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
 import { AuditReportGenerator } from "@/components/audit-report-generator"
 import { Label } from "@/components/ui/label"
 import {
@@ -21,7 +20,6 @@ import {
 import {
   FileText,
   Search,
-  Download,
   Calendar,
   AlertTriangle,
   Info,
@@ -76,7 +74,7 @@ export default function AdminAuditPage() {
       )
       setLogs(response.logs)
       setTotal(response.total)
-      setTotalPages(Math.max(1, Math.ceil(response.total / pageSize)))
+      setTotalPages(Math.max(1, response.totalPages || Math.ceil(response.total / pageSize)))
       setStats({
         total: response.total,
         info: response.stats?.info || 0,
@@ -116,17 +114,6 @@ export default function AdminAuditPage() {
   //     ws?.close()
   //   }
   // }, [])
-
-  const filteredLogs = useMemo(() => {
-    return logs.filter((log) => {
-      const matchesSearch =
-        log.user.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        log.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        log.details.toLowerCase().includes(searchQuery.toLowerCase())
-      const matchesLevel = levelFilter === "all" || log.level === levelFilter
-      return matchesSearch && matchesLevel
-    })
-  }, [logs, searchQuery, levelFilter])
 
   const getLevelIcon = (level: string) => {
     switch (level) {
@@ -176,17 +163,12 @@ export default function AdminAuditPage() {
       start.setDate(end.getDate() - days)
       const startDate = start.toISOString().slice(0, 10)
       const endDate = end.toISOString().slice(0, 10)
-      const response = await adminReportApi.getAuditExport("pdf", startDate, endDate)
-      if (response?.downloadUrl) {
-        const link = document.createElement("a")
-        link.href = response.downloadUrl
-        link.download = response.fileName || `audit-report-${endDate}.pdf`
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-      } else {
-        throw new Error("No se pudo generar el reporte")
-      }
+      await exportAuditLogsClient({
+        format: "pdf",
+        startDate,
+        endDate,
+        fileNamePrefix: `audit-${days}d`,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al generar reporte")
     } finally {
@@ -342,7 +324,7 @@ export default function AdminAuditPage() {
             </div>
           )}
           <div className="space-y-2">
-            {filteredLogs.map((log) => (
+            {logs.map((log) => (
               <div
                 key={log.id}
                 className={`border rounded-lg transition-colors ${
@@ -415,7 +397,7 @@ export default function AdminAuditPage() {
           {/* Pagination */}
           <div className="flex items-center justify-between mt-4 pt-4 border-t">
             <p className="text-sm text-muted-foreground">
-              {filteredLogs.length === 0
+              {logs.length === 0
                 ? "Mostrando 0 eventos"
                 : `Mostrando ${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, total)} de ${total} eventos`}
             </p>

@@ -1,8 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { format } from "date-fns"
-import { Calendar, Download, Loader2, AlertCircle, CheckCircle } from "lucide-react"
+import { format as formatDate } from "date-fns"
+import { Download, Loader2, AlertCircle, CheckCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -24,7 +24,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { adminReportApi } from "@/lib/admin-report"
+import { exportAuditLogsClient } from "@/lib/admin-audit-export"
 
 type ReportFormat = "pdf" | "excel" | "json"
 type ReportType = "daily" | "weekly" | "monthly" | "custom"
@@ -91,8 +91,8 @@ export function AuditReportGenerator() {
     }
 
     return {
-      start: format(start, "yyyy-MM-dd"),
-      end: format(today, "yyyy-MM-dd"),
+      start: formatDate(start, "yyyy-MM-dd"),
+      end: formatDate(today, "yyyy-MM-dd"),
     }
   }
 
@@ -117,19 +117,19 @@ export function AuditReportGenerator() {
       const config: ReportConfig = {
         type: reportType,
         format,
-        startDate: dateRange.start,
-        endDate: dateRange.end,
+        startDate: dateRange.start || undefined,
+        endDate: dateRange.end || undefined,
         level: logLevel !== "all" ? logLevel : undefined,
         user: userFilter || undefined,
       }
 
-      // Call backend API
-      const response = await adminReportApi.exportAuditReport({
-        format,
-        startDate: dateRange.start,
-        endDate: dateRange.end,
-        level: logLevel !== "all" ? logLevel : undefined,
-        user: userFilter || undefined,
+      const response = await exportAuditLogsClient({
+        format: config.format,
+        startDate: config.startDate,
+        endDate: config.endDate,
+        level: config.level,
+        userId: config.user,
+        fileNamePrefix: `audit-${config.type}`,
       })
 
       const reportResult: ReportResult = {
@@ -141,16 +141,6 @@ export function AuditReportGenerator() {
       }
 
       setResult(reportResult)
-
-      // Auto-download if URL is valid
-      if (reportResult.downloadUrl && reportResult.downloadUrl !== "#") {
-        const link = document.createElement("a")
-        link.href = reportResult.downloadUrl
-        link.download = reportResult.fileName
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-      }
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Error al generar reporte"
@@ -302,7 +292,7 @@ export function AuditReportGenerator() {
                   <div className="text-sm">
                     <div><strong>Archivo:</strong> {result.fileName}</div>
                     <div><strong>Tamaño:</strong> {formatFileSize(result.size)}</div>
-                    <div><strong>Generado:</strong> {format(new Date(result.generatedAt), "PPpp", { locale: {} })}</div>
+                    <div><strong>Generado:</strong> {formatDate(new Date(result.generatedAt), "PPpp")}</div>
                   </div>
                 </div>
               </AlertDescription>
