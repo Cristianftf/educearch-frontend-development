@@ -1,22 +1,32 @@
 package com.uci.competencia.service.impl;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.uci.competencia.model.dto.response.EvaluationDTO;
-import com.uci.competencia.model.entity.CaseSubmission;
 import com.uci.competencia.model.entity.CaseStudy;
+import com.uci.competencia.model.entity.CaseSubmission;
 import com.uci.competencia.model.entity.Evaluation;
+import com.uci.competencia.model.entity.User;
 import com.uci.competencia.model.enums.SubmissionStatus;
 import com.uci.competencia.repository.CaseStudyRepository;
 import com.uci.competencia.repository.CaseSubmissionRepository;
 import com.uci.competencia.repository.EvaluationRepository;
+import com.uci.competencia.repository.UserRepository;
 import com.uci.competencia.service.EvaluationService;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -27,6 +37,7 @@ public class EvaluationServiceImpl implements EvaluationService {
     private final EvaluationRepository evaluationRepository;
     private final CaseSubmissionRepository caseSubmissionRepository;
     private final CaseStudyRepository caseStudyRepository;
+    private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -34,34 +45,22 @@ public class EvaluationServiceImpl implements EvaluationService {
         log.info("Getting pending evaluations for professor: {}", professorId);
 
         try {
-            Set<String> professorCaseIds = caseStudyRepository.findByCreatedBy(professorId).stream()
-                    .map(CaseStudy::getId)
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toSet());
-
+            Set<String> professorCaseIds = resolveProfessorCaseIds(professorId);
             if (professorCaseIds.isEmpty()) {
                 return List.of();
             }
 
-            // Obtener todas las submissions pendientes
-            List<CaseSubmission> pendingSubmissions = caseSubmissionRepository
-                    .findByStatus(SubmissionStatus.PENDING);
+            List<CaseSubmission> pendingSubmissions = caseSubmissionRepository.findByStatus(SubmissionStatus.PENDING);
 
-            // Filtrar para no incluir evaluaciones ya realizadas
             List<Map<String, Object>> pendingEvaluations = pendingSubmissions.stream()
-                    .filter(submission -> professorCaseIds.contains(submission.getCaseId()))
-                    .filter(submission -> {
-                        // Verificar si esta submission ya tiene evaluación
-                        Optional<Evaluation> existing = evaluationRepository
-                                .findBySubmissionId(submission.getId());
-                        return existing.isEmpty();
-                    })
-                    .map(this::convertSubmissionToEvaluationMap)
-                    .collect(Collectors.toList());
+                .filter(Objects::nonNull)
+                .filter(submission -> professorCaseIds.contains(submission.getCaseId()))
+                .filter(submission -> findEvaluationsBySubmissionId(submission.getId()).isEmpty())
+                .map(this::convertSubmissionToEvaluationMap)
+                .collect(Collectors.toList());
 
             log.info("Found {} pending evaluations for professor {}", pendingEvaluations.size(), professorId);
             return pendingEvaluations;
-
         } catch (Exception e) {
             log.error("Error getting pending evaluations for professor {}: {}", professorId, e.getMessage());
             throw new RuntimeException("Error getting pending evaluations: " + e.getMessage());
@@ -73,14 +72,24 @@ public class EvaluationServiceImpl implements EvaluationService {
         log.info("Getting reviewed evaluations for professor: {}", professorId);
 
         try {
-            List<Evaluation> evaluations = evaluationRepository.findByProfessorId(professorId);
+            List<Evaluation> evaluations = resolveProfessorIdentifiers(professorId).stream()
+                .flatMap(identifier -> evaluationRepository.findByProfessorId(identifier).stream())
+                .filter(Objects::nonNull)
+                .collect(Collectors.toMap(
+                    Evaluation::getId,
+                    evaluation -> evaluation,
+                    (existing, replacement) -> existing
+                ))
+                .values()
+                .stream()
+                .toList();
 
             List<Map<String, Object>> reviewed = evaluations.stream()
                 .map(evaluation -> caseSubmissionRepository.findById(evaluation.getSubmissionId())
                     .map(submission -> {
                         Map<String, Object> map = convertSubmissionToEvaluationMap(submission);
                         map.put("evaluationId", evaluation.getId());
-                        map.put("status", SubmissionStatus.REVIEWED);
+                        map.put("status", SubmissionStatus.REVIEWED.name().toLowerCase());
                         return map;
                     })
                     .orElse(null))
@@ -100,80 +109,52 @@ public class EvaluationServiceImpl implements EvaluationService {
     public Evaluation createEvaluation(String submissionId, String professorId, Map<String, Object> evaluationData) {
         log.info("Creating evaluation for submission: {}, professor: {}", submissionId, professorId);
 
-        try {
-            // Verificar que la submission existe
-            CaseSubmission submission = caseSubmissionRepository.findById(submissionId)
-                    .orElseThrow(() -> new RuntimeException("Submission not found: " + submissionId));
+        Set<String> professorIdentifiers = resolveProfessorIdentifiers(professorId);
+        CaseSubmission submission = caseSubmissionRepository.findById(submissionId)
+            .orElseThrow(() -> new RuntimeException("Submission not found: " + submissionId));
 
-            // Verificar que no existe evaluación previa
-            Optional<Evaluation> existing = evaluationRepository.findBySubmissionId(submissionId);
-            if (existing.isPresent()) {
-                log.warn("Evaluation already exists for submission: {}", submissionId);
-                throw new RuntimeException("Evaluation already exists for this submission");
-            }
-
-            // Crear nueva evaluación
-            Evaluation evaluation = new Evaluation();
-            evaluation.setSubmissionId(submissionId);
-            evaluation.setProfessorId(professorId);
-
-            // Extraer scores y comments del mapa
-            if (evaluationData.containsKey("scores")) {
-                String scoresJson = objectMapper.writeValueAsString(evaluationData.get("scores"));
-                evaluation.setScores(scoresJson);
-            }
-
-            if (evaluationData.containsKey("comments")) {
-                String commentsJson = objectMapper.writeValueAsString(evaluationData.get("comments"));
-                evaluation.setComments(commentsJson);
-            }
-
-            // Obtener score general
-            Object overallScoreObj = evaluationData.get("overallScore");
-            if (overallScoreObj != null) {
-                evaluation.setOverallScore(((Number) overallScoreObj).intValue());
-            } else {
-                evaluation.setOverallScore(0);
-            }
-
-            // Feedback
-            if (evaluationData.containsKey("feedback")) {
-                evaluation.setFeedback((String) evaluationData.get("feedback"));
-            }
-
-            evaluation.setEvaluatedAt(LocalDateTime.now());
-            evaluation.setUpdatedAt(LocalDateTime.now());
-
-            Evaluation saved = evaluationRepository.save(evaluation);
-
-            // Actualizar estado de la submission a EVALUATED
-            submission.setStatus(SubmissionStatus.EVALUATED);
-            submission.setUpdatedAt(LocalDateTime.now());
-            caseSubmissionRepository.save(submission);
-
-            log.info("Evaluation created successfully: {}", saved.getId());
-            return saved;
-
-        } catch (Exception e) {
-            log.error("Error creating evaluation: {}", e.getMessage());
-            throw new RuntimeException("Error creating evaluation: " + e.getMessage());
+        if (!isSubmissionOwnedByProfessor(submission, professorIdentifiers)) {
+            throw new RuntimeException("Submission does not belong to professor");
         }
+
+        List<Evaluation> existingEvaluations = findEvaluationsBySubmissionId(submissionId);
+        Evaluation evaluation = existingEvaluations.isEmpty()
+            ? new Evaluation()
+            : existingEvaluations.get(0);
+
+        evaluation.setSubmissionId(submissionId);
+        evaluation.setProfessorId(resolveCanonicalUserId(professorId));
+        applyEvaluationData(evaluation, evaluationData);
+        evaluation.setEvaluatedAt(LocalDateTime.now());
+        evaluation.setUpdatedAt(LocalDateTime.now());
+
+        Evaluation saved = evaluationRepository.save(evaluation);
+
+        submission.setStatus(SubmissionStatus.REVIEWED);
+        submission.setUpdatedAt(LocalDateTime.now());
+        caseSubmissionRepository.save(submission);
+
+        if (existingEvaluations.size() > 1) {
+            log.warn(
+                "Submission {} has {} existing evaluations; updated latest record {}",
+                submissionId,
+                existingEvaluations.size(),
+                saved.getId()
+            );
+        }
+
+        log.info("Evaluation saved successfully: {}", saved.getId());
+        return saved;
     }
 
     @Override
     public EvaluationDTO getEvaluationBySubmission(String submissionId) {
         log.info("Getting evaluation for submission: {}", submissionId);
 
-        try {
-            Evaluation evaluation = evaluationRepository.findBySubmissionId(submissionId)
-                    .orElseThrow(() -> new RuntimeException("Evaluation not found for submission: " + submissionId));
-
-            return convertToDTO(evaluation);
-
-        } catch (Exception e) {
-            log.error("Error getting evaluation for submission {}: {}", submissionId, e.getMessage());
-            throw new RuntimeException("Error getting evaluation: " + e.getMessage());
-        }
+        Evaluation evaluation = findEvaluationsBySubmissionId(submissionId).stream()
+            .findFirst()
+            .orElseThrow(() -> new RuntimeException("Evaluation not found for submission: " + submissionId));
+        return convertToDTO(evaluation);
     }
 
     @Override
@@ -182,10 +163,8 @@ public class EvaluationServiceImpl implements EvaluationService {
 
         try {
             CaseSubmission submission = caseSubmissionRepository.findById(submissionId)
-                    .orElseThrow(() -> new RuntimeException("Submission not found: " + submissionId));
-
+                .orElseThrow(() -> new RuntimeException("Submission not found: " + submissionId));
             return convertSubmissionToMap(submission);
-
         } catch (Exception e) {
             log.error("Error getting submission {}: {}", submissionId, e.getMessage());
             throw new RuntimeException("Error getting submission: " + e.getMessage());
@@ -197,11 +176,21 @@ public class EvaluationServiceImpl implements EvaluationService {
         log.info("Getting all evaluations for professor: {}", professorId);
 
         try {
-            List<Evaluation> evaluations = evaluationRepository.findByProfessorId(professorId);
-            return evaluations.stream()
-                    .map(this::convertToDTO)
-                    .collect(Collectors.toList());
+            List<Evaluation> evaluations = resolveProfessorIdentifiers(professorId).stream()
+                .flatMap(identifier -> evaluationRepository.findByProfessorId(identifier).stream())
+                .filter(Objects::nonNull)
+                .collect(Collectors.toMap(
+                    Evaluation::getId,
+                    evaluation -> evaluation,
+                    (existing, replacement) -> existing
+                ))
+                .values()
+                .stream()
+                .toList();
 
+            return evaluations.stream()
+                .map(this::convertToDTO)
+                .collect(Collectors.toList());
         } catch (Exception e) {
             log.error("Error getting professor evaluations: {}", e.getMessage());
             throw new RuntimeException("Error getting evaluations: " + e.getMessage());
@@ -215,28 +204,26 @@ public class EvaluationServiceImpl implements EvaluationService {
 
         try {
             Evaluation evaluation = evaluationRepository.findById(evaluationId)
-                    .orElseThrow(() -> new RuntimeException("Evaluation not found: " + evaluationId));
+                .orElseThrow(() -> new RuntimeException("Evaluation not found: " + evaluationId));
 
-            // Actualizar scores
             if (evaluationData.containsKey("scores")) {
                 String scoresJson = objectMapper.writeValueAsString(evaluationData.get("scores"));
                 evaluation.setScores(scoresJson);
             }
 
-            // Actualizar comments
             if (evaluationData.containsKey("comments")) {
                 String commentsJson = objectMapper.writeValueAsString(evaluationData.get("comments"));
                 evaluation.setComments(commentsJson);
             }
 
-            // Actualizar score general
             if (evaluationData.containsKey("overallScore")) {
-                evaluation.setOverallScore(((Number) evaluationData.get("overallScore")).intValue());
+                int score = parseScore(evaluationData.get("overallScore"));
+                evaluation.setOverallScore(Math.max(0, Math.min(score, 100)));
             }
 
-            // Actualizar feedback
             if (evaluationData.containsKey("feedback")) {
-                evaluation.setFeedback((String) evaluationData.get("feedback"));
+                Object feedbackValue = evaluationData.get("feedback");
+                evaluation.setFeedback(feedbackValue != null ? feedbackValue.toString() : null);
             }
 
             evaluation.setUpdatedAt(LocalDateTime.now());
@@ -244,7 +231,6 @@ public class EvaluationServiceImpl implements EvaluationService {
             Evaluation updated = evaluationRepository.save(evaluation);
             log.info("Evaluation updated successfully: {}", evaluationId);
             return updated;
-
         } catch (Exception e) {
             log.error("Error updating evaluation: {}", e.getMessage());
             throw new RuntimeException("Error updating evaluation: " + e.getMessage());
@@ -258,9 +244,8 @@ public class EvaluationServiceImpl implements EvaluationService {
 
         try {
             Evaluation evaluation = evaluationRepository.findById(evaluationId)
-                    .orElseThrow(() -> new RuntimeException("Evaluation not found: " + evaluationId));
+                .orElseThrow(() -> new RuntimeException("Evaluation not found: " + evaluationId));
 
-            // Revertir status de submission a PENDING
             Optional<CaseSubmission> submission = caseSubmissionRepository.findById(evaluation.getSubmissionId());
             if (submission.isPresent()) {
                 submission.get().setStatus(SubmissionStatus.PENDING);
@@ -270,32 +255,26 @@ public class EvaluationServiceImpl implements EvaluationService {
 
             evaluationRepository.deleteById(evaluationId);
             log.info("Evaluation deleted successfully: {}", evaluationId);
-
         } catch (Exception e) {
             log.error("Error deleting evaluation: {}", e.getMessage());
             throw new RuntimeException("Error deleting evaluation: " + e.getMessage());
         }
     }
 
-    /**
-     * Convierte una submission a un mapa de evaluación pendiente
-     */
     private Map<String, Object> convertSubmissionToEvaluationMap(CaseSubmission submission) {
         Map<String, Object> map = new HashMap<>();
+        map.put("id", submission.getId());
         map.put("submissionId", submission.getId());
         map.put("studentId", submission.getStudentId());
         map.put("caseId", submission.getCaseId());
         map.put("submittedAt", submission.getSubmittedAt());
-        map.put("status", submission.getStatus());
+        map.put("status", submission.getStatus() != null ? submission.getStatus().name().toLowerCase() : "pending");
         map.put("content", submission.getContent());
-        map.put("selectedArticles", submission.getSelectedArticles());
+        map.put("selectedArticles", readSelectedArticles(submission));
         map.put("bibliography", submission.getBibliography());
         return map;
     }
 
-    /**
-     * Convierte una submission a un mapa
-     */
     private Map<String, Object> convertSubmissionToMap(CaseSubmission submission) {
         Map<String, Object> map = new HashMap<>();
         map.put("id", submission.getId());
@@ -303,17 +282,14 @@ public class EvaluationServiceImpl implements EvaluationService {
         map.put("studentId", submission.getStudentId());
         map.put("caseId", submission.getCaseId());
         map.put("submittedAt", submission.getSubmittedAt());
-        map.put("status", submission.getStatus());
+        map.put("status", submission.getStatus() != null ? submission.getStatus().name().toLowerCase() : "pending");
         map.put("content", submission.getContent());
-        map.put("selectedArticles", submission.getSelectedArticles());
+        map.put("selectedArticles", readSelectedArticles(submission));
         map.put("bibliography", submission.getBibliography());
         map.put("updatedAt", submission.getUpdatedAt());
         return map;
     }
 
-    /**
-     * Convierte una Evaluation a EvaluationDTO
-     */
     private EvaluationDTO convertToDTO(Evaluation evaluation) {
         try {
             EvaluationDTO dto = new EvaluationDTO();
@@ -321,14 +297,12 @@ public class EvaluationServiceImpl implements EvaluationService {
             dto.setSubmissionId(evaluation.getSubmissionId());
             dto.setProfessorId(evaluation.getProfessorId());
 
-            // Parsear scores JSON a mapa
             if (evaluation.getScores() != null) {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> scores = objectMapper.readValue(evaluation.getScores(), Map.class);
                 dto.setScores(scores);
             }
 
-            // Parsear comments JSON a mapa
             if (evaluation.getComments() != null) {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> comments = objectMapper.readValue(evaluation.getComments(), Map.class);
@@ -339,11 +313,164 @@ public class EvaluationServiceImpl implements EvaluationService {
             dto.setFeedback(evaluation.getFeedback());
             dto.setEvaluatedAt(evaluation.getEvaluatedAt());
             dto.setUpdatedAt(evaluation.getUpdatedAt());
-
             return dto;
         } catch (Exception e) {
             log.error("Error converting evaluation to DTO: {}", e.getMessage());
             throw new RuntimeException("Error converting evaluation: " + e.getMessage());
         }
+    }
+
+    private Set<String> resolveProfessorCaseIds(String professorIdentifier) {
+        Set<String> caseIds = new LinkedHashSet<>();
+        for (String identifier : resolveProfessorIdentifiers(professorIdentifier)) {
+            List<CaseStudy> cases = caseStudyRepository.findByCreatedBy(identifier);
+            for (CaseStudy caseStudy : cases) {
+                if (caseStudy == null || caseStudy.getId() == null || caseStudy.getId().isBlank()) {
+                    continue;
+                }
+                caseIds.add(caseStudy.getId());
+            }
+        }
+        return caseIds;
+    }
+
+    private Set<String> resolveProfessorIdentifiers(String professorIdentifier) {
+        if (professorIdentifier == null || professorIdentifier.isBlank()) {
+            return Set.of();
+        }
+
+        LinkedHashSet<String> identifiers = new LinkedHashSet<>();
+        identifiers.add(professorIdentifier.trim());
+
+        findUserByIdentifier(professorIdentifier).ifPresent(user -> {
+            if (user.getId() != null && !user.getId().isBlank()) {
+                identifiers.add(user.getId());
+            }
+            if (user.getEmail() != null && !user.getEmail().isBlank()) {
+                identifiers.add(user.getEmail());
+            }
+            if (user.getUsername() != null && !user.getUsername().isBlank()) {
+                identifiers.add(user.getUsername());
+            }
+        });
+
+        return identifiers;
+    }
+
+    private String resolveCanonicalUserId(String identifier) {
+        return findUserByIdentifier(identifier)
+            .map(User::getId)
+            .orElse(identifier);
+    }
+
+    private Optional<User> findUserByIdentifier(String identifier) {
+        if (identifier == null || identifier.isBlank()) {
+            return Optional.empty();
+        }
+
+        String normalized = identifier.trim();
+        try {
+            Optional<User> byId = userRepository.findById(normalized);
+            if (byId.isPresent()) {
+                return byId;
+            }
+        } catch (Exception e) {
+            log.debug("Identifier {} is not a direct user ID", normalized);
+        }
+
+        Optional<User> byEmail = userRepository.findByEmail(normalized);
+        if (byEmail.isPresent()) {
+            return byEmail;
+        }
+
+        return userRepository.findByUsername(normalized);
+    }
+
+    private boolean isSubmissionOwnedByProfessor(CaseSubmission submission, Set<String> professorIdentifiers) {
+        if (submission == null || submission.getCaseId() == null || submission.getCaseId().isBlank()) {
+            return false;
+        }
+        if (professorIdentifiers == null || professorIdentifiers.isEmpty()) {
+            return false;
+        }
+
+        return caseStudyRepository.findById(submission.getCaseId())
+            .map(CaseStudy::getCreatedBy)
+            .filter(Objects::nonNull)
+            .filter(createdBy -> !createdBy.isBlank())
+            .map(professorIdentifiers::contains)
+            .orElse(false);
+    }
+
+    private List<String> readSelectedArticles(CaseSubmission submission) {
+        if (submission == null) {
+            return List.of();
+        }
+        try {
+            List<String> selectedArticles = submission.getSelectedArticles();
+            if (selectedArticles == null || selectedArticles.isEmpty()) {
+                return List.of();
+            }
+            return new ArrayList<>(selectedArticles);
+        } catch (Exception e) {
+            log.debug("Could not read selected articles for submission {}", submission.getId(), e);
+            return List.of();
+        }
+    }
+
+    private int parseScore(Object value) {
+        if (value instanceof Number number) {
+            return (int) Math.round(number.doubleValue());
+        }
+        if (value instanceof String stringValue) {
+            try {
+                return (int) Math.round(Double.parseDouble(stringValue.trim()));
+            } catch (NumberFormatException e) {
+                throw new RuntimeException("Invalid overallScore value");
+            }
+        }
+        throw new RuntimeException("Invalid overallScore value");
+    }
+
+    private void applyEvaluationData(Evaluation evaluation, Map<String, Object> evaluationData) {
+        if (evaluation == null || evaluationData == null) {
+            return;
+        }
+
+        try {
+            if (evaluationData.containsKey("scores")) {
+                String scoresJson = objectMapper.writeValueAsString(evaluationData.get("scores"));
+                evaluation.setScores(scoresJson);
+            }
+
+            if (evaluationData.containsKey("comments")) {
+                String commentsJson = objectMapper.writeValueAsString(evaluationData.get("comments"));
+                evaluation.setComments(commentsJson);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Invalid evaluation payload");
+        }
+
+        Object overallScoreObj = evaluationData.get("overallScore");
+        int overallScore = overallScoreObj != null ? parseScore(overallScoreObj) : 0;
+        evaluation.setOverallScore(Math.max(0, Math.min(overallScore, 100)));
+
+        if (evaluationData.containsKey("feedback")) {
+            Object feedbackValue = evaluationData.get("feedback");
+            evaluation.setFeedback(feedbackValue != null ? feedbackValue.toString() : null);
+        }
+    }
+
+    private List<Evaluation> findEvaluationsBySubmissionId(String submissionId) {
+        if (submissionId == null || submissionId.isBlank()) {
+            return List.of();
+        }
+        return evaluationRepository.findBySubmissionIdIn(List.of(submissionId)).stream()
+            .filter(Objects::nonNull)
+            .sorted(Comparator.comparing(
+                Evaluation::getUpdatedAt,
+                Comparator.nullsLast(Comparator.reverseOrder())
+            ))
+            .toList();
     }
 }

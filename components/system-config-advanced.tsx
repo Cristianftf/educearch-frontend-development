@@ -240,7 +240,7 @@ export function SystemConfigAdvanced() {
       const payload = toApiConfig(config, apiConfig)
       await adminSystemApi.updateSettings(payload)
       setApiConfig(payload)
-      setSuccess("âœ… Configuración guardada exitosamente")
+      setSuccess("Configuración guardada exitosamente")
       setTimeout(() => setSuccess(null), 3000)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al guardar")
@@ -265,7 +265,7 @@ export function SystemConfigAdvanced() {
           ...prev,
           pubmed: { ...prev.pubmed, testStatus: "success" },
         }))
-        setSuccess("âœ… Conexión a PubMed verificada")
+        setSuccess("Conexión a PubMed verificada")
       } else {
         throw new Error("Conexión fallida")
       }
@@ -359,8 +359,8 @@ export function SystemConfigAdvanced() {
               </Button>
             </div>
             <p className="text-xs text-gray-600">
-              {config.pubmed.testStatus === "success" && "âœ… Conexión verificada"}
-              {config.pubmed.testStatus === "failed" && "âŒ Conexión fallida - revisa tu API Key"}
+              {config.pubmed.testStatus === "success" && "Conexión verificada"}
+              {config.pubmed.testStatus === "failed" && "Conexión fallida - revisa tu API Key"}
               {config.pubmed.testStatus === "pending" && "Haz click en Probar para verificar la conexión"}
             </p>
           </div>
@@ -630,3 +630,4 @@ export function SystemConfigAdvanced() {
     </div>
   )
 }
+

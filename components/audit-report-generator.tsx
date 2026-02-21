@@ -47,16 +47,16 @@ interface ReportResult {
 }
 
 const REPORT_TYPES = [
-  { value: "daily", label: "Diario", description: "Ãšltimas 24 horas" },
-  { value: "weekly", label: "Semanal", description: "Ãšltimos 7 días" },
-  { value: "monthly", label: "Mensual", description: "Ãšltimos 30 días" },
+  { value: "daily", label: "Diario", description: "Últimas 24 horas" },
+  { value: "weekly", label: "Semanal", description: "Últimos 7 días" },
+  { value: "monthly", label: "Mensual", description: "Últimos 30 días" },
   { value: "custom", label: "Personalizado", description: "Rango de fechas" },
 ]
 
 const EXPORT_FORMATS = [
-  { value: "pdf", label: "ðŸ“„ PDF", description: "Reporte formateado con gráficos" },
-  { value: "excel", label: "ðŸ“Š Excel", description: "Tabla con filtros y análisis" },
-  { value: "json", label: "ðŸ“‹ JSON", description: "Datos sin procesar" },
+  { value: "pdf", label: "PDF", description: "Reporte formateado con gráficos" },
+  { value: "excel", label: "Excel", description: "Tabla con filtros y análisis" },
+  { value: "json", label: "JSON", description: "Datos sin procesar" },
 ]
 
 export function AuditReportGenerator() {
@@ -256,9 +256,9 @@ export function AuditReportGenerator() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todos los niveles</SelectItem>
-                    <SelectItem value="INFO">â„¹ï¸ Info</SelectItem>
-                    <SelectItem value="WARN">âš ï¸ Advertencia</SelectItem>
-                    <SelectItem value="ERROR">âŒ Error</SelectItem>
+                    <SelectItem value="INFO">Info</SelectItem>
+                    <SelectItem value="WARN">Advertencia</SelectItem>
+                    <SelectItem value="ERROR">Error</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -288,7 +288,7 @@ export function AuditReportGenerator() {
               <CheckCircle className="w-4 h-4 text-green-700" />
               <AlertDescription className="text-green-800">
                 <div className="space-y-2">
-                  <div className="font-medium">âœ… Reporte generado exitosamente</div>
+                  <div className="font-medium">Reporte generado exitosamente</div>
                   <div className="text-sm">
                     <div><strong>Archivo:</strong> {result.fileName}</div>
                     <div><strong>Tamaño:</strong> {formatFileSize(result.size)}</div>
@@ -325,3 +325,4 @@ export function AuditReportGenerator() {
     </Dialog>
   )
 }
+

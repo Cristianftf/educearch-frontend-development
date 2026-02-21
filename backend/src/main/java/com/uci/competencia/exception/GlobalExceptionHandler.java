@@ -2,6 +2,7 @@ package com.uci.competencia.exception;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -73,6 +74,25 @@ public class GlobalExceptionHandler {
         );
         errorResponse.setPath(request.getDescription(false).replace("uri=", ""));
         errorResponse.setDetails(details);
+        return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleNotReadableException(HttpMessageNotReadableException ex, WebRequest request) {
+        String message = "Malformed request payload";
+        Throwable root = ex.getMostSpecificCause();
+        if (root != null && root.getMessage() != null && !root.getMessage().isBlank()) {
+            message = root.getMessage();
+        } else if (ex.getMessage() != null && !ex.getMessage().isBlank()) {
+            message = ex.getMessage();
+        }
+
+        ErrorResponse errorResponse = new ErrorResponse(
+            "INVALID_REQUEST_BODY",
+            message,
+            HttpStatus.BAD_REQUEST.value()
+        );
+        errorResponse.setPath(request.getDescription(false).replace("uri=", ""));
         return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
     }
 

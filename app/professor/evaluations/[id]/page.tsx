@@ -39,39 +39,39 @@ interface CompetencyFeedback {
 
 const competencyConfig: Record<CompetencyType, { label: string; icon: React.ElementType; description: string }> = {
   access: {
-    label: 'Acceso a la informaciÃ³n',
+    label: 'Acceso a la información',
     icon: Search,
-    description: 'Uso de operadores booleanos, TÃ©rminos MeSH y estrategias de BÃºsqueda',
+    description: 'Uso de operadores booleanos, Términos MeSH y estrategias de Búsqueda',
   },
   process: {
-    label: 'Procesamiento de informaciÃ³n',
+    label: 'Procesamiento de información',
     icon: ShieldCheck,
-    description: 'evaluaciÃ³n crÃ­tica de la evidencia, identificaciÃ³n de sesgos',
+    description: 'evaluación crítica de la evidencia, identificación de sesgos',
   },
   communicate: {
-    label: 'ComunicaciÃ³n de informaciÃ³n',
+    label: 'Comunicación de información',
     icon: FileText,
-    description: 'Formato de bibliografÃ­a, citaciÃ³n correcta, presentaciÃ³n',
+    description: 'Formato de bibliografía, citación correcta, presentación',
   },
 }
 
 const quickFeedbackTemplates = {
   access: [
     'Excelente uso de operadores booleanos',
-    'Considerar aÃ±adir mÃ¡s TÃ©rminos MeSH especÃ­ficos',
-    'Buena estrategia de BÃºsqueda, podrÃ­a ampliarse',
+    'Considerar añadir más Términos MeSH específicos',
+    'Buena estrategia de Búsqueda, podría ampliarse',
     'Falta uso de filtros por tipo de estudio',
   ],
   process: [
-    'Correcta identificaciÃ³n de niveles de evidencia',
-    'Revisar evaluaciÃ³n de conflictos de interÃ©s',
-    'Buen anÃ¡lisis crÃ­tico de metodologÃ­a',
-    'Mejorar identificaciÃ³n de sesgos',
+    'Correcta identificación de niveles de evidencia',
+    'Revisar evaluación de conflictos de interés',
+    'Buen análisis crítico de metodología',
+    'Mejorar identificación de sesgos',
   ],
   communicate: [
-    'bibliografÃ­a correctamente formateada',
+    'bibliografía correctamente formateada',
     'Revisar formato de citas in-texto',
-    'Excelente presentaciÃ³n de resultados',
+    'Excelente presentación de resultados',
     'Corregir errores en formato Vancouver',
   ],
 }
@@ -301,7 +301,7 @@ export default function EvaluationDetailPage() {
               </div>
             </div>
             <div className="text-right">
-              <p className="text-sm text-muted-foreground">puntuaciÃ³n total</p>
+              <p className="text-sm text-muted-foreground">puntuación total</p>
               <p className="text-3xl font-bold">{overallScorePercent}%</p>
               <p className="text-xs text-muted-foreground">
                 {Math.round(earnedPoints)} de {totalMaxPoints || 100} pts
@@ -322,8 +322,8 @@ export default function EvaluationDetailPage() {
             <Tabs defaultValue="content">
               <TabsList className="mb-4">
                 <TabsTrigger value="content">Contenido</TabsTrigger>
-                <TabsTrigger value="bibliography">bibliografÃ­a</TabsTrigger>
-                <TabsTrigger value="searches">BÃºsquedas</TabsTrigger>
+                <TabsTrigger value="bibliography">bibliografía</TabsTrigger>
+                <TabsTrigger value="searches">Búsquedas</TabsTrigger>
               </TabsList>
 
               <TabsContent value="content">
@@ -346,7 +346,7 @@ export default function EvaluationDetailPage() {
                     </pre>
                   ) : (
                     <p className="text-muted-foreground italic">
-                      No se incluy? bibliografÃ­a
+                      No se incluyó bibliografía
                     </p>
                   )}
                 </ScrollArea>
@@ -364,7 +364,7 @@ export default function EvaluationDetailPage() {
                     </div>
                   ) : (
                     <p className="text-muted-foreground italic">
-                      No se registraron BÃºsquedas
+                      No se registraron Búsquedas
                     </p>
                   )}
                 </ScrollArea>
@@ -376,7 +376,7 @@ export default function EvaluationDetailPage() {
         {/* Right: Evaluation Rubric */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">rÃºbrica de evaluaciÃ³n</CardTitle>
+            <CardTitle className="text-lg">rúbrica de evaluación</CardTitle>
           </CardHeader>
           <CardContent>
             <ScrollArea className="h-[540px] pr-4">
@@ -402,7 +402,7 @@ export default function EvaluationDetailPage() {
 
                       <div className="space-y-2">
                         <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground">puntuaciÃ³n</span>
+                          <span className="text-muted-foreground">puntuación</span>
                           <span>{scoreData?.score || 0}%</span>
                         </div>
                         <Slider
@@ -421,9 +421,9 @@ export default function EvaluationDetailPage() {
                       </div>
 
                       <div className="space-y-2">
-                        <Label className="text-xs">RetroalimentaciÃ³n</Label>
+                        <Label className="text-xs">Retroalimentación</Label>
                         <Textarea
-                          placeholder="AÃ±ade comentarios especÃ­ficos..."
+                          placeholder="Añade comentarios específicos..."
                           className="min-h-[60px] text-sm"
                           value={scoreData?.feedback || ''}
                           onChange={(e) =>
@@ -443,9 +443,9 @@ export default function EvaluationDetailPage() {
       {/* Competency Feedback */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">RetroalimentaciÃ³n por competencia</CardTitle>
+          <CardTitle className="text-lg">Retroalimentación por competencia</CardTitle>
           <CardDescription>
-            Proporciona comentarios especÃ­ficos para cada ?rea de competencia
+            Proporciona comentarios específicos para cada área de competencia
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -470,7 +470,7 @@ export default function EvaluationDetailPage() {
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <Textarea
-                      placeholder="Escribe tu RetroalimentaciÃ³n..."
+                      placeholder="Escribe tu Retroalimentación..."
                       className="min-h-[100px] text-sm"
                       value={feedback?.comment || ''}
                       onChange={(e) =>
@@ -507,7 +507,7 @@ export default function EvaluationDetailPage() {
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
             <MessageSquare className="h-5 w-5" />
-            RetroalimentaciÃ³n general
+            Retroalimentación general
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">

@@ -45,9 +45,6 @@ public class PubMedQueryBuilder {
             addFilters(pubmedQuery, filters);
         }
         
-        // 5. Limitar a PubMed Central (revisado por pares)
-        pubmedQuery.append(" AND publisher[sb]");
-        
         return pubmedQuery.toString();
     }
     
@@ -138,11 +135,11 @@ public class PubMedQueryBuilder {
      */
     private String formatDateFilter(Integer yearFrom, Integer yearTo) {
         if (yearFrom != null && yearTo != null) {
-            return yearFrom + ":01/01/" + yearTo + "[PDAT]";
+            return yearFrom + ":" + yearTo + "[PDAT]";
         } else if (yearFrom != null) {
-            return yearFrom + ":01/01/3000[PDAT]";
+            return yearFrom + ":3000[PDAT]";
         } else if (yearTo != null) {
-            return "1900:01/01/" + yearTo + "[PDAT]";
+            return "1900:" + yearTo + "[PDAT]";
         }
         return "";
     }

@@ -44,9 +44,9 @@ export function SystemConfig({ settings, onSave }: SystemConfigProps) {
     setIsSaving(true)
     try {
       await onSave?.(formData)
-      setMessage({ type: 'success', text: 'Configuraci髇 guardada correctamente' })
+      setMessage({ type: 'success', text: 'Configuraci贸n guardada correctamente' })
     } catch (error) {
-      setMessage({ type: 'error', text: 'Error al guardar la configuraci髇' })
+      setMessage({ type: 'error', text: 'Error al guardar la configuraci贸n' })
     } finally {
       setIsSaving(false)
     }
@@ -54,9 +54,9 @@ export function SystemConfig({ settings, onSave }: SystemConfigProps) {
 
   const handleTestConnection = async () => {
     setTestingConnection(true)
-    // Simular prueba de conexi髇
+    // Simular prueba de conexi贸n
     setTimeout(() => {
-      setMessage({ type: 'success', text: 'Conexi髇 con PubMed exitosa' })
+      setMessage({ type: 'success', text: 'Conexi贸n con PubMed exitosa' })
       setTestingConnection(false)
     }, 2000)
   }
@@ -66,8 +66,8 @@ export function SystemConfig({ settings, onSave }: SystemConfigProps) {
       {/* API Configuration */}
       <Card>
         <CardHeader>
-          <CardTitle>Configuraci髇 de PubMed API</CardTitle>
-          <CardDescription>Gestiona la conexi髇 con PubMed</CardDescription>
+          <CardTitle>Configuraci贸n de PubMed API</CardTitle>
+          <CardDescription>Gestiona la conexi贸n con PubMed</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
@@ -116,7 +116,7 @@ export function SystemConfig({ settings, onSave }: SystemConfigProps) {
                 <SelectItem value="300">5 minutos</SelectItem>
                 <SelectItem value="1800">30 minutos</SelectItem>
                 <SelectItem value="3600">1 hora</SelectItem>
-                <SelectItem value="86400">1 d韆</SelectItem>
+                <SelectItem value="86400">1 d铆a</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -133,7 +133,7 @@ export function SystemConfig({ settings, onSave }: SystemConfigProps) {
                   Probando...
                 </>
               ) : (
-                'Probar Conexi髇'
+                'Probar Conexi贸n'
               )}
             </Button>
             <Badge variant="outline" className="ml-auto">
@@ -146,8 +146,8 @@ export function SystemConfig({ settings, onSave }: SystemConfigProps) {
       {/* AI Model Configuration */}
       <Card>
         <CardHeader>
-          <CardTitle>Configuraci髇 de Modelos IA</CardTitle>
-          <CardDescription>Ajusta par醡etros de los modelos de lenguaje</CardDescription>
+          <CardTitle>Configuraci贸n de Modelos IA</CardTitle>
+          <CardDescription>Ajusta par谩metros de los modelos de lenguaje</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
@@ -178,7 +178,7 @@ export function SystemConfig({ settings, onSave }: SystemConfigProps) {
               }
             />
             <p className="text-xs text-muted-foreground">
-              M醩 alto = m醩 creativo, m醩 bajo = m醩 determin韘tico
+              M谩s alto = m谩s creativo, m谩s bajo = m谩s determin铆stico
             </p>
           </div>
 
@@ -204,7 +204,7 @@ export function SystemConfig({ settings, onSave }: SystemConfigProps) {
       {/* Pedagogical Configuration */}
       <Card>
         <CardHeader>
-          <CardTitle>Configuraci髇 Pedag骻ica</CardTitle>
+          <CardTitle>Configuraci贸n Pedag贸gica</CardTitle>
           <CardDescription>Define umbrales de competencia y puntuaciones</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -213,7 +213,7 @@ export function SystemConfig({ settings, onSave }: SystemConfigProps) {
               <h4 className="font-medium capitalize">
                 {competency === 'access' && 'Acceso'}
                 {competency === 'process' && 'Procesamiento'}
-                {competency === 'communicate' && 'Comunicaci髇'}
+                {competency === 'communicate' && 'Comunicaci贸n'}
               </h4>
               <div className="grid grid-cols-3 gap-2">
                 <div>
@@ -298,7 +298,7 @@ export function SystemConfig({ settings, onSave }: SystemConfigProps) {
             Guardando...
           </>
         ) : (
-          'Guardar Configuraci髇'
+          'Guardar Configuraci贸n'
         )}
       </Button>
     </div>

@@ -1,5 +1,8 @@
 package com.uci.competencia.service.impl;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.uci.competencia.exception.ResourceNotFoundException;
 import com.uci.competencia.model.dto.request.UserBatchImportDTO;
 import com.uci.competencia.model.entity.User;
 import com.uci.competencia.model.entity.SystemLog;
@@ -14,6 +17,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.CacheManager;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.PageRequest;
@@ -28,10 +33,15 @@ import org.springframework.transaction.annotation.Transactional;
 
 import javax.sql.DataSource;
 import java.io.File;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.lang.management.ManagementFactory;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -44,6 +54,7 @@ public class AdminServiceImpl implements AdminService {
     private final SystemLogRepository systemLogRepository;
     private final SearchSessionRepository searchSessionRepository;
     private final DataSource dataSource;
+    private final ObjectMapper objectMapper;
 
     @Autowired(required = false)
     private CacheManager cacheManager;
@@ -119,8 +130,125 @@ public class AdminServiceImpl implements AdminService {
     }
 
     @Override
+    @Transactional
     public void deleteUser(String id) {
-        userRepository.deleteById(id);
+        User existingUser = userRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("User not found: " + id));
+
+        final UUID userUuid;
+        try {
+            userUuid = UUID.fromString(id);
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("Invalid user ID format: " + id, ex);
+        }
+
+        JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+        try {
+            // --- Student dependencies ---
+            jdbcTemplate.update(
+                "DELETE FROM evaluations WHERE submission_id IN (" +
+                "SELECT id::text FROM case_submissions WHERE CAST(student_id AS text) = ?)",
+                id
+            );
+            jdbcTemplate.update(
+                "DELETE FROM submission_selected_articles WHERE submission_id IN (" +
+                "SELECT id FROM case_submissions WHERE CAST(student_id AS text) = ?)",
+                id
+            );
+            jdbcTemplate.update("DELETE FROM case_submissions WHERE CAST(student_id AS text) = ?", id);
+            jdbcTemplate.update("DELETE FROM competency_progress WHERE CAST(student_id AS text) = ?", id);
+            jdbcTemplate.update("DELETE FROM case_assigned_students WHERE student_id = ?", id);
+
+            // --- Professor dependencies ---
+            jdbcTemplate.update(
+                "DELETE FROM evaluations WHERE professor_id = ?",
+                id
+            );
+            jdbcTemplate.update(
+                "DELETE FROM evaluations WHERE submission_id IN (" +
+                "SELECT cs.id::text FROM case_submissions cs " +
+                "WHERE cs.case_id IN (" +
+                "SELECT c.id FROM case_studies c WHERE c.created_by = ? OR CAST(c.professor_id AS text) = ?))",
+                id, id
+            );
+            jdbcTemplate.update(
+                "DELETE FROM submission_selected_articles WHERE submission_id IN (" +
+                "SELECT cs.id FROM case_submissions cs " +
+                "WHERE cs.case_id IN (" +
+                "SELECT c.id FROM case_studies c WHERE c.created_by = ? OR CAST(c.professor_id AS text) = ?))",
+                id, id
+            );
+            jdbcTemplate.update(
+                "DELETE FROM case_submissions WHERE case_id IN (" +
+                "SELECT c.id FROM case_studies c WHERE c.created_by = ? OR CAST(c.professor_id AS text) = ?)",
+                id, id
+            );
+            jdbcTemplate.update(
+                "DELETE FROM case_assigned_students WHERE case_id IN (" +
+                "SELECT c.id FROM case_studies c WHERE c.created_by = ? OR CAST(c.professor_id AS text) = ?)",
+                id, id
+            );
+            jdbcTemplate.update(
+                "DELETE FROM case_rubric WHERE case_id IN (" +
+                "SELECT c.id FROM case_studies c WHERE c.created_by = ? OR CAST(c.professor_id AS text) = ?)",
+                id, id
+            );
+            jdbcTemplate.update(
+                "DELETE FROM case_guiding_questions WHERE case_id IN (" +
+                "SELECT c.id FROM case_studies c WHERE c.created_by = ? OR CAST(c.professor_id AS text) = ?)",
+                id, id
+            );
+            jdbcTemplate.update(
+                "DELETE FROM case_required_articles WHERE case_id IN (" +
+                "SELECT c.id FROM case_studies c WHERE c.created_by = ? OR CAST(c.professor_id AS text) = ?)",
+                id, id
+            );
+            jdbcTemplate.update(
+                "DELETE FROM case_optional_articles WHERE case_id IN (" +
+                "SELECT c.id FROM case_studies c WHERE c.created_by = ? OR CAST(c.professor_id AS text) = ?)",
+                id, id
+            );
+            jdbcTemplate.update(
+                "DELETE FROM case_studies WHERE created_by = ? OR CAST(professor_id AS text) = ?",
+                id, id
+            );
+            jdbcTemplate.update("DELETE FROM professor_expertise WHERE CAST(professor_id AS text) = ?", id);
+
+            // --- Search/verification dependencies ---
+            jdbcTemplate.update(
+                "DELETE FROM verification_results WHERE session_context IN (" +
+                "SELECT id FROM search_sessions WHERE CAST(user_id AS text) = ?)",
+                id
+            );
+            jdbcTemplate.update("DELETE FROM verification_results WHERE CAST(user_id AS text) = ?", id);
+            jdbcTemplate.update(
+                "DELETE FROM result_mesh_terms WHERE search_result_id IN (" +
+                "SELECT sr.id FROM search_results sr " +
+                "JOIN search_sessions ss ON ss.id = sr.session_id " +
+                "WHERE CAST(ss.user_id AS text) = ?)",
+                id
+            );
+            jdbcTemplate.update(
+                "DELETE FROM search_results WHERE session_id IN (" +
+                "SELECT id FROM search_sessions WHERE CAST(user_id AS text) = ?)",
+                id
+            );
+            jdbcTemplate.update("DELETE FROM search_sessions WHERE CAST(user_id AS text) = ?", id);
+
+            // --- Optional user-owned records ---
+            jdbcTemplate.update("DELETE FROM bibliographies WHERE user_id = ?", id);
+
+            // --- Inheritance tables ---
+            jdbcTemplate.update("DELETE FROM students WHERE CAST(user_id AS text) = ?", id);
+            jdbcTemplate.update("DELETE FROM professors WHERE CAST(user_id AS text) = ?", id);
+            jdbcTemplate.update("DELETE FROM administrators WHERE CAST(user_id AS text) = ?", id);
+
+            userRepository.deleteById(existingUser.getId());
+        } catch (DataIntegrityViolationException ex) {
+            throw new IllegalStateException("Cannot delete user due to related records that require cleanup", ex);
+        } catch (DataAccessException ex) {
+            throw new IllegalStateException("Cannot delete user due to SQL constraint or type mismatch", ex);
+        }
     }
 
     @Override
@@ -1382,27 +1510,228 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     public boolean testPubmedConnection() {
-        log.info("Testing PubMed connection");
-        
+        Map<String, Object> pubmed = checkPubMedProvider("diabetes");
+        return "online".equals(pubmed.get("status")) || "warning".equals(pubmed.get("status"));
+    }
+
+    @Override
+    public Map<String, Object> checkExternalApis(String queryText) {
+        String query = normalizeExternalQuery(queryText);
+
+        List<Map<String, Object>> providers = List.of(
+            checkPubMedProvider(query),
+            checkEuropePmcProvider(query),
+            checkClinicalTrialsProvider(query)
+        );
+
+        long online = providers.stream()
+            .filter(provider -> "online".equals(provider.get("status")))
+            .count();
+        long warning = providers.stream()
+            .filter(provider -> "warning".equals(provider.get("status")))
+            .count();
+        long offline = providers.stream()
+            .filter(provider -> "offline".equals(provider.get("status")))
+            .count();
+
+        String status = offline > 0 ? "DOWN" : (warning > 0 ? "DEGRADED" : "UP");
+
+        Map<String, Object> summary = new HashMap<>();
+        summary.put("total", providers.size());
+        summary.put("online", online);
+        summary.put("warning", warning);
+        summary.put("offline", offline);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("status", status);
+        response.put("testedAt", LocalDateTime.now());
+        response.put("query", query);
+        response.put("summary", summary);
+        response.put("providers", providers);
+        return response;
+    }
+
+    private Map<String, Object> checkPubMedProvider(String query) {
+        String requestUrl = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+            + "?db=pubmed&retmode=json&retmax=1&sort=relevance&term=" + encodeQuery(query);
+
+        return checkProvider(
+            "pubmed",
+            "PubMed (NCBI E-utilities)",
+            requestUrl,
+            "https://www.ncbi.nlm.nih.gov/books/NBK25499/",
+            "Literatura biomedica revisada por pares",
+            this::extractPubMedCount
+        );
+    }
+
+    private Map<String, Object> checkEuropePmcProvider(String query) {
+        String requestUrl = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+            + "?query=" + encodeQuery(query) + "&format=json&resultType=core&pageSize=1";
+
+        return checkProvider(
+            "europepmc",
+            "Europe PMC",
+            requestUrl,
+            "https://europepmc.org/RestfulWebService",
+            "Indice europeo de publicaciones y preprints biomedicos",
+            this::extractEuropePmcCount
+        );
+    }
+
+    private Map<String, Object> checkClinicalTrialsProvider(String query) {
+        String requestUrl = "https://clinicaltrials.gov/api/v2/studies"
+            + "?query.term=" + encodeQuery(query) + "&pageSize=1";
+
+        return checkProvider(
+            "clinicaltrials",
+            "ClinicalTrials.gov API v2",
+            requestUrl,
+            "https://clinicaltrials.gov/data-api/about-api",
+            "Registro oficial de ensayos clinicos",
+            this::extractClinicalTrialsCount
+        );
+    }
+
+    private Map<String, Object> checkProvider(
+        String id,
+        String name,
+        String requestUrl,
+        String docsUrl,
+        String description,
+        Function<String, Long> countExtractor
+    ) {
+        long startedAt = System.currentTimeMillis();
+        int httpStatus = 0;
+        long resultCount = 0;
+        String message = "Sin respuesta";
+        String status = "offline";
+        String error = null;
+
+        HttpURLConnection connection = null;
         try {
-            // Intentar conexión a PubMed
-            // En implementación real, hacer una petición HTTP real a PubMed API
-            java.net.URL url = new java.net.URL("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=test&retmax=1");
-            java.net.HttpURLConnection connection = (java.net.HttpURLConnection) url.openConnection();
+            URL url = new URL(requestUrl);
+            connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(5000);
-            connection.setReadTimeout(5000);
-            
-            int responseCode = connection.getResponseCode();
-            boolean isConnected = (responseCode >= 200 && responseCode < 300);
-            
-            log.info("PubMed connection test result: {} (HTTP {})", isConnected ? "SUCCESS" : "FAILED", responseCode);
-            
-            return isConnected;
-        } catch (Exception e) {
-            log.error("Error testing PubMed connection: {}", e.getMessage());
-            return false;
+            connection.setReadTimeout(8000);
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("User-Agent", "uci-competencia-admin-diagnostics/1.0");
+
+            httpStatus = connection.getResponseCode();
+            String body = readResponseBody(connection, httpStatus);
+
+            if (httpStatus >= 200 && httpStatus < 300) {
+                try {
+                    resultCount = countExtractor.apply(body);
+                } catch (Exception parseError) {
+                    log.debug("Could not parse {} count: {}", name, parseError.getMessage());
+                    resultCount = 0;
+                }
+                status = "online";
+                message = resultCount > 0
+                    ? "Conectividad y respuesta validadas"
+                    : "Conectividad validada, sin resultados para la consulta de prueba";
+            } else {
+                status = "offline";
+                message = "HTTP " + httpStatus;
+            }
+        } catch (Exception ex) {
+            status = "offline";
+            message = "Fallo de conectividad";
+            error = ex.getMessage();
+            log.warn("External API check failed for {}: {}", name, ex.getMessage());
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
         }
+
+        long latencyMs = Math.max(1, System.currentTimeMillis() - startedAt);
+
+        Map<String, Object> provider = new HashMap<>();
+        provider.put("id", id);
+        provider.put("name", name);
+        provider.put("description", description);
+        provider.put("status", status);
+        provider.put("httpStatus", httpStatus);
+        provider.put("latencyMs", latencyMs);
+        provider.put("resultCount", resultCount);
+        provider.put("message", message);
+        provider.put("error", error);
+        provider.put("docsUrl", docsUrl);
+        provider.put("requestUrl", requestUrl);
+        provider.put("lastCheck", LocalDateTime.now());
+        return provider;
+    }
+
+    private String readResponseBody(HttpURLConnection connection, int httpStatus) {
+        try {
+            InputStream stream = httpStatus >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            if (stream == null) {
+                return "";
+            }
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (Exception ex) {
+            return "";
+        }
+    }
+
+    private long extractPubMedCount(String responseBody) {
+        if (responseBody == null || responseBody.isBlank()) {
+            return 0;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(responseBody);
+            return root.path("esearchresult").path("count").asLong(0);
+        } catch (Exception ex) {
+            return 0;
+        }
+    }
+
+    private long extractEuropePmcCount(String responseBody) {
+        if (responseBody == null || responseBody.isBlank()) {
+            return 0;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(responseBody);
+            return root.path("hitCount").asLong(0);
+        } catch (Exception ex) {
+            return 0;
+        }
+    }
+
+    private long extractClinicalTrialsCount(String responseBody) {
+        if (responseBody == null || responseBody.isBlank()) {
+            return 0;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(responseBody);
+            long totalCount = root.path("totalCount").asLong(-1);
+            if (totalCount >= 0) {
+                return totalCount;
+            }
+            JsonNode studies = root.path("studies");
+            return studies.isArray() ? studies.size() : 0;
+        } catch (Exception ex) {
+            return 0;
+        }
+    }
+
+    private String encodeQuery(String query) {
+        try {
+            return java.net.URLEncoder.encode(query, StandardCharsets.UTF_8);
+        } catch (Exception ex) {
+            return "evidence";
+        }
+    }
+
+    private String normalizeExternalQuery(String queryText) {
+        if (queryText == null) {
+            return "evidence based medicine";
+        }
+        String normalized = queryText.trim().replaceAll("\\s+", " ");
+        return normalized.isEmpty() ? "evidence based medicine" : normalized;
     }
 
     // ======================== BACKUPS MANAGEMENT ========================

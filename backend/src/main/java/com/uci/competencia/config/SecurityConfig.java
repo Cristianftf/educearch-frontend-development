@@ -43,8 +43,10 @@ public class SecurityConfig {
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**").permitAll()
+                .requestMatchers("/ws-native", "/ws-native/**", "/ws/**").permitAll()
                 .requestMatchers("/api/search/**").authenticated()
                 .requestMatchers("/api/verify/**").authenticated()
+                .requestMatchers("/api/chat/**").hasAnyRole("STUDENT", "PROFESSOR", "ADMIN")
                 .requestMatchers("/api/student/**").hasRole("STUDENT")
                 .requestMatchers("/api/professor/**").hasRole("PROFESSOR")
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")

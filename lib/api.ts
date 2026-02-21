@@ -14,6 +14,7 @@ export { verifyApi } from './verification'
 export { bibliographyApi } from './bibliography'
 export { progressApi } from './progress'
 export { casesApi } from './cases'
+export { chatApi } from './chat'
 
 // Evaluation & Hedges
 export { evaluationApi } from './evaluations'

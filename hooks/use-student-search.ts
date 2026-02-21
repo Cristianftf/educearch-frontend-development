@@ -53,20 +53,20 @@ export function useStudentSearch(): UseStudentSearchReturn {
         addActivity({
           id: `activity-${Date.now()}`,
           type: 'search',
-          description: `Búsqueda ejecutada: ${query.rawQuery}`,
+          description: `BÃºsqueda ejecutada: ${query.rawQuery}`,
           timestamp: new Date().toISOString(),
           metadata: { queryId: query.id, resultCount: session.totalResults },
         })
 
-        // Auto-guardar búsqueda
+        // Auto-guardar bÃºsqueda
         addSavedSearch(query)
         queryClient.invalidateQueries({ queryKey: ['student', 'searchHistory'] })
         return session
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Error al ejecutar búsqueda'
+        const errorMessage = err instanceof Error ? err.message : 'Error al ejecutar bÃºsqueda'
         setError(errorMessage)
         console.error('[useStudentSearch]:', err)
-        return null
+        throw err instanceof Error ? err : new Error(errorMessage)
       } finally {
         setIsSearching(false)
       }
@@ -81,7 +81,7 @@ export function useStudentSearch(): UseStudentSearchReturn {
         toggleSearchFavorite(searchId)
         queryClient.invalidateQueries({ queryKey: ['student', 'searchHistory'] })
       } catch (err) {
-        setError('No se pudo guardar la búsqueda')
+        setError('No se pudo guardar la bÃºsqueda')
         console.error('[useStudentSearch saveSearch]:', err)
       }
     },
@@ -94,7 +94,7 @@ export function useStudentSearch(): UseStudentSearchReturn {
       setSavedSearches((prev) => prev.filter((s) => s.id !== searchId))
       queryClient.invalidateQueries({ queryKey: ['student', 'searchHistory'] })
     } catch (err) {
-      setError('No se pudo eliminar la búsqueda')
+      setError('No se pudo eliminar la bÃºsqueda')
       console.error('[useStudentSearch deleteSearch]:', err)
     }
   }, [queryClient, setSavedSearches])

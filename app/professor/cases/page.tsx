@@ -56,12 +56,22 @@ const difficultyConfig: Record<CaseDifficulty, { label: string; color: string }>
   advanced: { label: 'Avanzado', color: 'bg-destructive/10 text-destructive border-destructive/30' },
 }
 
+function parseCalendarDateUtc(value: string): Date {
+  const datePart = value.slice(0, 10)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    const [year, month, day] = datePart.split('-').map((item) => parseInt(item, 10))
+    return new Date(Date.UTC(year, month - 1, day))
+  }
+  return new Date(value)
+}
+
 export default function ProfessorCasesPage() {
   const [cases, setCases] = useState<CaseStudy[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [deleteDialog, setDeleteDialog] = useState<CaseStudy | null>(null)
   const [draggedCase, setDraggedCase] = useState<CaseStudy | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -79,15 +89,23 @@ export default function ProfessorCasesPage() {
   }, [])
 
   const handleStatusChange = useCallback(async (caseId: string, newStatus: CaseStatus) => {
+    const currentCase = cases.find((item) => item.id === caseId)
+    if (newStatus === 'active' && currentCase && currentCase.assignedStudents.length === 0) {
+      setActionError('No puedes activar un caso sin estudiantes asignados.')
+      return
+    }
+
     try {
       await casesApi.update(caseId, { status: newStatus })
       setCases((prev) =>
         prev.map((c) => (c.id === caseId ? { ...c, status: newStatus } : c))
       )
+      setActionError(null)
     } catch (err) {
       console.error('[v0] Error updating case status:', err)
+      setActionError('No se pudo actualizar el estado del caso.')
     }
-  }, [])
+  }, [cases])
 
   const handleDelete = useCallback(async () => {
     if (!deleteDialog) return
@@ -163,6 +181,10 @@ export default function ProfessorCasesPage() {
           onChange={(e) => setSearchTerm(e.target.value)}
         />
       </div>
+
+      {actionError && (
+        <p className="text-sm text-destructive">{actionError}</p>
+      )}
 
       {/* Kanban Board */}
       <div className="grid gap-6 lg:grid-cols-3">
@@ -296,9 +318,10 @@ export default function ProfessorCasesPage() {
                           {caseStudy.dueDate && (
                             <div className="flex items-center gap-1 text-xs text-muted-foreground mt-2">
                               <Calendar className="h-3 w-3" />
-                              {new Date(caseStudy.dueDate).toLocaleDateString('es', {
+                              {parseCalendarDateUtc(caseStudy.dueDate).toLocaleDateString('es', {
                                 day: 'numeric',
                                 month: 'short',
+                                timeZone: 'UTC',
                               })}
                             </div>
                           )}
@@ -330,7 +353,7 @@ export default function ProfessorCasesPage() {
           <DialogHeader>
             <DialogTitle>Eliminar caso</DialogTitle>
             <DialogDescription>
-              ?Estás seguro de que deseas eliminar el caso &ldquo;{deleteDialog?.title}&rdquo;? Esta acción
+              ¿Estás seguro de que deseas eliminar el caso &ldquo;{deleteDialog?.title}&rdquo;? Esta acción
               no se puede deshacer.
             </DialogDescription>
           </DialogHeader>

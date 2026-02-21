@@ -20,6 +20,54 @@ export function createLocalId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const segments = token.split('.')
+  if (segments.length < 2) return null
+  try {
+    const base64 = segments[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=')
+    const json =
+      typeof window !== 'undefined' && typeof window.atob === 'function'
+        ? window.atob(padded)
+        : ''
+    if (!json) return null
+    const parsed = JSON.parse(json)
+    if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>
+    return null
+  } catch {
+    return null
+  }
+}
+
+function normalizeScopePart(value: string): string {
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '_')
+  return normalized || 'anonymous'
+}
+
+export function getStorageScope(): string {
+  if (!isClient()) return 'server'
+  const token = window.localStorage.getItem('auth_token')
+  if (!token) return 'anonymous'
+
+  const payload = decodeJwtPayload(token)
+  const subject = typeof payload?.sub === 'string' ? payload.sub : 'anonymous'
+  const authorities = typeof payload?.authorities === 'string' ? payload.authorities : ''
+  const role = authorities
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .find((item) => item.startsWith('role_'))
+    ?.replace('role_', '')
+
+  if (role) {
+    return `${normalizeScopePart(role)}:${normalizeScopePart(subject)}`
+  }
+  return normalizeScopePart(subject)
+}
+
+export function getScopedStorageKey(baseKey: string): string {
+  return `${baseKey}:${getStorageScope()}`
+}
+
 export function readLocalStorage<T>(key: string, fallback: T): T {
   if (!isClient()) return fallback
   try {

@@ -33,6 +33,15 @@ const difficultyConfig: Record<CaseDifficulty, { label: string; color: string }>
   advanced: { label: 'Avanzado', color: 'bg-destructive/10 text-destructive border-destructive/30' },
 }
 
+function parseCalendarDateUtc(value: string): Date {
+  const datePart = value.slice(0, 10)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    const [year, month, day] = datePart.split('-').map((item) => parseInt(item, 10))
+    return new Date(Date.UTC(year, month - 1, day))
+  }
+  return new Date(value)
+}
+
 export default function ProfessorCaseDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -142,10 +151,15 @@ export default function ProfessorCaseDetailPage() {
 
   const handleStatusChange = async (status: CaseStatus) => {
     if (!caseStudy) return
+    if (status === 'active' && caseStudy.assignedStudents.length === 0) {
+      setError('No puedes activar un caso sin estudiantes asignados.')
+      return
+    }
     setIsUpdating(true)
     try {
       const updated = await casesApi.update(caseStudy.id, { status })
       setCaseStudy(updated)
+      setError(null)
     } catch (err) {
       console.error('[v0] Error updating case status:', err)
       setError('No se pudo actualizar el estado del caso.')
@@ -209,10 +223,11 @@ export default function ProfessorCaseDetailPage() {
               {caseStudy.dueDate && (
                 <span className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Calendar className="h-3 w-3" />
-                  {new Date(caseStudy.dueDate).toLocaleDateString('es', {
+                  {parseCalendarDateUtc(caseStudy.dueDate).toLocaleDateString('es', {
                     day: 'numeric',
                     month: 'short',
                     year: 'numeric',
+                    timeZone: 'UTC',
                   })}
                 </span>
               )}

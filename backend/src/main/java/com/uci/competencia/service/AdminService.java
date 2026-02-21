@@ -178,6 +178,14 @@ public interface AdminService {
      * Probar conexión a PubMed
      */
     boolean testPubmedConnection();
+
+    /**
+     * Comprobar conectividad y respuesta de APIs externas de busqueda.
+     *
+     * @param queryText consulta de prueba opcional
+     * @return diagnostico por proveedor y resumen general
+     */
+    Map<String, Object> checkExternalApis(String queryText);
     
     /**
      * Obtener lista de backups

@@ -1,4 +1,11 @@
-import type { SystemHealth, AdminSystemConfiguration, Alert, AdminDashboardData, SystemOverview } from '@/types'
+import type {
+  SystemHealth,
+  AdminSystemConfiguration,
+  Alert,
+  AdminDashboardData,
+  SystemOverview,
+  ExternalApiDiagnostics,
+} from '@/types'
 import { api } from './api-client'
 
 export const adminSystemApi = {
@@ -15,6 +22,11 @@ export const adminSystemApi = {
 
   testPubmedConnection: () =>
     api.post<{ success: boolean; message: string; timestamp: string }>('/admin/test-pubmed'),
+
+  checkExternalApis: (queryText?: string) =>
+    api.post<ExternalApiDiagnostics>('/admin/external-apis/check', {
+      queryText,
+    }),
 
   getAlerts: () => api.get<{ alerts: Alert[]; count: number }>('/admin/alerts'),
 

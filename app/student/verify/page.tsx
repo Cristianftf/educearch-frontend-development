@@ -2,7 +2,7 @@
 
 import React from "react"
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import type { VerificationResult, VerificationStatus } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -22,7 +22,6 @@ import {
 } from '@/components/ui/accordion'
 import {
   ShieldCheck,
-  ShieldAlert,
   ShieldQuestion,
   Link as LinkIcon,
   FileText,
@@ -39,6 +38,7 @@ import {
 } from 'lucide-react'
 import { VerificationRecommendations } from '@/components/verification-recommendations'
 import { useStudentVerify } from '@/hooks/use-student-verify'
+import { validateContentSourceUrl } from '@/lib/url-validation'
 
 const statusConfig: Record<
   VerificationStatus,
@@ -89,16 +89,36 @@ export default function VerifyPage() {
     loadHistory(1, 10)
   }, [loadHistory])
 
-  const handleVerify = useCallback(async () => {
-    const claim = inputMode === 'text' ? claimText : claimUrl
+  const wordCount = claimText.split(/\s+/).filter(Boolean).length
+  const urlValidation = useMemo(() => {
+    if (inputMode !== 'url' || !claimUrl.trim()) {
+      return { normalizedUrl: undefined, error: undefined }
+    }
+    return validateContentSourceUrl(claimUrl)
+  }, [inputMode, claimUrl])
 
-    if (!claim.trim()) {
-      setError('Por favor, ingresa un claim o URL para verificar')
+  const handleVerify = useCallback(async () => {
+    const trimmedClaim = claimText.trim()
+    const trimmedUrl = claimUrl.trim()
+
+    if (inputMode === 'text' && !trimmedClaim) {
+      setError('Por favor, ingresa un claim para verificar')
       return
     }
 
-    if (inputMode === 'text' && claim.split(' ').length > 500) {
+    if (inputMode === 'url' && !trimmedUrl) {
+      setError('Por favor, ingresa una URL para verificar')
+      return
+    }
+
+    if (inputMode === 'text' && wordCount > 500) {
       setError('El claim no puede exceder 500 palabras')
+      return
+    }
+
+    const validatedUrl = inputMode === 'url' ? validateContentSourceUrl(trimmedUrl) : null
+    if (inputMode === 'url' && (!validatedUrl?.normalizedUrl || validatedUrl.error)) {
+      setError(validatedUrl?.error || 'La URL no es valida para verificacion')
       return
     }
 
@@ -107,20 +127,19 @@ export default function VerifyPage() {
 
     try {
       const verificationResult = await verifyClaim(
-        inputMode === 'text' ? claim : '',
-        inputMode === 'url' ? claim : undefined
+        inputMode === 'text' ? trimmedClaim : '',
+        inputMode === 'url' ? validatedUrl?.normalizedUrl : undefined
       )
       if (verificationResult) {
         setResult(verificationResult)
         await loadHistory(1, 10)
       }
     } catch (err) {
-      setError('Error al verificar. Intenta de nuevo más tarde.')
+      const message = err instanceof Error ? err.message : 'Error al verificar. Intenta de nuevo mas tarde.'
+      setError(message)
       console.error('[v0] Verification error:', err)
     }
-  }, [inputMode, claimText, claimUrl, verifyClaim, loadHistory])
-  const wordCount = claimText.split(/\s+/).filter(Boolean).length
-
+  }, [inputMode, claimText, claimUrl, verifyClaim, loadHistory, wordCount])
   const safeResult = result ? { ...result, supportingEvidence: Array.isArray(result.supportingEvidence) ? result.supportingEvidence : [], contradictingEvidence: Array.isArray(result.contradictingEvidence) ? result.contradictingEvidence : [], recommendations: Array.isArray(result.recommendations) ? result.recommendations : [] } : null;
 
   return (
@@ -184,6 +203,9 @@ export default function VerifyPage() {
                       onChange={(e) => setClaimUrl(e.target.value)}
                       disabled={isVerifying}
                     />
+                    {claimUrl.trim() && urlValidation.error && (
+                      <p className="text-xs text-destructive">{urlValidation.error}</p>
+                    )}
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Analizaremos el contenido de la pÃ¡gina para extraer claims verificables
@@ -204,18 +226,20 @@ export default function VerifyPage() {
                 onClick={handleVerify}
                 disabled={
                   isVerifying ||
-                  (inputMode === 'text' ? !claimText.trim() : !claimUrl.trim())
+                  (inputMode === 'text'
+                    ? !claimText.trim() || wordCount > 500
+                    : !claimUrl.trim() || Boolean(urlValidation.error))
                 }
               >
                 {isVerifying ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Analizando claim...
+                    {inputMode === 'url' ? 'Analizando contenido de URL...' : 'Analizando claim...'}
                   </>
                 ) : (
                   <>
                     <ShieldCheck className="mr-2 h-4 w-4" />
-                    Verificar claim mÃ©dico
+                    {inputMode === 'url' ? 'Verificar contenido de URL' : 'Verificar claim medico'}
                   </>
                 )}
               </Button>
@@ -301,9 +325,27 @@ export default function VerifyPage() {
                                 &ldquo;{evidence.snippet}&rdquo;
                               </p>
                               <div className="flex items-center justify-between mt-2">
-                                <Badge variant="outline" className="text-xs">
-                                  Relevancia: {evidence.relevanceScore}%
-                                </Badge>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline" className="text-xs">
+                                    Relevancia: {evidence.relevanceScore}%
+                                  </Badge>
+                                  {evidence.source && (
+                                    <Badge variant="secondary" className="text-xs">
+                                      {evidence.source}
+                                    </Badge>
+                                  )}
+                                </div>
+                                {evidence.sourceUrl && (
+                                  <a
+                                    href={evidence.sourceUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs inline-flex items-center gap-1 text-primary hover:underline"
+                                  >
+                                    <ExternalLink className="h-3 w-3" />
+                                    Fuente
+                                  </a>
+                                )}
                               </div>
                             </div>
                           ))}
@@ -340,9 +382,27 @@ export default function VerifyPage() {
                                 &ldquo;{evidence.snippet}&rdquo;
                               </p>
                               <div className="flex items-center justify-between mt-2">
-                                <Badge variant="outline" className="text-xs">
-                                  Relevancia: {evidence.relevanceScore}%
-                                </Badge>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline" className="text-xs">
+                                    Relevancia: {evidence.relevanceScore}%
+                                  </Badge>
+                                  {evidence.source && (
+                                    <Badge variant="secondary" className="text-xs">
+                                      {evidence.source}
+                                    </Badge>
+                                  )}
+                                </div>
+                                {evidence.sourceUrl && (
+                                  <a
+                                    href={evidence.sourceUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs inline-flex items-center gap-1 text-primary hover:underline"
+                                  >
+                                    <ExternalLink className="h-3 w-3" />
+                                    Fuente
+                                  </a>
+                                )}
                               </div>
                             </div>
                           ))}
@@ -421,7 +481,7 @@ export default function VerifyPage() {
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted-foreground">
               <p>
-                <strong className="text-foreground">Se especÃ­fico:</strong> Claims concretos
+                <strong className="text-foreground">SÃ© especÃ­fico:</strong> Claims concretos
                 generan mejores resultados.
               </p>
               <p>
@@ -520,3 +580,4 @@ export default function VerifyPage() {
     </div>
   )
 }
+

@@ -13,7 +13,9 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @RestController
@@ -86,10 +88,15 @@ public class CaseController {
      */
     @PostMapping
     @PreAuthorize("hasRole('PROFESSOR')")
-    public ResponseEntity<CaseStudyDTO> createCase(@RequestBody CaseStudyDTO caseStudy) {
-        String professorId = getCurrentUserId();
-        CaseStudyDTO created = caseService.createCase(caseStudy, professorId);
-        return ResponseEntity.ok(created);
+    public ResponseEntity<?> createCase(@RequestBody CaseStudyDTO caseStudy) {
+        try {
+            String professorId = getCurrentUserId();
+            CaseStudyDTO created = caseService.createCase(caseStudy, professorId);
+            return ResponseEntity.ok(created);
+        } catch (RuntimeException e) {
+            log.warn("Validation error creating case: {}", e.getMessage());
+            return buildErrorResponse("Error creating case", e.getMessage(), 400);
+        }
     }
 
     /**
@@ -98,12 +105,20 @@ public class CaseController {
      */
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('PROFESSOR')")
-    public ResponseEntity<CaseStudyDTO> updateCase(@PathVariable String id, @RequestBody CaseStudyDTO caseStudy) {
-        if (!isCaseOwnedByCurrentProfessor(id)) {
-            return ResponseEntity.status(403).build();
+    public ResponseEntity<?> updateCase(@PathVariable String id, @RequestBody CaseStudyDTO caseStudy) {
+        try {
+            if (!isCaseOwnedByCurrentProfessor(id)) {
+                return ResponseEntity.status(403).build();
+            }
+            CaseStudyDTO updated = caseService.updateCase(id, caseStudy);
+            return ResponseEntity.ok(updated);
+        } catch (RuntimeException e) {
+            log.warn("Validation error updating case {}: {}", id, e.getMessage());
+            return buildErrorResponse("Error updating case", e.getMessage(), 400);
+        } catch (Exception e) {
+            log.error("Unexpected error updating case {}", id, e);
+            return buildErrorResponse("Error updating case", "An unexpected error occurred while updating the case", 500);
         }
-        CaseStudyDTO updated = caseService.updateCase(id, caseStudy);
-        return ResponseEntity.ok(updated);
     }
 
     /**
@@ -186,7 +201,7 @@ public class CaseController {
         String studentId = getCurrentUserId();
         return caseService.getSubmission(caseId, studentId)
             .map(ResponseEntity::ok)
-            .orElse(ResponseEntity.notFound().build());
+            .orElse(ResponseEntity.noContent().build());
     }
 
     /**
@@ -226,6 +241,14 @@ public class CaseController {
     private boolean isCaseOwnedByCurrentProfessor(String caseId) {
         String professorId = getCurrentUserId();
         return caseService.isCaseOwnedByProfessor(caseId, professorId);
+    }
+
+    private ResponseEntity<Map<String, Object>> buildErrorResponse(String error, String message, int status) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("error", error);
+        response.put("message", message != null && !message.isBlank() ? message : error);
+        response.put("timestamp", System.currentTimeMillis());
+        return ResponseEntity.status(status).body(response);
     }
 
     // DTOs auxiliares

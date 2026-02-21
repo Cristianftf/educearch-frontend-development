@@ -126,6 +126,10 @@ public class CaseServiceImpl implements CaseService {
         if (!caseStudy.getAssignedStudents().isEmpty() && caseStudy.getStatus() == CaseStatus.DRAFT) {
             caseStudy.setStatus(CaseStatus.ACTIVE);
         }
+        if (caseStudy.getStatus() == CaseStatus.ACTIVE && caseStudy.getAssignedStudents().isEmpty()) {
+            throw new RuntimeException("Cannot activate case without assigned students");
+        }
+        validateCasePayload(caseStudy);
 
         CaseStudy saved = caseStudyRepository.save(caseStudy);
         return convertToDTO(saved);
@@ -184,6 +188,10 @@ public class CaseServiceImpl implements CaseService {
         if (caseStudyDTO.getStartDate() != null) {
             existing.setStartDate(caseStudyDTO.getStartDate());
         }
+        if (existing.getStatus() == CaseStatus.ACTIVE && safeList(existing.getAssignedStudents()).isEmpty()) {
+            throw new RuntimeException("Cannot activate case without assigned students");
+        }
+        validateCasePayload(existing);
 
         CaseStudy saved = caseStudyRepository.save(existing);
         return convertToDTO(saved);
@@ -290,6 +298,10 @@ public class CaseServiceImpl implements CaseService {
         CaseStudy caseStudy = caseStudyRepository.findById(caseId)
             .orElseThrow(() -> new RuntimeException("Case not found: " + caseId));
 
+        if (caseStudy.getStatus() != CaseStatus.ACTIVE) {
+            throw new RuntimeException("Case is not active: " + caseId);
+        }
+
         if (!matchesAssignedStudent(caseStudy.getAssignedStudents(), studentId)) {
             throw new RuntimeException("Case not assigned to student: " + studentId);
         }
@@ -310,27 +322,52 @@ public class CaseServiceImpl implements CaseService {
 
     @Override
     public Optional<CaseSubmissionDTO> getSubmission(String caseId, String studentId) {
-        Set<String> identifiers = resolveUserIdentifiers(studentId);
+        List<String> identifiers = resolveSubmissionStudentIdentifiers(studentId);
         if (identifiers.isEmpty()) {
             return Optional.empty();
         }
-        List<CaseSubmission> submissions = caseSubmissionRepository.findByCaseIdAndStudentIdInOrderBySubmittedAtDesc(
-            caseId,
-            new ArrayList<>(identifiers)
-        );
-        if (submissions.isEmpty()) {
+
+        Set<String> identifierSet = new LinkedHashSet<>(identifiers);
+        List<CaseSubmission> matches = caseSubmissionRepository.findByCaseId(caseId).stream()
+            .filter(Objects::nonNull)
+            .filter(submission -> submission.getStudentId() != null && identifierSet.contains(submission.getStudentId()))
+            .toList();
+
+        if (matches.isEmpty()) {
             return Optional.empty();
         }
-        return Optional.of(convertSubmissionToDTO(submissions.get(0)));
+
+        return matches.stream()
+            .filter(Objects::nonNull)
+            .max(Comparator.comparing(
+                CaseSubmission::getSubmittedAt,
+                Comparator.nullsLast(Comparator.naturalOrder())
+            ))
+            .map(this::convertSubmissionToDTO);
     }
 
     @Override
     public List<CaseSubmissionDTO> getStudentSubmissions(String studentId) {
-        Set<String> identifiers = resolveUserIdentifiers(studentId);
-        List<CaseSubmission> submissions = identifiers.stream()
-            .flatMap(identifier -> caseSubmissionRepository.findByStudentId(identifier).stream())
+        List<String> identifiers = resolveSubmissionStudentIdentifiers(studentId);
+        if (identifiers.isEmpty()) {
+            return List.of();
+        }
+
+        Set<String> identifierSet = new LinkedHashSet<>(identifiers);
+        List<CaseSubmission> submissions = caseSubmissionRepository.findAll().stream()
+            .filter(Objects::nonNull)
+            .filter(submission -> submission.getStudentId() != null && identifierSet.contains(submission.getStudentId()))
             .toList();
+
         return submissions.stream()
+            .filter(Objects::nonNull)
+            .collect(Collectors.toMap(
+                CaseSubmission::getId,
+                submission -> submission,
+                (existing, replacement) -> existing
+            ))
+            .values()
+            .stream()
             .map(this::convertSubmissionToDTO)
             .collect(Collectors.toList());
     }
@@ -390,6 +427,30 @@ public class CaseServiceImpl implements CaseService {
         return value != null ? value.replace("\"", "\\\"").replace("\n", "\\n") : "";
     }
 
+    private void validateCasePayload(CaseStudy caseStudy) {
+        if (caseStudy == null) {
+            throw new RuntimeException("Case payload is empty");
+        }
+
+        String title = caseStudy.getTitle() != null ? caseStudy.getTitle().trim() : "";
+        if (title.length() < 3 || title.length() > 255) {
+            throw new RuntimeException("Title must be between 3 and 255 characters");
+        }
+
+        String scenario = caseStudy.getScenario() != null ? caseStudy.getScenario().trim() : "";
+        if (scenario.length() < 10 || scenario.length() > 5000) {
+            throw new RuntimeException("Scenario must be between 10 and 5000 characters");
+        }
+
+        List<String> guidingQuestions = safeList(caseStudy.getGuidingQuestions());
+        for (int index = 0; index < guidingQuestions.size(); index++) {
+            String question = guidingQuestions.get(index);
+            if (question != null && question.length() > 1000) {
+                throw new RuntimeException("Guiding question " + (index + 1) + " exceeds 1000 characters");
+            }
+        }
+    }
+
     private List<String> normalizeStudentAssignments(List<String> studentReferences) {
         if (studentReferences == null || studentReferences.isEmpty()) {
             return List.of();
@@ -402,7 +463,8 @@ public class CaseServiceImpl implements CaseService {
             }
             Optional<User> user = findUserByIdentifier(reference);
             if (user.isEmpty()) {
-                log.warn("Skipping unresolved student reference during assignment: {}", reference);
+                // Preserve legacy references (email/username) so existing active cases remain editable.
+                normalized.add(reference.trim());
                 continue;
             }
             User resolved = user.get();
@@ -469,6 +531,25 @@ public class CaseServiceImpl implements CaseService {
         });
 
         return identifiers;
+    }
+
+    private List<String> resolveSubmissionStudentIdentifiers(String studentIdentifier) {
+        if (studentIdentifier == null || studentIdentifier.isBlank()) {
+            return List.of();
+        }
+
+        LinkedHashSet<String> identifiers = new LinkedHashSet<>();
+        String canonicalStudentId = resolveCanonicalStudentId(studentIdentifier);
+        if (canonicalStudentId != null && !canonicalStudentId.isBlank()) {
+            identifiers.add(canonicalStudentId);
+        }
+        identifiers.addAll(resolveUserIdentifiers(studentIdentifier));
+
+        return identifiers.stream()
+            .filter(Objects::nonNull)
+            .map(String::trim)
+            .filter(value -> !value.isBlank())
+            .toList();
     }
 
     private boolean matchesAssignedStudent(List<String> assignedStudents, String studentIdentifier) {
@@ -592,17 +673,23 @@ public class CaseServiceImpl implements CaseService {
         dto.setStudentId(submission.getStudentId());
         dto.setSubmittedAt(submission.getSubmittedAt());
         dto.setContent(submission.getContent());
-        dto.setSelectedArticles(submission.getSelectedArticles());
+        dto.setSelectedArticles(safeList(submission.getSelectedArticles()));
         dto.setBibliography(submission.getBibliography());
-        dto.setStatus(submission.getStatus().name().toLowerCase());
+        SubmissionStatus status = submission.getStatus() != null
+            ? submission.getStatus()
+            : SubmissionStatus.PENDING;
+        dto.setStatus(status.name().toLowerCase());
 
         // Incluir evaluaciÃ³n si existe
-        Optional<Evaluation> evaluation = evaluationRepository.findBySubmissionId(submission.getId());
-        if (evaluation.isPresent()) {
-            dto.setEvaluation(convertEvaluationToDTO(evaluation.get()));
-        } else {
-            dto.setEvaluation(null);
-        }
+        Evaluation latestEvaluation = evaluationRepository.findBySubmissionIdIn(List.of(submission.getId())).stream()
+            .filter(Objects::nonNull)
+            .sorted(Comparator.comparing(
+                Evaluation::getUpdatedAt,
+                Comparator.nullsLast(Comparator.reverseOrder())
+            ))
+            .findFirst()
+            .orElse(null);
+        dto.setEvaluation(convertEvaluationToDTO(latestEvaluation));
 
         return dto;
     }

@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 import { useState, useEffect, useCallback } from 'react'
 import { casesApi } from '@/lib/api'
@@ -60,10 +60,12 @@ const difficultyConfig: Record<
 }
 
 function formatDate(dateString: string): string {
-  return new Date(dateString).toLocaleDateString('es', {
+  const date = parseCalendarDateUtc(dateString)
+  return date.toLocaleDateString('es', {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
+    timeZone: 'UTC',
   })
 }
 
@@ -78,10 +80,20 @@ function formatDateTime(dateString: string): string {
 }
 
 function getDaysRemaining(dueDate: string): number {
-  const due = new Date(dueDate)
+  const due = parseCalendarDateUtc(dueDate)
   const now = new Date()
-  const diff = due.getTime() - now.getTime()
-  return Math.ceil(diff / (1000 * 60 * 60 * 24))
+  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  const diff = due.getTime() - todayUtc
+  return Math.floor(diff / (1000 * 60 * 60 * 24))
+}
+
+function parseCalendarDateUtc(value: string): Date {
+  const datePart = value.slice(0, 10)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    const [year, month, day] = datePart.split('-').map((item) => parseInt(item, 10))
+    return new Date(Date.UTC(year, month - 1, day))
+  }
+  return new Date(value)
 }
 
 export default function CasesPage() {
@@ -97,6 +109,11 @@ export default function CasesPage() {
   const [submissionsByCaseId, setSubmissionsByCaseId] = useState<Record<string, CaseSubmission>>({})
   const [isLoadingSubmission, setIsLoadingSubmission] = useState(false)
   const [submissionError, setSubmissionError] = useState<string | null>(null)
+  const [evaluationNotifications, setEvaluationNotifications] = useState<
+    Array<{ submissionId: string; caseId: string; title: string; score: number }>
+  >([])
+
+  const evaluatedSeenStorageKey = `student-evaluated-seen:${user?.id ?? 'anonymous'}`
 
   const loadCasesAndSubmissions = useCallback(async () => {
     const assignedCases = await casesApi.getAssigned()
@@ -106,6 +123,7 @@ export default function CasesPage() {
       assignedCases.map(async (caseStudy) => {
         try {
           const submission = await casesApi.getMySubmission(caseStudy.id)
+          if (!submission) return null
           return [caseStudy.id, submission] as const
         } catch (err) {
           if (err instanceof ApiHttpError && err.status === 404) {
@@ -169,6 +187,10 @@ export default function CasesPage() {
       .getMySubmission(selectedCase.id)
       .then((submission) => {
         if (!isMounted) return
+        if (!submission) {
+          setSelectedSubmission(null)
+          return
+        }
         setSelectedSubmission(submission)
         setSubmissionsByCaseId((prev) => ({ ...prev, [selectedCase.id]: submission }))
       })
@@ -190,6 +212,50 @@ export default function CasesPage() {
       isMounted = false
     }
   }, [selectedCase, submissionsByCaseId])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const raw = window.localStorage.getItem(evaluatedSeenStorageKey)
+    let parsed: string[] = []
+    if (raw) {
+      try {
+        const candidate = JSON.parse(raw)
+        if (Array.isArray(candidate)) {
+          parsed = candidate.filter((value): value is string => typeof value === 'string')
+        }
+      } catch {
+        parsed = []
+      }
+    }
+    const seenSubmissionIds = new Set<string>(parsed)
+
+    const newNotifications: Array<{ submissionId: string; caseId: string; title: string; score: number }> = []
+    for (const [caseId, submission] of Object.entries(submissionsByCaseId)) {
+      if (!submission?.evaluation) continue
+      if (seenSubmissionIds.has(submission.id)) continue
+      const caseTitle =
+        cases.find((entry) => entry.id === caseId)?.title ?? `Caso ${caseId.slice(0, 8)}`
+      newNotifications.push({
+        submissionId: submission.id,
+        caseId,
+        title: caseTitle,
+        score: submission.evaluation.overallScore,
+      })
+      seenSubmissionIds.add(submission.id)
+    }
+
+    if (newNotifications.length === 0) return
+    setEvaluationNotifications((prev) => {
+      const merged = [...newNotifications, ...prev]
+      const byId = new Map<string, { submissionId: string; caseId: string; title: string; score: number }>()
+      merged.forEach((item) => byId.set(item.submissionId, item))
+      return Array.from(byId.values())
+    })
+    window.localStorage.setItem(
+      evaluatedSeenStorageKey,
+      JSON.stringify(Array.from(seenSubmissionIds))
+    )
+  }, [cases, submissionsByCaseId, evaluatedSeenStorageKey])
 
   const handleSubmit = useCallback(async () => {
     if (!selectedCase || !submissionContent.trim()) return
@@ -220,6 +286,7 @@ export default function CasesPage() {
 
   const pendingCases = cases.filter((c) => !submissionsByCaseId[c.id])
   const completedCases = cases.filter((c) => Boolean(submissionsByCaseId[c.id]))
+  const evaluatedCases = completedCases.filter((c) => Boolean(submissionsByCaseId[c.id]?.evaluation))
   const selectedCaseSubmission = selectedCase
     ? submissionsByCaseId[selectedCase.id] ?? selectedSubmission
     : selectedSubmission
@@ -295,12 +362,47 @@ export default function CasesPage() {
                     : 0}
                   %
                 </p>
-                <p className="text-sm text-muted-foreground">Progreso total</p>
+                <p className="text-sm text-muted-foreground">
+                  Progreso total ({evaluatedCases.length} evaluado{evaluatedCases.length === 1 ? '' : 's'})
+                </p>
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {evaluationNotifications.length > 0 && (
+        <Card className="border-success/40 bg-success/5">
+          <CardContent className="pt-6 space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-success">
+                  Tienes {evaluationNotifications.length} evaluacion{evaluationNotifications.length > 1 ? 'es' : ''} nueva{evaluationNotifications.length > 1 ? 's' : ''}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Tu profesor ya califico una o mas entregas de casos de estudio.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setEvaluationNotifications([])}
+                className="bg-transparent"
+              >
+                Entendido
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {evaluationNotifications.slice(0, 3).map((notification) => (
+                <div key={notification.submissionId} className="rounded-md border border-success/30 bg-background px-3 py-2 text-sm">
+                  <span className="font-medium">{notification.title}</span>
+                  <span className="text-muted-foreground"> - Nota: {notification.score}/100</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Cases List */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -354,7 +456,7 @@ export default function CasesPage() {
                         <div className="flex items-center gap-4 text-muted-foreground">
                           <span className="flex items-center gap-1">
                             <BookOpen className="h-4 w-4" />
-                            {caseStudy.requiredArticles.length} artÃ­culos
+                            {caseStudy.requiredArticles.length} artículos
                           </span>
                           <span className="flex items-center gap-1">
                             <Target className="h-4 w-4" />
@@ -369,7 +471,7 @@ export default function CasesPage() {
                           >
                             <Calendar className="h-3 w-3" />
                             {daysRemaining > 0
-                              ? `${daysRemaining} dÃ­as`
+                              ? `${daysRemaining} días`
                               : daysRemaining === 0
                                 ? 'Hoy'
                                 : 'Vencido'}
@@ -399,7 +501,7 @@ export default function CasesPage() {
                 <CheckCircle2 className="h-12 w-12 mx-auto mb-4 text-success" />
                 <h3 className="text-lg font-medium mb-2">No hay casos pendientes</h3>
                 <p className="text-muted-foreground">
-                  Has completado todos tus casos asignados. Â¡Excelente trabajo!
+                  Has completado todos tus casos asignados. ¡Excelente trabajo!
                 </p>
               </CardContent>
             </Card>
@@ -409,42 +511,52 @@ export default function CasesPage() {
         <TabsContent value="completed" className="mt-6">
           {completedCases.length > 0 ? (
             <div className="grid gap-4 md:grid-cols-2">
-              {completedCases.map((caseStudy) => (
-                <Card
-                  key={caseStudy.id}
-                  className="cursor-pointer transition-all hover:shadow-md opacity-80"
-                  onClick={() => setSelectedCase(caseStudy)}
-                >
-                  <CardHeader className="pb-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <CardTitle className="text-lg line-clamp-2">
-                        {caseStudy.title}
-                      </CardTitle>
-                      <Badge variant="outline" className="bg-success/10 border-success/30">
-                        <CheckCircle2 className="h-3 w-3 mr-1" />
-                        Completado
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-sm text-muted-foreground line-clamp-2">
-                      {caseStudy.scenario}
-                    </p>
-
-                    <Button
-                    variant="ghost"
-                    className="w-full mt-4 justify-between"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setSelectedCase(caseStudy)
-                    }}
+              {completedCases.map((caseStudy) => {
+                const submission = submissionsByCaseId[caseStudy.id]
+                return (
+                  <Card
+                    key={caseStudy.id}
+                    className="cursor-pointer transition-all hover:shadow-md opacity-80"
+                    onClick={() => setSelectedCase(caseStudy)}
                   >
-                    Ver mi entrega
-                    <Eye className="h-4 w-4" />
-                  </Button>
-                  </CardContent>
-                </Card>
-              ))}
+                    <CardHeader className="pb-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <CardTitle className="text-lg line-clamp-2">
+                          {caseStudy.title}
+                        </CardTitle>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <Badge variant="outline" className="bg-success/10 border-success/30">
+                            <CheckCircle2 className="h-3 w-3 mr-1" />
+                            Completado
+                          </Badge>
+                          {submission?.evaluation && (
+                            <Badge variant="outline" className="bg-primary/10 border-primary/30">
+                              Evaluado: {submission.evaluation.overallScore}/100
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-muted-foreground line-clamp-2">
+                        {caseStudy.scenario}
+                      </p>
+
+                      <Button
+                      variant="ghost"
+                      className="w-full mt-4 justify-between"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setSelectedCase(caseStudy)
+                      }}
+                    >
+                      Ver mi entrega
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                    </CardContent>
+                  </Card>
+                )
+              })}
             </div>
           ) : (
             <Card>
@@ -452,7 +564,7 @@ export default function CasesPage() {
                 <FolderOpen className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
                 <h3 className="text-lg font-medium mb-2">No hay casos completados</h3>
                 <p className="text-muted-foreground">
-                  Completa tus casos pendientes para verlos aquÃ­
+                  Completa tus casos pendientes para verlos aquí
                 </p>
               </CardContent>
             </Card>
@@ -494,7 +606,7 @@ export default function CasesPage() {
                 <div>
                   <h4 className="font-medium mb-2 flex items-center gap-2">
                     <FileText className="h-4 w-4" />
-                    Escenario clÃ­nico
+                    Escenario clínico
                   </h4>
                   <div className="p-4 rounded-lg bg-muted text-sm leading-relaxed">
                     {selectedCase.scenario}
@@ -505,7 +617,7 @@ export default function CasesPage() {
                 <div>
                   <h4 className="font-medium mb-2 flex items-center gap-2">
                     <BookOpen className="h-4 w-4" />
-                    ArtÃ­culos requeridos ({selectedCase.requiredArticles.length})
+                    Artículos requeridos ({selectedCase.requiredArticles.length})
                   </h4>
                   <div className="space-y-2">
                     {selectedCase.requiredArticles.map((articleId, idx) => (
@@ -516,7 +628,7 @@ export default function CasesPage() {
                         <span className="text-sm font-medium text-muted-foreground">
                           {idx + 1}.
                         </span>
-                        <span className="text-sm">ArtÃ­culo ID: {articleId}</span>
+                        <span className="text-sm">Artículo ID: {articleId}</span>
                         <Button variant="outline" size="sm" className="ml-auto bg-transparent" asChild>
                           <a
                             href={`https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(
@@ -525,7 +637,7 @@ export default function CasesPage() {
                             target="_blank"
                             rel="noopener noreferrer"
                           >
-                            Ver artÃ­culo
+                            Ver artículo
                           </a>
                         </Button>
                       </div>
@@ -537,7 +649,7 @@ export default function CasesPage() {
                 <div>
                   <h4 className="font-medium mb-2 flex items-center gap-2">
                     <MessageSquare className="h-4 w-4" />
-                    Preguntas guÃ­a
+                    Preguntas guía
                   </h4>
                   <ol className="space-y-2 list-decimal list-inside">
                     {selectedCase.guidingQuestions.map((question, idx) => {
@@ -572,7 +684,7 @@ export default function CasesPage() {
                 <div>
                   <h4 className="font-medium mb-2 flex items-center gap-2">
                     <Target className="h-4 w-4" />
-                    Criterios de evaluaciÃ³n
+                    Criterios de evaluación
                   </h4>
                   <div className="space-y-2">
                     {selectedCase.rubric.map((item, idx) => (
@@ -594,7 +706,7 @@ export default function CasesPage() {
                 </div>
 
                 {/* Submission Form (only for active cases) */}
-                {!selectedCaseSubmission && (
+                {!selectedCaseSubmission && selectedCase.status === 'active' && (
                   <div className="border-t pt-6">
                     <h4 className="font-medium mb-3">Tu entrega</h4>
                     <div className="space-y-4">
@@ -602,7 +714,7 @@ export default function CasesPage() {
                         <Label htmlFor="submission">Respuesta</Label>
                         <Textarea
                           id="submission"
-                          placeholder="Escribe tu anÃ¡lisis del caso, respondiendo las preguntas guÃ­a..."
+                          placeholder="Escribe tu análisis del caso, respondiendo las preguntas guía..."
                           className="min-h-[200px] mt-2"
                           value={submissionContent}
                           onChange={(e) => setSubmissionContent(e.target.value)}
@@ -628,6 +740,15 @@ export default function CasesPage() {
                         )}
                       </Button>
                     </div>
+                  </div>
+                )}
+
+                {!selectedCaseSubmission && selectedCase.status !== 'active' && (
+                  <div className="border-t pt-6">
+                    <p className="text-sm text-muted-foreground">
+                      Este caso esta en estado <span className="font-medium">{selectedCase.status}</span> y no
+                      admite nuevas entregas.
+                    </p>
                   </div>
                 )}
 
@@ -664,7 +785,7 @@ export default function CasesPage() {
 
                         {selectedCaseSubmission.evaluation && (
                           <div className="space-y-3">
-                            <h5 className="font-medium">EvaluaciÃ³n del profesor</h5>
+                            <h5 className="font-medium">Evaluación del profesor</h5>
                             <div className="grid gap-3 sm:grid-cols-3 text-sm">
                               <div className="p-3 rounded-lg border">
                                 <p className="text-xs text-muted-foreground">Acceso</p>
@@ -689,7 +810,7 @@ export default function CasesPage() {
                                 )}
                               </div>
                               <div className="p-3 rounded-lg border">
-                                <p className="text-xs text-muted-foreground">ComunicaciÃ³n</p>
+                                <p className="text-xs text-muted-foreground">Comunicación</p>
                                 <p className="text-lg font-semibold">
                                   {selectedCaseSubmission.evaluation.scores.communicate}
                                 </p>
@@ -701,7 +822,7 @@ export default function CasesPage() {
                               </div>
                             </div>
                             <div className="p-4 rounded-lg bg-muted/50 text-sm">
-                              <p className="text-xs text-muted-foreground">PuntuaciÃ³n global</p>
+                              <p className="text-xs text-muted-foreground">Puntuación global</p>
                               <p className="text-lg font-semibold">
                                 {selectedCaseSubmission.evaluation.overallScore}
                               </p>
@@ -771,4 +892,5 @@ function CasesSkeleton() {
     </div>
   )
 }
+
 

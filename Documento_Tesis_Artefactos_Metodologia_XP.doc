@@ -1,0 +1,372 @@
+﻿DOCUMENTO DE TESIS
+ARTEFACTOS Y DIAGRAMAS BASADOS EN METODOLOGIA XP
+Proyecto: Plataforma de competencias informacionales en salud (EduSearch)
+Fecha: 2026-02-17
+
+NOTA DE ALCANCE
+- Se asume que "metodologia X" = XP (Extreme Programming), por el contexto de tu solicitud.
+- Este documento integra: (1) artefactos recomendados por XP, (2) artefactos ya materializados en el proyecto, y (3) artefactos adicionales generados para tesis.
+
+============================================================
+1. MARCO METODOLOGICO XP (RESUMEN OPERATIVO)
+============================================================
+XP enfatiza calidad tecnica + feedback continuo con ciclos cortos.
+
+Practicas base usadas para este documento:
+- Stories (historias de usuario)
+- Weekly Cycle (iteraciones cortas)
+- Quarterly Cycle (plan de release)
+- Testing / Test-First / ATDD
+- Continuous Integration
+- Diseno incremental y refactorizacion
+
+Interpretacion aplicada al proyecto:
+- Ciclo semanal -> sprints cortos con entregables verificables.
+- Ciclo trimestral -> release academico con objetivos por rol.
+- Historias por valor de usuario -> estudiante/profesor/admin.
+- Calidad de entrega -> criterios de aceptacion + pruebas + auditoria.
+
+============================================================
+2. CATALOGO DE ARTEFACTOS XP PARA ESTE PROYECTO
+============================================================
+AXP-01. Vision del producto
+- Proposito: establecer objetivo academico y alcance.
+- Estado: generado en este documento (Seccion 3.1).
+
+AXP-02. Personas / roles de usuario
+- Proposito: centrar el backlog en actores reales.
+- Estado: existente en el sistema (student/professor/admin) y formalizado aqui.
+
+AXP-03. Product Backlog por historias
+- Proposito: gestionar funcionalidad incremental por valor.
+- Estado: generado en Seccion 3.3.
+
+AXP-04. Story Map
+- Proposito: ordenar flujo funcional y prioridad.
+- Estado: generado en Seccion 3.4.
+
+AXP-05. Release Plan (Quarterly Cycle)
+- Proposito: plan de entregas por bloques temporales.
+- Estado: generado en Seccion 3.5.
+
+AXP-06. Iteration Plan (Weekly Cycle)
+- Proposito: detalle de trabajo semanal ejecutable.
+- Estado: generado en Seccion 3.6.
+
+AXP-07. Criterios de aceptacion y ATDD
+- Proposito: definir "done" funcional desde perspectiva usuario.
+- Estado: generado en Seccion 3.7.
+
+AXP-08. Definition of Done (DoD)
+- Proposito: estandar minimo de calidad por historia.
+- Estado: generado en Seccion 3.8.
+
+AXP-09. Arquitectura y diagramas tecnicos
+- Proposito: trazabilidad de solucion y comunicacion tecnica.
+- Estado: generado en Seccion 4.
+
+AXP-10. Matriz de pruebas
+- Proposito: enlazar historias con validaciones.
+- Estado: generado en Seccion 3.9.
+
+AXP-11. Registro de riesgos
+- Proposito: identificar riesgos de proyecto y mitigacion.
+- Estado: generado en Seccion 3.10.
+
+AXP-12. Evidencia de implementacion real
+- Proposito: demostrar correspondencia tesis-sistema.
+- Estado: compilado en Seccion 5 con rutas reales.
+
+============================================================
+3. ARTEFACTOS GENERADOS PARA LA TESIS
+============================================================
+3.1 Vision del producto
+"Proveer una plataforma web para desarrollar competencias informacionales en salud,
+permitiendo a estudiantes buscar y verificar evidencia cientifica, a profesores guiar y
+ evaluar desempeño, y a administradores monitorear operacion, seguridad e integracion
+ con APIs externas confiables."
+
+3.2 Personas (resumen)
+- Persona 1: Estudiante de ciencias medicas
+  Necesita buscar evidencia, verificar claims, generar bibliografia y resolver casos.
+- Persona 2: Profesor
+  Necesita disenar casos, evaluar entregas, definir hedges y monitorear progreso.
+- Persona 3: Administrador
+  Necesita gestionar usuarios, auditar actividad, monitorear salud y APIs externas.
+
+3.3 Product backlog inicial (historias priorizadas)
+Escala prioridad: P1 (alta), P2 (media), P3 (baja)
+
+US-01 (P1) Como estudiante quiero ejecutar busqueda avanzada con MeSH y filtros para obtener evidencia relevante.
+US-02 (P1) Como estudiante quiero guardar historial/favoritos de busqueda para reutilizar estrategias.
+US-03 (P1) Como estudiante quiero verificar un claim o URL para detectar desinformacion.
+US-04 (P1) Como estudiante quiero generar bibliografia (APA/Vancouver/BibTeX/XML) para mis entregas.
+US-05 (P1) Como estudiante quiero resolver casos asignados y enviar mi respuesta.
+US-06 (P1) Como profesor quiero crear/editar/asignar casos de estudio con rubrica.
+US-07 (P1) Como profesor quiero evaluar entregas con comentarios por competencia.
+US-08 (P2) Como profesor quiero administrar search hedges para consultas recurrentes.
+US-09 (P2) Como profesor quiero ver analiticas y estudiantes en riesgo.
+US-10 (P1) Como administrador quiero gestionar usuarios (crear/editar/importar/cambiar rol/estado).
+US-11 (P1) Como administrador quiero auditar logs y exportar reportes.
+US-12 (P1) Como administrador quiero verificar conectividad y respuesta de APIs externas.
+US-13 (P2) Como administrador quiero ejecutar mantenimiento tecnico (cache/db/logs/reindex).
+US-14 (P2) Como cualquier rol autenticado quiero chat interno para coordinacion.
+
+3.4 Story map textual
+Actividades principales (horizontal):
+[Acceso] -> [Busqueda] -> [Verificacion] -> [Bibliografia] -> [Casos] -> [Evaluacion] -> [Monitoreo]
+
+Capa minima (walking skeleton):
+- Login por rol
+- Busqueda basica
+- Verificacion basica
+- Creacion/envio de caso
+- Evaluacion basica
+- Panel admin salud general
+
+Capas de evolucion:
+- Capa 2: filtros avanzados, historial, exportaciones
+- Capa 3: hedges, analiticas avanzadas, monitor de APIs externas, mantenimiento automatizado
+
+3.5 Release plan (12 semanas ejemplo)
+Release R1 (Semanas 1-4)
+- US-01, US-03, US-05, US-06, US-10
+Objetivo: flujo academico minimo funcional por rol.
+
+Release R2 (Semanas 5-8)
+- US-02, US-04, US-07, US-11, US-14
+Objetivo: robustez academica y colaboracion.
+
+Release R3 (Semanas 9-12)
+- US-08, US-09, US-12, US-13
+Objetivo: optimizacion docente + gobernanza operativa.
+
+3.6 Iteration plan (ejemplo Semana 1)
+Objetivo iteracion: cerrar flujo estudiante de busqueda-verificacion.
+
+Historias en iteracion:
+- US-01 (parcial completa): query builder + filtros + ejecucion + resultados
+- US-03 (parcial completa): verificacion de claim y visualizacion semaforo
+
+Tareas tecnicas sugeridas:
+- FE: formularios/filtros/estados de carga
+- FE: manejo de errores API y mensajes UX
+- BE: endpoint de busqueda y paginado
+- BE: endpoint verificacion claim/url
+- QA: pruebas funcionales humo por rol
+
+Criterio de salida iteracion:
+- Demo funcional en entorno local con datos reales o fallback validado.
+
+3.7 Criterios de aceptacion (ATDD) - ejemplos
+US-01 Busqueda avanzada
+- Dado un estudiante autenticado
+- Cuando define terminos MeSH, operador booleano y filtros validos
+- Entonces el sistema devuelve una lista de resultados con metadatos y permite guardar historial.
+
+US-12 Monitor APIs externas
+- Dado un administrador autenticado
+- Cuando ejecuta diagnostico con un termino de prueba
+- Entonces el sistema muestra estado por proveedor, latencia y evidencia de respuesta.
+
+US-07 Evaluacion docente
+- Dado un profesor con entregas pendientes
+- Cuando califica por rubrica y guarda feedback
+- Entonces el estudiante puede visualizar calificacion y comentario asociado.
+
+3.8 Definition of Done (DoD) para historias
+Una historia se considera DONE si:
+- Cumple criterio de aceptacion acordado.
+- Tiene validacion de errores y mensajes de usuario.
+- Respeta permisos por rol.
+- Registra evento auditable si aplica (acciones criticas).
+- Incluye pruebas minimas (funcionales o unitarias segun tipo).
+- No rompe funcionalidades existentes (smoke test rol afectado).
+
+3.9 Matriz de pruebas resumida
+- Pruebas funcionales por rol: login, rutas protegidas, operaciones principales.
+- Pruebas API: contratos minimos de endpoints criticos.
+- Pruebas de seguridad: acceso denegado por rol incorrecto.
+- Pruebas de integracion externa: disponibilidad, latencia, manejo de timeout.
+- Pruebas de regresion: busqueda/verificacion/bibliografia/casos/evaluaciones/admin.
+
+3.10 Registro de riesgos (inicial)
+R-01 Integraciones externas inestables
+- Impacto: alto | Probabilidad: media
+- Mitigacion: fallback, cache, reintentos, monitor admin.
+
+R-02 Inconsistencia de permisos por rol
+- Impacto: alto | Probabilidad: media
+- Mitigacion: pruebas de autorizacion FE+BE, matriz de permisos.
+
+R-03 Degradacion de rendimiento en consultas
+- Impacto: medio | Probabilidad: media
+- Mitigacion: paginacion, limites, optimizacion indices, reindex periodico.
+
+R-04 Deuda tecnica en evolucion de modulos
+- Impacto: medio | Probabilidad: media
+- Mitigacion: refactorizacion incremental y definicion clara de DoD.
+
+============================================================
+4. DIAGRAMAS GENERADOS (FORMATO TEXTUAL)
+============================================================
+4.1 Diagrama de contexto (C4-Context simplificado)
+
+[Estudiante] ----> |
+[Profesor]   ----> | Frontend Next.js (roles, UI, chat)
+[Admin]      ----> |
+                     |
+                     v
+                Backend Spring Boot API
+                     |
+         +-----------+-----------+
+         |                       |
+         v                       v
+   PostgreSQL                APIs externas
+ (usuarios, casos,          (PubMed, Europe PMC,
+  busquedas, logs)           ClinicalTrials)
+
+4.2 Diagrama de casos de uso (resumen)
+- Actor Estudiante:
+  Buscar evidencia, Verificar claim/URL, Generar bibliografia, Resolver casos, Chatear.
+- Actor Profesor:
+  Gestionar casos, Evaluar entregas, Gestionar hedges, Ver analiticas, Buscar, Chatear.
+- Actor Administrador:
+  Gestionar usuarios, Auditar, Configurar sistema, Monitorear salud/APIs, Mantenimiento, Chatear.
+
+4.3 Diagrama de componentes (alto nivel)
+
+Frontend
+- app/student/*
+- app/professor/*
+- app/admin/*
+- components/*
+- hooks/*
+- contexts/auth-context
+
+Backend API
+- Auth + Security JWT
+- Search/Verification/Bibliography
+- Cases/Evaluations
+- Admin/Audit/System/Health
+- Chat REST + WebSocket
+
+Integraciones
+- PubMed
+- Europe PMC
+- ClinicalTrials.gov
+
+Persistencia
+- users, competency_progress
+- search_sessions, search_results
+- verification_results
+- case_studies, case_submissions
+- system_logs, chat_messages
+
+4.4 Diagrama de secuencia: busqueda avanzada estudiante
+
+Estudiante -> Frontend: Define query + filtros
+Frontend -> /api/search/execute: POST SearchRequest
+Backend -> Proveedor externo(s): Consultar evidencia
+Proveedor externo(s) -> Backend: Resultados
+Backend -> DB: Guardar search_session + resultados
+Backend -> Frontend: SearchResponse
+Frontend -> Estudiante: Mostrar resultados + opcion guardar
+
+4.5 Diagrama de secuencia: monitor de APIs externas (admin)
+
+Admin -> Frontend Admin: Ejecutar diagnostico
+Frontend -> /api/admin/external-apis/check: POST query
+Backend -> PubMed: test query
+Backend -> Europe PMC: test query
+Backend -> ClinicalTrials: test query
+Backend -> Frontend: estado por proveedor + latencia + cobertura
+Frontend -> Admin: tablero de diagnostico
+
+4.6 Diagrama entidad-relacion (conceptual)
+
+users (1) ---- (0..1) students
+users (1) ---- (0..1) professors
+users (1) ---- (0..1) administrators
+
+users (1) ---- (N) search_sessions ---- (N) search_results
+users (1) ---- (N) verification_results
+
+professors (1) ---- (N) case_studies ---- (N) case_submissions ---- (N) students
+case_studies (1) ---- (N) case_guiding_questions
+
+users (1) ---- (N) system_logs
+users (1) ---- (N) chat_messages (como sender/recipient)
+
+4.7 Diagrama de despliegue (logico)
+
+[Navegador]
+   |
+   v
+[Next.js App (Puerto 3000)]
+   |
+   v
+[Spring Boot API (Puerto 8080)] ---- [WebSocket endpoint]
+   |
+   +---- [PostgreSQL]
+   |
+   +---- [PubMed / Europe PMC / ClinicalTrials APIs]
+
+============================================================
+5. EVIDENCIA DE TRAZABILIDAD CON EL CODIGO REAL
+============================================================
+Rutas frontend por rol (muestra):
+- Estudiante: app/student/search/page.tsx, app/student/verify/page.tsx, app/student/bibliography/page.tsx, app/student/cases/page.tsx
+- Profesor: app/professor/cases/page.tsx, app/professor/evaluations/page.tsx, app/professor/hedges/page.tsx, app/professor/analytics/page.tsx
+- Admin: app/admin/users/page.tsx, app/admin/audit/page.tsx, app/admin/system/page.tsx, app/admin/health/page.tsx
+
+Componentes clave:
+- components/admin-external-apis-monitor.tsx
+- components/chat/chat-panel.tsx
+- components/query-builder.tsx
+- components/case-wizard.tsx
+
+Controladores backend (muestra):
+- backend/src/main/java/com/uci/competencia/controller/api/SearchController.java
+- backend/src/main/java/com/uci/competencia/controller/api/VerificationController.java
+- backend/src/main/java/com/uci/competencia/controller/api/CaseController.java
+- backend/src/main/java/com/uci/competencia/controller/api/EvaluationController.java
+- backend/src/main/java/com/uci/competencia/controller/api/AdminController.java
+
+Modelo de datos base (migraciones):
+- backend/src/main/resources/db/migration/V1.0__Initial_Schema.sql
+
+============================================================
+6. FUENTES CONSULTADAS (INTERNET)
+============================================================
+1) Agile Alliance - Extreme Programming (XP)
+https://agilealliance.org/glossary/xp/
+
+2) Agile Alliance - User Stories
+https://agilealliance.org/glossary/user-stories/
+
+3) Agile Alliance - Story Mapping
+https://agilealliance.org/glossary/story-mapping/
+
+4) Agile Alliance - Acceptance Test-Driven Development (ATDD)
+https://agilealliance.org/glossary/atdd/
+
+5) Agile Alliance - Acceptance Testing
+https://agilealliance.org/glossary/acceptance-testing/
+
+6) Agile Alliance - CRC Cards
+https://agilealliance.org/glossary/crc-cards/
+
+7) Martin Fowler - Continuous Integration (original)
+https://martinfowler.com/articles/originalContinuousIntegration.html
+
+8) Martin Fowler - Software Delivery Guide (definicion CI actualizada)
+https://martinfowler.com/delivery.html
+
+============================================================
+7. OBSERVACION DE RIGOR METODOLOGICO
+============================================================
+- Los artefactos listados para XP en este documento se apoyan en fuentes base de Agile Alliance y Martin Fowler.
+- La seleccion de diagramas (contexto, casos de uso, componentes, secuencia, ER, despliegue) es una inferencia metodologica practica para documentar arquitectura y trazabilidad en tesis, alineada con desarrollo agil y evidencia tecnica del repositorio.
+
+FIN DEL DOCUMENTO

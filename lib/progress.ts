@@ -9,6 +9,7 @@ import type {
 import { api } from './api-client'
 import {
   STUDENT_FALLBACK_KEYS,
+  getScopedStorageKey,
   isBackendReachable,
   readLocalStorage,
 } from './student-resilience'
@@ -78,7 +79,7 @@ function buildFallbackProgress(userId = 'local-student'): StudentProgress {
     []
   )
   const submissions = readLocalStorage<CaseSubmission[]>(
-    STUDENT_FALLBACK_KEYS.caseSubmissions,
+    getScopedStorageKey(STUDENT_FALLBACK_KEYS.caseSubmissions),
     []
   )
 

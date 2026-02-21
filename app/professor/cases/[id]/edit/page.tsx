@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { casesApi } from '@/lib/api'
+import { ApiHttpError } from '@/lib/api-client'
 import type { CaseDifficulty, CaseStatus, GuidingQuestion, RubricItem } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -144,12 +145,26 @@ export default function EditCasePage() {
 
   const handleSave = useCallback(async () => {
     if (!caseId) return
+    const trimmedTitle = title.trim()
+    const trimmedScenario = scenario.trim()
+    if (trimmedTitle.length < 3) {
+      setError('El titulo debe tener al menos 3 caracteres.')
+      return
+    }
+    if (trimmedScenario.length < 10) {
+      setError('El escenario debe tener al menos 10 caracteres.')
+      return
+    }
+    if (status === 'active' && assignedStudents.length === 0) {
+      setError('No puedes activar un caso sin estudiantes asignados.')
+      return
+    }
     setIsSaving(true)
     setError(null)
     try {
       await casesApi.update(caseId, {
-        title,
-        scenario,
+        title: trimmedTitle,
+        scenario: trimmedScenario,
         difficulty,
         status,
         requiredArticles,
@@ -162,7 +177,11 @@ export default function EditCasePage() {
       router.push(`/professor/cases/${caseId}`)
     } catch (err) {
       console.error('[v0] Error saving case:', err)
-      setError('No se pudo guardar el caso.')
+      if (err instanceof ApiHttpError) {
+        setError(err.details || err.message)
+      } else {
+        setError('No se pudo guardar el caso.')
+      }
     } finally {
       setIsSaving(false)
     }
@@ -196,7 +215,7 @@ export default function EditCasePage() {
           </Button>
           <div>
             <h1 className="text-2xl font-bold">Editar caso</h1>
-            <p className="text-sm text-muted-foreground">Actualiza la informaciÃ³n del caso de estudio.</p>
+            <p className="text-sm text-muted-foreground">Actualiza la información del caso de estudio.</p>
           </div>
         </div>
         <Button onClick={handleSave} disabled={isSaving}>
@@ -209,15 +228,15 @@ export default function EditCasePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">informaciÃ³n general</CardTitle>
+          <CardTitle className="text-lg">información general</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="title">TÃ­tulo</Label>
+            <Label htmlFor="title">Título</Label>
             <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="scenario">Escenario clÃ­nico</Label>
+            <Label htmlFor="scenario">Escenario clínico</Label>
             <Textarea
               id="scenario"
               value={scenario}
@@ -274,24 +293,24 @@ export default function EditCasePage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Recursos</CardTitle>
-          <CardDescription>Agrega o elimina identificadores de artÃ­culos.</CardDescription>
+          <CardDescription>Agrega o elimina identificadores de artículos.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-3">
-            <Label>artÃ­culos obligatorios</Label>
+            <Label>artículos obligatorios</Label>
             <div className="flex gap-2">
               <Input
-                placeholder="aÃ±adir PMID o ID"
+                placeholder="añadir PMID o ID"
                 value={newRequiredArticle}
                 onChange={(e) => setNewRequiredArticle(e.target.value)}
               />
               <Button type="button" variant="outline" onClick={addRequiredArticle}>
-                aÃ±adir
+                añadir
               </Button>
             </div>
             <div className="flex flex-wrap gap-2">
               {requiredArticles.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Sin artÃ­culos obligatorios.</p>
+                <p className="text-sm text-muted-foreground">Sin artículos obligatorios.</p>
               ) : (
                 requiredArticles.map((article, index) => (
                   <Badge key={`${article}-${index}`} variant="secondary" className="gap-2">
@@ -313,20 +332,20 @@ export default function EditCasePage() {
           <Separator />
 
           <div className="space-y-3">
-            <Label>artÃ­culos opcionales</Label>
+            <Label>artículos opcionales</Label>
             <div className="flex gap-2">
               <Input
-                placeholder="aÃ±adir PMID o ID"
+                placeholder="añadir PMID o ID"
                 value={newOptionalArticle}
                 onChange={(e) => setNewOptionalArticle(e.target.value)}
               />
               <Button type="button" variant="outline" onClick={addOptionalArticle}>
-                aÃ±adir
+                añadir
               </Button>
             </div>
             <div className="flex flex-wrap gap-2">
               {optionalArticles.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Sin artÃ­culos opcionales.</p>
+                <p className="text-sm text-muted-foreground">Sin artículos opcionales.</p>
               ) : (
                 optionalArticles.map((article, index) => (
                   <Badge key={`${article}-${index}`} variant="outline" className="gap-2">
@@ -351,12 +370,12 @@ export default function EditCasePage() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="text-lg">Preguntas guÃ­a</CardTitle>
+              <CardTitle className="text-lg">Preguntas guía</CardTitle>
               <CardDescription>Actualiza las preguntas para los estudiantes.</CardDescription>
             </div>
             <Button variant="outline" onClick={addQuestion}>
               <Plus className="mr-2 h-4 w-4" />
-              aÃ±adir pregunta
+              añadir pregunta
             </Button>
           </div>
         </CardHeader>
@@ -389,7 +408,7 @@ export default function EditCasePage() {
                     <SelectContent>
                       <SelectItem value="access">Acceso</SelectItem>
                       <SelectItem value="process">Procesamiento</SelectItem>
-                      <SelectItem value="communicate">ComunicaciÃ³n</SelectItem>
+                      <SelectItem value="communicate">Comunicación</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -419,12 +438,12 @@ export default function EditCasePage() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="text-lg">rÃºbrica de evaluaciÃ³n</CardTitle>
-              <CardDescription>Define criterios y niveles de desempeÃ±o.</CardDescription>
+              <CardTitle className="text-lg">rúbrica de evaluación</CardTitle>
+              <CardDescription>Define criterios y niveles de desempeño.</CardDescription>
             </div>
             <Button variant="outline" onClick={addRubricItem}>
               <Plus className="mr-2 h-4 w-4" />
-              aÃ±adir criterio
+              añadir criterio
             </Button>
           </div>
         </CardHeader>
@@ -456,7 +475,7 @@ export default function EditCasePage() {
                         <SelectContent>
                           <SelectItem value="access">Acceso</SelectItem>
                           <SelectItem value="process">Procesamiento</SelectItem>
-                          <SelectItem value="communicate">ComunicaciÃ³n</SelectItem>
+                          <SelectItem value="communicate">Comunicación</SelectItem>
                         </SelectContent>
                       </Select>
                       <div className="flex items-center gap-1">
@@ -478,7 +497,7 @@ export default function EditCasePage() {
                       <div className="space-y-1">
                         <Label className="text-xs text-success">Excelente</Label>
                         <Textarea
-                          placeholder="Describe el desempeÃ±o excelente..."
+                          placeholder="Describe el desempeño excelente..."
                           className="min-h-[80px] text-sm"
                           value={item.levels.excellent}
                           onChange={(e) =>
@@ -491,7 +510,7 @@ export default function EditCasePage() {
                       <div className="space-y-1">
                         <Label className="text-xs text-warning">Bueno</Label>
                         <Textarea
-                          placeholder="Describe el desempeÃ±o bueno..."
+                          placeholder="Describe el desempeño bueno..."
                           className="min-h-[80px] text-sm"
                           value={item.levels.good}
                           onChange={(e) =>
@@ -504,7 +523,7 @@ export default function EditCasePage() {
                       <div className="space-y-1">
                         <Label className="text-xs text-destructive">Necesita mejorar</Label>
                         <Textarea
-                          placeholder="Describe el desempeÃ±o a mejorar..."
+                          placeholder="Describe el desempeño a mejorar..."
                           className="min-h-[80px] text-sm"
                           value={item.levels.needs_improvement}
                           onChange={(e) =>

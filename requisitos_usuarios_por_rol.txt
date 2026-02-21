@@ -1,0 +1,224 @@
+RESUMEN DE REQUISITOS DE USUARIO POR ROL (estado actual del sitio)
+
+Fuente de analisis:
+- Rutas y pantallas en app/
+- Componentes funcionales en components/
+- Servicios/API consumidos en lib/
+
+------------------------------------------------------------
+1) USUARIO PUBLICO (NO AUTENTICADO)
+------------------------------------------------------------
+RU-PUB-01: El usuario debe poder ver una pagina principal informativa con descripcion de la plataforma y beneficios por rol.
+RU-PUB-02: El usuario debe poder ir a iniciar sesion.
+RU-PUB-03: El usuario debe poder registrarse con datos personales/academicos basicos.
+RU-PUB-04: El registro debe validar politica de contrasena y confirmacion de contrasena.
+RU-PUB-05: El usuario debe poder solicitar recuperacion de contrasena por correo.
+RU-PUB-06: El usuario debe poder restablecer su contrasena usando token de recuperacion.
+
+------------------------------------------------------------
+2) REQUISITOS COMUNES (USUARIOS AUTENTICADOS)
+------------------------------------------------------------
+RU-COM-01: El sistema debe autenticar por login y mantener sesion con tokens.
+RU-COM-02: El sistema debe redirigir automaticamente segun rol (student/professor/admin).
+RU-COM-03: El sistema debe proteger rutas por rol y permisos.
+RU-COM-04: El usuario debe poder cerrar sesion desde el menu de perfil.
+RU-COM-05: El sistema debe mostrar retroalimentacion de errores y estados de carga.
+RU-COM-06: El sistema debe permitir chat interno entre usuarios con:
+- lista de contactos
+- mensajes por conversacion
+- envio de mensajes
+- estados de lectura/no leido
+- actualizacion en tiempo real con fallback por API REST
+
+------------------------------------------------------------
+3) ROL ESTUDIANTE
+------------------------------------------------------------
+RU-EST-01: El estudiante debe ver dashboard personal con progreso por competencias:
+- acceso a la informacion
+- procesamiento de informacion
+- comunicacion de informacion
+
+RU-EST-02: El estudiante debe ver actividad reciente en la plataforma.
+
+RU-EST-03: El estudiante debe realizar busqueda avanzada de evidencia con:
+- sugerencias MeSH/autocompletado
+- construccion visual de query (terminos + operadores booleanos)
+- query avanzada editable
+- filtros permitidos:
+  - rango de anos
+  - tipo de estudio (systematic_review, meta_analysis, rct, cohort, case_control, case_report)
+  - idioma (eng, spa, por)
+  - solo texto completo
+  - tamano muestral minimo
+  - limite maximo de resultados
+
+RU-EST-04: El estudiante debe poder ejecutar busquedas y ver resultados estructurados.
+RU-EST-05: El estudiante debe poder consultar historial de busquedas.
+RU-EST-06: El estudiante debe poder guardar y eliminar elementos del historial/favoritos de busqueda.
+RU-EST-07: El estudiante debe poder reutilizar resultados de busqueda para otras herramientas (verificacion/bibliografia/piramide).
+
+RU-EST-08: El estudiante debe verificar informacion por:
+- texto (claim)
+- URL
+
+RU-EST-09: El sistema de verificacion debe clasificar resultado (semaforo), mostrar evidencias a favor/en contra y resumen de confianza.
+RU-EST-10: El estudiante debe consultar historial de verificaciones.
+RU-EST-11: El estudiante debe recibir recomendaciones accionables tras verificar (por ejemplo, terminos sugeridos para nuevas busquedas).
+
+RU-EST-12: El estudiante debe generar bibliografias a partir de articulos seleccionados.
+RU-EST-13: El estudiante debe poder usar formatos de salida bibliografica:
+- APA
+- Vancouver
+- BibTeX
+- XML
+
+RU-EST-14: El estudiante debe poder copiar o descargar bibliografias generadas (incluyendo descarga de archivo).
+RU-EST-15: El estudiante debe consultar historial de bibliografias generadas.
+
+RU-EST-16: El estudiante debe usar vista de piramide de evidencia para explorar calidad/nivel de estudios y recomendaciones.
+
+RU-EST-17: El estudiante debe gestionar casos asignados:
+- ver pendientes y completados
+- abrir detalle del caso
+- responder preguntas
+- adjuntar/registrar bibliografia de soporte
+- enviar entrega
+
+RU-EST-18: El estudiante debe poder ver evaluaciones/retroalimentacion de entregas y notificaciones de nuevas calificaciones.
+RU-EST-19: El estudiante debe comunicarse por chat con docentes/otros usuarios habilitados.
+
+------------------------------------------------------------
+4) ROL PROFESOR
+------------------------------------------------------------
+RU-PROF-01: El profesor debe ver dashboard docente con metricas de clase:
+- progreso medio por competencia
+- estudiantes con bajo rendimiento
+- entregas pendientes
+- tendencia de uso/actividad
+
+RU-PROF-02: El profesor debe ejecutar busquedas academicas avanzadas (visual y query raw) con los mismos filtros permitidos de fuentes externas confiables.
+RU-PROF-03: El profesor debe guardar estrategias de busqueda como "search hedges".
+
+RU-PROF-04: El profesor debe administrar casos de estudio:
+- crear caso (wizard por pasos)
+- editar caso
+- duplicar caso
+- activar/archivar
+- eliminar
+- buscar/filtrar casos
+
+RU-PROF-05: El profesor debe definir en cada caso:
+- objetivo/escenario
+- recursos
+- preguntas guia
+- rubrica/criterios de evaluacion
+- nivel de dificultad (novice/intermediate/advanced)
+
+RU-PROF-06: El profesor debe asignar casos a estudiantes y monitorear estado de avance.
+
+RU-PROF-07: El profesor debe gestionar evaluaciones:
+- ver entregas pendientes/revisadas
+- abrir detalle de una entrega
+- calificar por competencia y/o criterio de rubrica
+- redactar retroalimentacion por competencia y comentario general
+- guardar evaluacion
+
+RU-PROF-08: El profesor debe administrar Search Hedges:
+- crear, editar, eliminar
+- clasificar por categoria
+- almacenar descripcion y query PubMed
+- probar hedge en consulta
+
+RU-PROF-09: El profesor debe monitorear progreso individual y grupal de estudiantes con:
+- filtros y ordenacion
+- detalle por estudiante
+- recomendaciones de seguimiento
+- exportacion de datos
+- envio de recordatorios
+
+RU-PROF-10: El profesor debe acceder a analiticas de aula:
+- indicadores agregados
+- conceptos/keywords que requieren refuerzo
+- identificacion de estudiantes en riesgo
+
+RU-PROF-11: El profesor debe usar chat para comunicacion academica.
+
+------------------------------------------------------------
+5) ROL ADMINISTRADOR
+------------------------------------------------------------
+RU-ADM-01: El administrador debe ver dashboard con KPIs operacionales y acceso rapido a modulos criticos.
+
+RU-ADM-02: El administrador debe gestionar usuarios:
+- listar usuarios con filtros
+- crear usuario
+- editar usuario
+- cambiar rol/estado (activo-inactivo)
+- eliminar usuario
+- importar usuarios por CSV (carga masiva)
+
+RU-ADM-03: El administrador debe monitorear auditoria del sistema:
+- explorar logs
+- buscar por texto
+- filtrar por nivel y fechas
+- consultar estadisticas
+- exportar reportes
+- ejecutar reportes automaticos
+
+RU-ADM-04: El administrador debe operar el sistema tecnico:
+- consultar estado general/overview
+- crear respaldos (backups)
+- restaurar respaldo
+- descargar respaldo
+- eliminar respaldo
+
+RU-ADM-05: El administrador debe ejecutar mantenimiento:
+- limpiar cache
+- optimizar base de datos
+- limpiar logs historicos
+- reindexar motor de busqueda
+
+RU-ADM-06: El administrador debe monitorear salud de infraestructura:
+- estado global
+- CPU, memoria, disco
+- percentiles de latencia (P50/P75/P95/P99)
+- estado por servicio
+- uso de API externa clave y umbrales
+
+RU-ADM-07: El administrador debe configurar parametros avanzados del sistema:
+- configuracion general y operativa
+- claves/API keys de proveedores externos
+- limites de tasa y cache
+- parametros de modelo IA (provider, temperatura, top-p, ventana de contexto, max tokens)
+- umbrales pedagogicos y mensajes de feedback
+- prueba de conexion de proveedor (ej. PubMed)
+
+RU-ADM-08: El administrador debe verificar comunicacion real con APIs externas usadas por busqueda mediante un monitor/diagnostico dedicado.
+
+RU-ADM-09: El modulo de monitoreo de APIs externas debe permitir:
+- ejecutar prueba con query configurable
+- medir latencia/estado por proveedor
+- visualizar respuesta real y cobertura
+- detectar fallos de conectividad o degradacion
+
+RU-ADM-10: El administrador debe usar chat interno para coordinacion operativa.
+
+------------------------------------------------------------
+6) INTEGRACIONES EXTERNAS DE DATOS CONFIABLES (ACTUALES)
+------------------------------------------------------------
+RU-INT-01: El sistema de busqueda/verificacion debe integrar APIs externas confiables para evidencia biomedica.
+RU-INT-02: Las fuentes integradas actualmente deben incluir:
+- PubMed
+- Europe PMC
+- ClinicalTrials.gov
+
+RU-INT-03: El sistema debe soportar pruebas de conectividad y calidad de respuesta de estas fuentes desde modulo administrador.
+
+------------------------------------------------------------
+7) CRITERIOS TRANSVERSALES DE FUNCIONAMIENTO REAL
+------------------------------------------------------------
+RU-TRA-01: Toda funcionalidad de busqueda/verificacion/bibliografia debe operar contra APIs backend y manejar errores sin bloquear el flujo completo del usuario.
+RU-TRA-02: El sistema debe registrar eventos en auditoria para trazabilidad (acciones y fallos).
+RU-TRA-03: El sistema debe mantener consistencia de permisos por rol en frontend y backend.
+RU-TRA-04: El sistema debe ser usable en desktop y mobile (interfaces responsivas).
+
+Fin del resumen.

@@ -100,6 +100,8 @@ export interface SearchFilters {
   studyTypes?: string[]
   minSampleSize?: number
   languages?: string[]
+  hasFullText?: boolean
+  maxResults?: number
 }
 
 export interface SearchResult {
@@ -115,6 +117,8 @@ export interface SearchResult {
   sampleSize?: number
   hasConflictOfInterest: boolean
   doi?: string
+  source?: string
+  sourceUrl?: string
 }
 
 export interface SearchSession {
@@ -147,6 +151,8 @@ export interface EvidenceItem {
   snippet: string
   supports: boolean
   relevanceScore: number
+  source?: string
+  sourceUrl?: string
 }
 
 // ============ BIBLIOGRAFÍA ============
@@ -282,6 +288,35 @@ export interface SystemServiceStatus {
   latency?: number
   uptime?: string
   lastCheck?: string
+}
+
+export interface ExternalApiProviderStatus {
+  id: string
+  name: string
+  description?: string
+  status: 'online' | 'warning' | 'offline'
+  httpStatus: number
+  latencyMs: number
+  resultCount: number
+  message?: string
+  error?: string | null
+  docsUrl?: string
+  requestUrl?: string
+  lastCheck?: string
+}
+
+export interface ExternalApiDiagnostics {
+  status: 'UP' | 'DEGRADED' | 'DOWN'
+  testedAt?: string
+  query?: string
+  summary?: {
+    total: number
+    online: number
+    warning: number
+    offline: number
+  }
+  providers?: ExternalApiProviderStatus[]
+  message?: string
 }
 
 export interface AdminDashboardData {

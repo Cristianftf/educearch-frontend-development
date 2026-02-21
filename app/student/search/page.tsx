@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Slider } from '@/components/ui/slider'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Accordion,
@@ -53,27 +54,36 @@ const BOOLEAN_OPERATORS = ['AND', 'OR', 'NOT'] as const
 type BooleanOperator = (typeof BOOLEAN_OPERATORS)[number]
 
 const STUDY_TYPES = [
-  { id: 'systematic_review', label: 'Revisión Sistemática' },
-  { id: 'meta_analysis', label: 'Metaanálisis' },
-  { id: 'rct', label: 'Ensayo Clínico Aleatorizado' },
-  { id: 'cohort', label: 'Estudio de Cohorte' },
-  { id: 'case_control', label: 'Caso-Control' },
-  { id: 'case_report', label: 'Reporte de Caso' },
+  { id: 'systematic_review', label: 'Revision sistematica' },
+  { id: 'meta_analysis', label: 'Metaanalisis' },
+  { id: 'rct', label: 'Ensayo clinico aleatorizado' },
+  { id: 'cohort', label: 'Estudio de cohorte' },
+  { id: 'case_control', label: 'Caso-control' },
+  { id: 'case_report', label: 'Reporte de caso' },
+]
+
+const LANGUAGE_OPTIONS = [
+  { id: 'eng', label: 'Ingles' },
+  { id: 'spa', label: 'Espanol' },
+  { id: 'por', label: 'Portugues' },
 ]
 
 const STUDY_TYPE_IDS = new Set(STUDY_TYPES.map((type) => type.id))
+const LANGUAGE_IDS = new Set(LANGUAGE_OPTIONS.map((language) => language.id))
 const YEAR_MIN = 2000
 const YEAR_MAX = 2026
 
 type NormalizedSearchFilters = Required<
-  Pick<SearchFilters, 'yearRange' | 'studyTypes' | 'minSampleSize'>
-> &
-  Pick<SearchFilters, 'languages'>
+  Pick<SearchFilters, 'yearRange' | 'studyTypes' | 'minSampleSize' | 'languages' | 'hasFullText' | 'maxResults'>
+>
 
 const DEFAULT_FILTERS: NormalizedSearchFilters = {
   yearRange: [2018, 2026],
   studyTypes: [],
   minSampleSize: 0,
+  languages: ['eng'],
+  hasFullText: false,
+  maxResults: 30,
 }
 
 const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
@@ -103,6 +113,14 @@ const normalizeStudyTypes = (studyTypes?: SearchFilters['studyTypes']) => {
   return Array.from(unique)
 }
 
+const normalizeLanguages = (languages?: SearchFilters['languages']) => {
+  if (!Array.isArray(languages) || languages.length === 0) return DEFAULT_FILTERS.languages
+  const selected = languages
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => LANGUAGE_IDS.has(entry))
+  return selected.length > 0 ? [selected[0]] : DEFAULT_FILTERS.languages
+}
+
 const normalizeFilters = (filters?: SearchFilters): NormalizedSearchFilters => ({
   yearRange: normalizeYearRange(filters?.yearRange),
   studyTypes: normalizeStudyTypes(filters?.studyTypes),
@@ -110,7 +128,12 @@ const normalizeFilters = (filters?: SearchFilters): NormalizedSearchFilters => (
     typeof filters?.minSampleSize === 'number' && Number.isFinite(filters.minSampleSize)
       ? clampNumber(filters.minSampleSize, 0, 1000)
       : DEFAULT_FILTERS.minSampleSize,
-  languages: filters?.languages,
+  languages: normalizeLanguages(filters?.languages),
+  hasFullText: filters?.hasFullText === true,
+  maxResults:
+    typeof filters?.maxResults === 'number' && Number.isFinite(filters.maxResults)
+      ? clampNumber(filters.maxResults, 5, 200)
+      : DEFAULT_FILTERS.maxResults,
 })
 
 const normalizeStudyTypeValue = (value: string) => {
@@ -162,6 +185,69 @@ const areTermsEqual = (a?: MeshTerm[], b?: MeshTerm[]) => {
   return true
 }
 
+const sanitizeMeshTerms = (terms: MeshTerm[]): MeshTerm[] => {
+  const unique = new Set<string>()
+  const sanitized: MeshTerm[] = []
+
+  for (const term of terms) {
+    const rawTerm = typeof term?.term === 'string' ? term.term.trim() : ''
+    if (!rawTerm) continue
+    const normalizedKey = rawTerm.toLowerCase()
+    if (unique.has(normalizedKey)) continue
+    unique.add(normalizedKey)
+
+    sanitized.push({
+      id: typeof term?.id === 'string' && term.id.trim() ? term.id : rawTerm.toUpperCase(),
+      term: rawTerm,
+      description: typeof term?.description === 'string' ? term.description : undefined,
+    })
+  }
+
+  return sanitized
+}
+
+const normalizeQueryParts = (terms: MeshTerm[], operators: BooleanOperator[]) => {
+  const normalizedTerms = sanitizeMeshTerms(terms)
+  const maxOperators = Math.max(0, normalizedTerms.length - 1)
+  const normalizedOperators = operators
+    .filter((operator): operator is BooleanOperator => BOOLEAN_OPERATORS.includes(operator))
+    .slice(0, maxOperators)
+
+  while (normalizedOperators.length < maxOperators) {
+    normalizedOperators.push('AND')
+  }
+
+  return {
+    terms: normalizedTerms,
+    operators: normalizedOperators,
+  }
+}
+
+const buildRawQuery = (
+  terms: MeshTerm[],
+  operators: BooleanOperator[],
+  filters: NormalizedSearchFilters
+): string => {
+  if (terms.length === 0) return ''
+
+  let query = `[${terms[0].term}]`
+  for (let i = 1; i < terms.length; i += 1) {
+    const op = operators[i - 1] || 'AND'
+    query += ` ${op} [${terms[i].term}]`
+  }
+
+  query += ` AND [${filters.yearRange[0]}:${filters.yearRange[1]}]`
+  if (filters.languages.length > 0) {
+    query += ` AND [lang:${filters.languages[0]}]`
+  }
+  if (filters.hasFullText) {
+    query += ' AND [full-text]'
+  }
+  query += ` [max:${filters.maxResults}]`
+
+  return query
+}
+
 export default function SearchPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [suggestions, setSuggestions] = useState<MeshTerm[]>([])
@@ -175,14 +261,19 @@ export default function SearchPage() {
     operators: BooleanOperator[]
   } | null>(null)
   const [filters, setFilters] = useState<NormalizedSearchFilters>(() => normalizeFilters())
-  const { searchHistory, loadHistory, executeSearch: executeSearchHook } = useStudentSearch()
+  const {
+    searchHistory,
+    loadHistory,
+    executeSearch: executeSearchHook,
+    error: searchHookError,
+  } = useStudentSearch()
   const [currentSession, setCurrentSession] = useState<SearchSession | null>(null)
   const [isSearching, setIsSearching] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedArticle, setSelectedArticle] = useState<SearchResult | null>(null)
   const [selectedResults, setSelectedResults] = useState<SearchResult[]>([])
   const [exportMessage, setExportMessage] = useState<string | null>(null)
-  const { addActivity, addSavedSearch, setSavedSearches, toggleSearchFavorite } = useStudent()
+  const { toggleSearchFavorite } = useStudent()
   const router = useRouter()
 
   const handleVisualQueryChange = useCallback(
@@ -251,32 +342,31 @@ export default function SearchPage() {
   }, [])
 
   const addOperator = useCallback((operator: BooleanOperator) => {
-    setOperators((prev) => [...prev, operator])
-  }, [])
+    setOperators((prev) => {
+      const maxOperators = Math.max(0, selectedTerms.length - 1)
+      if (maxOperators === 0 || prev.length >= maxOperators) {
+        return prev
+      }
+      return [...prev, operator]
+    })
+  }, [selectedTerms.length])
 
-  const buildQueryString = useCallback((): string => {
-    if (selectedTerms.length === 0) return ''
-
-    let query = `[${selectedTerms[0].term}]`
-    for (let i = 1; i < selectedTerms.length; i++) {
-      const op = operators[i - 1] || 'AND'
-      query += ` ${op} [${selectedTerms[i].term}]`
-    }
-
-    if (filters.yearRange) {
-      query += ` AND [${filters.yearRange[0]}:${filters.yearRange[1]}]`
-    }
-
-    return query
-  }, [selectedTerms, operators, filters])
+  const buildQueryString = useCallback(
+    (termsInput = selectedTerms, operatorsInput = operators): string => {
+      const normalized = normalizeQueryParts(termsInput, operatorsInput)
+      return buildRawQuery(normalized.terms, normalized.operators, filters)
+    },
+    [selectedTerms, operators, filters]
+  )
 
   const executeSearch = useCallback(async () => {
     const activeTerms = queryMode === 'visual' ? (visualQuery?.terms ?? []) : selectedTerms
     const activeOperators = queryMode === 'visual' ? (visualQuery?.operators ?? []) : operators
-    const activeRawQuery =
-      queryMode === 'visual' ? (visualQuery?.rawQuery ?? '') : buildQueryString()
-    if (activeTerms.length === 0) {
-      setError('Añade al menos un término MeSH para buscar')
+    const normalizedQuery = normalizeQueryParts(activeTerms, activeOperators)
+    const activeRawQuery = buildRawQuery(normalizedQuery.terms, normalizedQuery.operators, filters)
+
+    if (normalizedQuery.terms.length === 0) {
+      setError('Anade al menos un termino MeSH para buscar')
       return
     }
 
@@ -286,26 +376,29 @@ export default function SearchPage() {
     try {
       const query: SearchQuery = {
         id: `query-${Date.now()}`,
-        terms: activeTerms,
-        operators: activeOperators,
+        terms: normalizedQuery.terms,
+        operators: normalizedQuery.operators,
         filters,
         rawQuery: activeRawQuery,
         createdAt: new Date().toISOString(),
       }
 
       const session = await executeSearchHook(query)
-      if (session) {
-        setCurrentSession(session)
-        setSelectedResults([])
+      if (!session) {
+        setError(searchHookError || 'No se pudieron obtener resultados validos para esta busqueda.')
+        return
       }
+      setCurrentSession(session)
+      setSelectedResults([])
       await loadHistory(1, 10)
     } catch (err) {
-      setError('Error al ejecutar la búsqueda. Intenta de nuevo.')
+      const message = err instanceof Error ? err.message : 'Error al ejecutar la busqueda. Intenta de nuevo.'
+      setError(message)
       console.error('[v0] Search error:', err)
     } finally {
       setIsSearching(false)
     }
-  }, [selectedTerms, operators, filters, buildQueryString, queryMode, visualQuery, executeSearchHook, loadHistory])
+  }, [selectedTerms, operators, filters, queryMode, visualQuery, executeSearchHook, loadHistory, searchHookError])
 
   const toggleResultSelection = useCallback((result: SearchResult) => {
     setSelectedResults((prev) => {
@@ -328,7 +421,7 @@ export default function SearchPage() {
 
   const exportSelection = useCallback(() => {
     if (selectedResults.length === 0) {
-      setError('Selecciona al menos un artÃ­culo para exportar.')
+      setError('Selecciona al menos un articulo para exportar.')
       return
     }
     try {
@@ -337,7 +430,7 @@ export default function SearchPage() {
         'search_selection_v2',
         JSON.stringify({ version: 2, items: selectedResults })
       )
-      setExportMessage('SelecciÃ³n enviada a bibliografÃ­as.')
+      setExportMessage('Seleccion enviada a bibliografias.')
       setTimeout(() => setExportMessage(null), 2000)
       router.push('/student/bibliography?source=search')
     } catch (err) {
@@ -356,16 +449,25 @@ export default function SearchPage() {
   }, [toggleSearchFavorite, loadHistory])
 
   const reuseSearch = useCallback((query: SearchQuery) => {
-    setSelectedTerms(query.terms)
-    setOperators(query.operators)
+    const normalized = normalizeQueryParts(query.terms, query.operators as BooleanOperator[])
+    setSelectedTerms(normalized.terms)
+    setOperators(normalized.operators)
     setFilters(normalizeFilters(query.filters))
+    setQueryMode('advanced')
+    setVisualQuery({
+      rawQuery: query.rawQuery,
+      terms: normalized.terms,
+      operators: normalized.operators,
+    })
   }, [])
 
   const yearRangeValue = filters.yearRange
   const minSampleValue = [filters.minSampleSize]
+  const maxResultsValue = [filters.maxResults]
 
   const [yearRangeDraft, setYearRangeDraft] = useState<[number, number]>(yearRangeValue)
   const [minSampleDraft, setMinSampleDraft] = useState<number[]>(minSampleValue)
+  const [maxResultsDraft, setMaxResultsDraft] = useState<number[]>(maxResultsValue)
 
   useEffect(() => {
     setYearRangeDraft((prev) =>
@@ -382,6 +484,14 @@ export default function SearchPage() {
         : minSampleValue
     )
   }, [minSampleValue[0]])
+
+  useEffect(() => {
+    setMaxResultsDraft((prev) =>
+      prev[0] === maxResultsValue[0]
+        ? prev
+        : maxResultsValue
+    )
+  }, [maxResultsValue[0]])
 
   const updateYearRange = useCallback((value: [number, number]) => {
     setFilters((prev) => {
@@ -403,17 +513,30 @@ export default function SearchPage() {
     })
   }, [])
 
-  const displayQuery =
-    queryMode === 'visual' ? (visualQuery?.rawQuery || '') : buildQueryString()
-  const canSearch =
-    queryMode === 'visual'
-      ? (visualQuery?.terms?.length || 0) > 0
-      : selectedTerms.length > 0
+  const updateMaxResults = useCallback((value: number) => {
+    setFilters((prev) => {
+      const current = prev.maxResults
+      if (current === value) {
+        return prev
+      }
+      return { ...prev, maxResults: value }
+    })
+  }, [])
+
+  const displayQuery = queryMode === 'visual'
+    ? buildQueryString(visualQuery?.terms ?? [], visualQuery?.operators ?? [])
+    : buildQueryString()
+
+  const canSearch = useMemo(() => {
+    const activeTerms = queryMode === 'visual' ? (visualQuery?.terms ?? []) : selectedTerms
+    const activeOperators = queryMode === 'visual' ? (visualQuery?.operators ?? []) : operators
+    return normalizeQueryParts(activeTerms, activeOperators).terms.length > 0
+  }, [queryMode, visualQuery, selectedTerms, operators])
 
   const filteredResults = useMemo(() => {
     if (!currentSession) return []
     const [yearFrom, yearTo] = filters.yearRange
-    return currentSession.results.filter((result) => {
+    const filtered = currentSession.results.filter((result) => {
       if (result.year < yearFrom || result.year > yearTo) {
         return false
       }
@@ -429,17 +552,28 @@ export default function SearchPage() {
           return false
         }
       }
+      if (filters.hasFullText && !result.sourceUrl && !result.doi) {
+        return false
+      }
       return true
     })
-  }, [currentSession, filters.yearRange, filters.studyTypes, filters.minSampleSize])
+    return filtered.slice(0, filters.maxResults)
+  }, [
+    currentSession,
+    filters.yearRange,
+    filters.studyTypes,
+    filters.minSampleSize,
+    filters.hasFullText,
+    filters.maxResults,
+  ])
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Búsqueda Avanzada</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Busqueda Avanzada</h1>
         <p className="text-muted-foreground mt-1">
-          Construye queries con términos MeSH y operadores booleanos
+          Construye queries con terminos MeSH y operadores booleanos
         </p>
       </div>
 
@@ -471,17 +605,17 @@ export default function SearchPage() {
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
                 <Search className="h-5 w-5" />
-                Términos MeSH
+                Terminos MeSH
               </CardTitle>
               <CardDescription>
-                Busca y añade términos del vocabulario controlado MeSH
+                Busca y anade terminos del vocabulario controlado MeSH
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Buscar términos MeSH (ej: diabetes, hypertension)..."
+                  placeholder="Buscar terminos MeSH (ej: diabetes, hypertension)..."
                   className="pl-10"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
@@ -516,7 +650,7 @@ export default function SearchPage() {
               {/* Selected terms */}
               {selectedTerms.length > 0 && (
                 <div className="space-y-3">
-                  <Label>Términos seleccionados</Label>
+                  <Label>Terminos seleccionados</Label>
                   <div className="flex flex-wrap gap-2">
                     {selectedTerms.map((term, index) => (
                       <div key={term.id} className="flex items-center gap-1">
@@ -582,7 +716,7 @@ export default function SearchPage() {
               <div className="p-4 rounded-lg bg-muted font-mono text-sm overflow-x-auto">
                 {displayQuery || (
                   <span className="text-muted-foreground">
-                    Añade términos para construir tu query...
+                    Anade terminos para construir tu query...
                   </span>
                 )}
               </div>
@@ -614,7 +748,7 @@ export default function SearchPage() {
                 ) : (
                   <>
                     <Search className="mr-2 h-4 w-4" />
-                    Ejecutar búsqueda
+                    Ejecutar busqueda
                   </>
                 )}
               </Button>
@@ -629,7 +763,7 @@ export default function SearchPage() {
                   <div>
                     <CardTitle className="text-lg">Resultados</CardTitle>
                     <CardDescription>
-                      {filteredResults.length} artículos encontrados
+                      {filteredResults.length} articulos encontrados
                       {currentSession.totalResults !== filteredResults.length && (
                         <span className="text-muted-foreground">
                           {' '}
@@ -639,7 +773,7 @@ export default function SearchPage() {
                     </CardDescription>
                   </div>
                   <Button variant="outline" size="sm" onClick={exportSelection}>
-                    Exportar selección
+                    Exportar seleccion
                   </Button>
                 </div>
               </CardHeader>
@@ -699,10 +833,15 @@ export default function SearchPage() {
                                     n={result.sampleSize}
                                   </span>
                                 )}
+                                {result.source && (
+                                  <Badge variant="secondary" className="text-[10px] h-5">
+                                    {result.source}
+                                  </Badge>
+                                )}
                               </div>
                               {result.hasConflictOfInterest && (
                                 <Badge variant="destructive" className="mt-2 text-xs">
-                                  Conflicto de interés declarado
+                                  Conflicto de interes declarado
                                 </Badge>
                               )}
                             </div>
@@ -727,11 +866,11 @@ export default function SearchPage() {
                 <Sparkles className="h-5 w-5 text-primary" />
                 Asistente IA
               </CardTitle>
-              <CardDescription>Sugerencias inteligentes para tu búsqueda</CardDescription>
+              <CardDescription>Sugerencias inteligentes para tu busqueda</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                Basándote en tus términos, considera añadir:
+                Basandote en tus terminos, considera anadir:
               </p>
               <div className="space-y-2">
                 <Button variant="outline" size="sm" className="w-full justify-start bg-transparent">
@@ -749,13 +888,16 @@ export default function SearchPage() {
           {/* Filters */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Filtros</CardTitle>
+              <CardTitle className="text-lg">Filtros avanzados</CardTitle>
+              <CardDescription>
+                Aplica estos parametros en todas las fuentes externas antes de mostrar resultados.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               {/* Year Range */}
               <div className="space-y-3">
                 <Label>
-                  Rango de años: {yearRangeDraft[0]} - {yearRangeDraft[1]}
+                  Rango anual: {yearRangeDraft[0]} - {yearRangeDraft[1]}
                 </Label>
                 <Slider
                   min={2000}
@@ -771,6 +913,9 @@ export default function SearchPage() {
               {/* Study Types */}
               <div className="space-y-3">
                 <Label>Tipo de estudio</Label>
+                <p className="text-xs text-muted-foreground">
+                  Selecciona uno o mas disenos para filtrar evidencia clinica.
+                </p>
                 <div className="space-y-2">
                   {STUDY_TYPES.map((type) => (
                     <div key={type.id} className="flex items-center gap-2">
@@ -794,9 +939,62 @@ export default function SearchPage() {
                 </div>
               </div>
 
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label htmlFor="language-filter">Idioma principal</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Prioriza resultados indexados en el idioma seleccionado.
+                  </p>
+                </div>
+                <Select
+                  value={filters.languages[0] || 'eng'}
+                  onValueChange={(value) =>
+                    setFilters((prev) => ({
+                      ...prev,
+                      languages: [value],
+                    }))
+                  }
+                >
+                  <SelectTrigger id="language-filter">
+                    <SelectValue placeholder="Selecciona un idioma" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LANGUAGE_OPTIONS.map((language) => (
+                      <SelectItem key={language.id} value={language.id}>
+                        {language.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="full-text-only"
+                    checked={filters.hasFullText}
+                    onCheckedChange={(checked) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        hasFullText: checked === true,
+                      }))
+                    }
+                  />
+                  <Label htmlFor="full-text-only" className="text-sm font-normal cursor-pointer">
+                    Solo resultados con texto completo
+                  </Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Excluye registros sin enlace de acceso al contenido.
+                </p>
+              </div>
+
               {/* Sample Size */}
               <div className="space-y-3">
-                <Label>Tamaño muestral mínimo: {minSampleDraft[0]}</Label>
+                <Label>Tamano muestral minimo: {minSampleDraft[0]}</Label>
+                <p className="text-xs text-muted-foreground">
+                  Util para priorizar estudios con mayor robustez estadistica.
+                </p>
                 <Slider
                   min={0}
                   max={1000}
@@ -804,6 +1002,21 @@ export default function SearchPage() {
                   value={minSampleDraft}
                   onValueChange={(value) => setMinSampleDraft(value as number[])}
                   onValueCommit={([value]) => updateMinSampleSize(value)}
+                />
+              </div>
+
+              <div className="space-y-3">
+                <Label>Maximo de resultados: {maxResultsDraft[0]}</Label>
+                <p className="text-xs text-muted-foreground">
+                  Limita la cantidad final mostrada y acelera la revision.
+                </p>
+                <Slider
+                  min={5}
+                  max={200}
+                  step={5}
+                  value={maxResultsDraft}
+                  onValueChange={(value) => setMaxResultsDraft(value as number[])}
+                  onValueCommit={([value]) => updateMaxResults(value)}
                 />
               </div>
             </CardContent>
@@ -861,7 +1074,7 @@ export default function SearchPage() {
                 </Accordion>
               ) : (
                 <p className="text-sm text-muted-foreground text-center py-4">
-                  No hay búsquedas recientes
+                  No hay busquedas recientes
                 </p>
               )}
             </CardContent>
@@ -885,6 +1098,9 @@ export default function SearchPage() {
                 <div className="flex flex-wrap gap-2">
                   <Badge variant="outline">Nivel {selectedArticle.evidenceLevel}</Badge>
                   <Badge variant="secondary">{selectedArticle.studyType}</Badge>
+                  {selectedArticle.source && (
+                    <Badge variant="secondary">{selectedArticle.source}</Badge>
+                  )}
                   {selectedArticle.sampleSize && (
                     <Badge variant="secondary">n={selectedArticle.sampleSize}</Badge>
                   )}
@@ -900,7 +1116,7 @@ export default function SearchPage() {
                 {selectedArticle.hasConflictOfInterest && (
                   <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
                     <AlertCircle className="h-4 w-4 inline mr-2" />
-                    Este artículo tiene conflictos de interés declarados
+                    Este articulo tiene conflictos de interes declarados
                   </div>
                 )}
 
@@ -912,17 +1128,17 @@ export default function SearchPage() {
                       setSelectedArticle(null)
                     }}
                   >
-                    Añadir a bibliografía
+                    Anadir a bibliografia
                   </Button>
-                  {selectedArticle.doi && (
+                  {(selectedArticle.sourceUrl || selectedArticle.doi) && (
                     <Button variant="outline" asChild>
                       <a
-                        href={`https://doi.org/${selectedArticle.doi}`}
+                        href={selectedArticle.sourceUrl || `https://doi.org/${selectedArticle.doi}`}
                         target="_blank"
                         rel="noopener noreferrer"
                       >
                         <ExternalLink className="h-4 w-4 mr-2" />
-                        Ver en PubMed
+                        {selectedArticle.source ? `Ver en ${selectedArticle.source}` : 'Ver fuente'}
                       </a>
                     </Button>
                   )}

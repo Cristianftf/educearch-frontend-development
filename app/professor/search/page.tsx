@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { Slider } from "@/components/ui/slider"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
@@ -17,6 +19,39 @@ import { Loader2, Search, Save, Sparkles } from "lucide-react"
 import QueryBuilder from "@/components/query-builder"
 
 type BooleanOperator = "AND" | "OR" | "NOT"
+
+const STUDY_TYPES = [
+  { id: "systematic_review", label: "Revision sistematica" },
+  { id: "meta_analysis", label: "Metaanalisis" },
+  { id: "rct", label: "Ensayo clinico aleatorizado" },
+  { id: "cohort", label: "Estudio de cohorte" },
+  { id: "case_control", label: "Caso-control" },
+  { id: "case_report", label: "Reporte de caso" },
+]
+
+const LANGUAGE_OPTIONS = [
+  { id: "eng", label: "Ingles" },
+  { id: "spa", label: "Espanol" },
+  { id: "por", label: "Portugues" },
+]
+
+const YEAR_MIN = 2000
+const YEAR_MAX = 2026
+
+const normalizeStudyTypeValue = (value: string) => {
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_")
+  if (normalized.includes("systematic")) return "systematic_review"
+  if (normalized.includes("meta")) return "meta_analysis"
+  if (
+    normalized.includes("randomized") ||
+    normalized.includes("interventional") ||
+    normalized.includes("clinical_trial")
+  ) return "rct"
+  if (normalized.includes("cohort")) return "cohort"
+  if (normalized.includes("case_control")) return "case_control"
+  if (normalized.includes("case_report")) return "case_report"
+  return normalized
+}
 
 export default function ProfessorSearchPage() {
   const [queryMode, setQueryMode] = useState<"visual" | "raw">("visual")
@@ -29,7 +64,14 @@ export default function ProfessorSearchPage() {
     operators: BooleanOperator[]
   } | null>(null)
   const [rawQuery, setRawQuery] = useState("")
-  const [filters, setFilters] = useState<SearchFilters>({ yearRange: [2018, 2026] })
+  const [filters, setFilters] = useState<SearchFilters>({
+    yearRange: [2018, 2026],
+    studyTypes: [],
+    minSampleSize: 0,
+    languages: ["eng"],
+    hasFullText: false,
+    maxResults: 30,
+  })
   const [results, setResults] = useState<SearchResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -79,9 +121,37 @@ export default function ProfessorSearchPage() {
     queryMode === "visual" ? visualQuery?.operators || [] : []
   ), [queryMode, visualQuery])
 
+  const filteredResults = useMemo(() => {
+    const [yearFrom, yearTo] = filters.yearRange ?? [YEAR_MIN, YEAR_MAX]
+    const maxResults = typeof filters.maxResults === "number" ? filters.maxResults : 30
+    const filtered = results.filter((result) => {
+      if (result.year < yearFrom || result.year > yearTo) return false
+      if (Array.isArray(filters.studyTypes) && filters.studyTypes.length > 0) {
+        if (!filters.studyTypes.includes(normalizeStudyTypeValue(result.studyType || ""))) return false
+      }
+      if (typeof filters.minSampleSize === "number" && filters.minSampleSize > 0) {
+        const sampleSize = result.sampleSize ?? 0
+        if (sampleSize < filters.minSampleSize) return false
+      }
+      if (filters.hasFullText && !result.sourceUrl && !result.doi) {
+        return false
+      }
+      return true
+    })
+    return filtered.slice(0, maxResults)
+  }, [results, filters])
+
+  const handleVisualQueryChange = useCallback((data: {
+    rawQuery: string
+    terms: MeshTerm[]
+    operators: BooleanOperator[]
+  }) => {
+    setVisualQuery(data)
+  }, [])
+
   const executeSearch = useCallback(async () => {
     if (!activeRawQuery.trim() || activeTerms.length === 0) {
-      setError("Construye una Búsqueda antes de ejecutar.")
+      setError("Construye una busqueda antes de ejecutar.")
       return
     }
     setIsSearching(true)
@@ -101,7 +171,7 @@ export default function ProfessorSearchPage() {
       const session = await searchApi.execute(query)
       setResults(session.results)
     } catch (err) {
-      setError("Error al ejecutar la Búsqueda.")
+      setError("Error al ejecutar la busqueda.")
     } finally {
       setIsSearching(false)
     }
@@ -129,9 +199,9 @@ export default function ProfessorSearchPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Búsqueda Profesor</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Busqueda Profesor</h1>
         <p className="text-muted-foreground mt-1">
-          Ejecuta Búsquedas y guarda estrategias como Search Hedges reutilizables.
+          Ejecuta busquedas y guarda estrategias como Search Hedges reutilizables.
         </p>
       </div>
 
@@ -148,7 +218,7 @@ export default function ProfessorSearchPage() {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Buscar Términos MeSH..."
+              placeholder="Buscar terminos MeSH..."
               className="pl-9"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -174,7 +244,7 @@ export default function ProfessorSearchPage() {
 
           <QueryBuilder
             availableTerms={suggestions}
-            onQueryChange={(data) => setVisualQuery(data)}
+            onQueryChange={handleVisualQueryChange}
           />
         </TabsContent>
 
@@ -191,6 +261,143 @@ export default function ProfessorSearchPage() {
         </TabsContent>
       </Tabs>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Filtros avanzados de busqueda</CardTitle>
+          <CardDescription>Parametros compatibles con PubMed y APIs externas confiables.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="space-y-2">
+            <Label>
+              Rango anual: {filters.yearRange?.[0] ?? YEAR_MIN} - {filters.yearRange?.[1] ?? YEAR_MAX}
+            </Label>
+            <Slider
+              min={YEAR_MIN}
+              max={YEAR_MAX}
+              step={1}
+              value={filters.yearRange ?? [2018, YEAR_MAX]}
+              onValueChange={(value) =>
+                setFilters((prev) => ({
+                  ...prev,
+                  yearRange: value as [number, number],
+                }))
+              }
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Tipo de estudio</Label>
+            <p className="text-xs text-muted-foreground">
+              Selecciona disenos metodologicos para filtrar resultados clinicos.
+            </p>
+            <div className="grid gap-2 md:grid-cols-2">
+              {STUDY_TYPES.map((type) => {
+                const selected = (filters.studyTypes ?? []).includes(type.id)
+                return (
+                  <label key={type.id} className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={selected}
+                      onCheckedChange={(checked) =>
+                        setFilters((prev) => ({
+                          ...prev,
+                          studyTypes: checked
+                            ? [...(prev.studyTypes ?? []), type.id]
+                            : (prev.studyTypes ?? []).filter((item) => item !== type.id),
+                        }))
+                      }
+                    />
+                    {type.label}
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Idioma principal</Label>
+            <p className="text-xs text-muted-foreground">
+              Prioriza registros indexados en el idioma seleccionado.
+            </p>
+            <Select
+              value={filters.languages?.[0] ?? "eng"}
+              onValueChange={(value) =>
+                setFilters((prev) => ({
+                  ...prev,
+                  languages: [value],
+                }))
+              }
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Seleccionar idioma" />
+              </SelectTrigger>
+              <SelectContent>
+                {LANGUAGE_OPTIONS.map((language) => (
+                  <SelectItem key={language.id} value={language.id}>
+                    {language.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                checked={filters.hasFullText === true}
+                onCheckedChange={(checked) =>
+                  setFilters((prev) => ({
+                    ...prev,
+                    hasFullText: checked === true,
+                  }))
+                }
+              />
+              <Label className="text-sm font-normal">Solo resultados con texto completo</Label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Excluye registros sin enlace directo al contenido.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Tamano muestral minimo: {filters.minSampleSize ?? 0}</Label>
+            <p className="text-xs text-muted-foreground">
+              Incrementa este valor para priorizar estudios con muestras amplias.
+            </p>
+            <Slider
+              min={0}
+              max={1000}
+              step={10}
+              value={[filters.minSampleSize ?? 0]}
+              onValueChange={([value]) =>
+                setFilters((prev) => ({
+                  ...prev,
+                  minSampleSize: value,
+                }))
+              }
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Maximo de resultados: {filters.maxResults ?? 30}</Label>
+            <p className="text-xs text-muted-foreground">
+              Limita la salida final para acelerar analisis y revision docente.
+            </p>
+            <Slider
+              min={5}
+              max={200}
+              step={5}
+              value={[filters.maxResults ?? 30]}
+              onValueChange={([value]) =>
+                setFilters((prev) => ({
+                  ...prev,
+                  maxResults: value,
+                }))
+              }
+            />
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="flex flex-col sm:flex-row gap-3">
         <Button onClick={executeSearch} disabled={isSearching}>
           {isSearching ? (
@@ -201,7 +408,7 @@ export default function ProfessorSearchPage() {
           ) : (
             <>
               <Search className="mr-2 h-4 w-4" />
-              Ejecutar Búsqueda
+              Ejecutar busqueda
             </>
           )}
         </Button>
@@ -217,7 +424,7 @@ export default function ProfessorSearchPage() {
             <DialogHeader>
               <DialogTitle>Guardar estrategia</DialogTitle>
               <DialogDescription>
-                Convierte esta Búsqueda en un Search Hedge reutilizable.
+                Convierte esta busqueda en un Search Hedge reutilizable.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
@@ -226,10 +433,10 @@ export default function ProfessorSearchPage() {
                 <Input value={hedgeName} onChange={(e) => setHedgeName(e.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label>Categoría</Label>
+                <Label>Categoria</Label>
                 <Select value={hedgeCategory} onValueChange={setHedgeCategory}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Selecciona Categoría" />
+                    <SelectValue placeholder="Selecciona Categoria" />
                   </SelectTrigger>
                   <SelectContent>
                     {(categories.length > 0 ? categories : ["General"]).map((cat) => (
@@ -241,7 +448,7 @@ export default function ProfessorSearchPage() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Descripción</Label>
+                <Label>Descripcion</Label>
                 <Textarea
                   value={hedgeDescription}
                   onChange={(e) => setHedgeDescription(e.target.value)}
@@ -262,15 +469,15 @@ export default function ProfessorSearchPage() {
       <Card>
         <CardHeader>
           <CardTitle>Resultados</CardTitle>
-          <CardDescription>{results.length} artículos encontrados</CardDescription>
+          <CardDescription>{filteredResults.length} articulos encontrados</CardDescription>
         </CardHeader>
         <CardContent>
-          {results.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No hay resultados aún.</p>
+          {filteredResults.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No hay resultados aun.</p>
           ) : (
             <ScrollArea className="h-[420px] pr-4">
               <div className="space-y-3">
-                {results.map((result) => (
+                {filteredResults.map((result) => (
                   <Card key={result.id} className="hover:bg-muted/40 transition-colors">
                     <CardContent className="p-4 space-y-2">
                       <p className="font-medium">{result.title}</p>
@@ -294,3 +501,4 @@ export default function ProfessorSearchPage() {
     </div>
   )
 }
+

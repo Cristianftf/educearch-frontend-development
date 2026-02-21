@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
@@ -53,7 +53,7 @@ import {
 const difficultyConfig: Record<CaseDifficulty, { label: string; description: string; color: string }> = {
   novice: {
     label: 'Novato',
-    description: 'Conceptos bÃ¡sicos, BÃºsquedas simples',
+    description: 'Conceptos básicos, Búsquedas simples',
     color: 'bg-success/10 text-success border-success/30',
   },
   intermediate: {
@@ -63,7 +63,7 @@ const difficultyConfig: Record<CaseDifficulty, { label: string; description: str
   },
   advanced: {
     label: 'Avanzado',
-    description: 'Estrategias complejas, evaluaciÃ³n crÃ­tica',
+    description: 'Estrategias complejas, evaluación crítica',
     color: 'bg-destructive/10 text-destructive border-destructive/30',
   },
 }
@@ -85,6 +85,8 @@ export default function NewCasePage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
+  const [hasSearchedResources, setHasSearchedResources] = useState(false)
+  const [resourceSearchError, setResourceSearchError] = useState<string | null>(null)
   const [requiredArticles, setRequiredArticles] = useState<SearchResult[]>([])
   const [optionalArticles, setOptionalArticles] = useState<SearchResult[]>([])
 
@@ -103,43 +105,50 @@ export default function NewCasePage() {
   const [rubricItems, setRubricItems] = useState<RubricItem[]>([
     {
       id: '1',
-      criteria: 'Uso de TÃ©rminos MeSH',
+      criteria: 'Uso de Términos MeSH',
       competency: 'access',
       maxPoints: 20,
       levels: {
-        excellent: 'Utiliza TÃ©rminos MeSH precisos y relevantes',
-        good: 'Utiliza algunos TÃ©rminos MeSH correctamente',
-        needs_improvement: 'No utiliza TÃ©rminos MeSH o son incorrectos',
+        excellent: 'Utiliza Términos MeSH precisos y relevantes',
+        good: 'Utiliza algunos Términos MeSH correctamente',
+        needs_improvement: 'No utiliza Términos MeSH o son incorrectos',
       },
     },
     {
       id: '2',
-      criteria: 'evaluaciÃ³n de evidencia',
+      criteria: 'evaluación de evidencia',
       competency: 'process',
       maxPoints: 30,
       levels: {
         excellent: 'Identifica correctamente niveles de evidencia y sesgos',
         good: 'Identifica algunos aspectos de la calidad de evidencia',
-        needs_improvement: 'No evalÃºa la calidad de la evidencia',
+        needs_improvement: 'No evalúa la calidad de la evidencia',
       },
     },
     {
       id: '3',
-      criteria: 'Formato de bibliografÃ­a',
+      criteria: 'Formato de bibliografía',
       competency: 'communicate',
       maxPoints: 20,
       levels: {
-        excellent: 'bibliografÃ­a perfectamente formateada segÃºn norma',
-        good: 'bibliografÃ­a con errores menores de formato',
-        needs_improvement: 'bibliografÃ­a mal formateada o incompleta',
+        excellent: 'bibliografía perfectamente formateada según norma',
+        good: 'bibliografía con errores menores de formato',
+        needs_improvement: 'bibliografía mal formateada o incompleta',
       },
     },
   ])
 
   const searchArticles = useCallback(async () => {
-    if (searchTerm.length < 2) return
+    if (searchTerm.trim().length < 2) {
+      setResourceSearchError('Escribe al menos 2 caracteres para buscar recursos.')
+      setSearchResults([])
+      setHasSearchedResources(false)
+      return
+    }
 
     setIsSearching(true)
+    setResourceSearchError(null)
+    setHasSearchedResources(true)
     try {
       const queryId =
         typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -153,9 +162,15 @@ export default function NewCasePage() {
         rawQuery: searchTerm,
         createdAt: new Date().toISOString(),
       })
-      setSearchResults(session.results)
+      const results = Array.isArray(session.results) ? session.results : []
+      setSearchResults(results)
+      if (results.length === 0) {
+        setResourceSearchError('No se encontraron recursos para esta consulta.')
+      }
     } catch (err) {
       console.error('[v0] Search error:', err)
+      setSearchResults([])
+      setResourceSearchError('No se pudo completar la busqueda de recursos.')
     } finally {
       setIsSearching(false)
     }
@@ -325,7 +340,7 @@ export default function NewCasePage() {
               Crear Caso de Estudio
             </h1>
             <p className="text-muted-foreground mt-1">
-              Define el escenario, recursos y criterios de evaluaciÃ³n
+              Define el escenario, recursos y criterios de evaluación
             </p>
           </div>
         </div>
@@ -366,7 +381,7 @@ export default function NewCasePage() {
           </TabsTrigger>
           <TabsTrigger value="rubric" className="gap-2">
             <ClipboardList className="h-4 w-4" />
-            <span className="hidden sm:inline">rÃºbrica</span>
+            <span className="hidden sm:inline">rúbrica</span>
           </TabsTrigger>
         </TabsList>
 
@@ -376,21 +391,21 @@ export default function NewCasePage() {
             <div className="lg:col-span-2 space-y-6">
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-lg">informaciÃ³n del caso</CardTitle>
+                  <CardTitle className="text-lg">información del caso</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="title">TÃ­tulo del caso</Label>
+                    <Label htmlFor="title">Título del caso</Label>
                     <Input
                       id="title"
-                      placeholder="Ej: Manejo de diabetes en paciente geriÃ¡trico"
+                      placeholder="Ej: Manejo de diabetes en paciente geriátrico"
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="scenario">Escenario clÃ­nico</Label>
+                    <Label htmlFor="scenario">Escenario clínico</Label>
                     <div className="border rounded-lg">
                       {/* Simple toolbar */}
                       <div className="flex items-center gap-1 p-2 border-b bg-muted/30">
@@ -412,7 +427,7 @@ export default function NewCasePage() {
                       </div>
                       <Textarea
                         id="scenario"
-                        placeholder="Describe el escenario clÃ­nico detalladamente. Incluye datos del paciente, sÃ­ntomas, contexto y la pregunta de investigaciÃ³n que deben resolver los estudiantes..."
+                        placeholder="Describe el escenario clínico detalladamente. Incluye datos del paciente, síntomas, contexto y la pregunta de investigación que deben resolver los estudiantes..."
                         className="min-h-[250px] border-0 focus-visible:ring-0 resize-none"
                         value={scenario}
                         onChange={(e) => setScenario(e.target.value)}
@@ -429,7 +444,7 @@ export default function NewCasePage() {
             <div className="space-y-6">
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-lg">ConfiguraciÃ³n</CardTitle>
+                  <CardTitle className="text-lg">Configuración</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
@@ -481,12 +496,12 @@ export default function NewCasePage() {
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
                     <Users className="h-5 w-5" />
-                    AsignaciÃ³n
+                    Asignación
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <p className="text-sm text-muted-foreground">
-                    Selecciona estudiantes para dejar el caso listo para publicaciÃ³n.
+                    Selecciona estudiantes para dejar el caso listo para publicación.
                   </p>
                   <Input
                     placeholder="Buscar estudiante..."
@@ -540,9 +555,9 @@ export default function NewCasePage() {
             {/* Search Articles */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">Buscar artÃ­culos</CardTitle>
+                <CardTitle className="text-lg">Buscar artículos</CardTitle>
                 <CardDescription>
-                  Busca y AÃ±ade artÃ­culos como recursos del caso
+                  Busca y Añade artículos como recursos del caso
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -550,7 +565,7 @@ export default function NewCasePage() {
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                      placeholder="Buscar artÃ­culos..."
+                      placeholder="Buscar artículos..."
                       className="pl-10"
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
@@ -561,6 +576,18 @@ export default function NewCasePage() {
                     {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Buscar'}
                   </Button>
                 </div>
+
+                {resourceSearchError && (
+                  <div className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
+                    {resourceSearchError}
+                  </div>
+                )}
+
+                {hasSearchedResources && !isSearching && searchResults.length === 0 && !resourceSearchError && (
+                  <p className="text-sm text-muted-foreground">
+                    Sin resultados. Intenta con otro termino clinico o una consulta mas especifica.
+                  </p>
+                )}
 
                 {searchResults.length > 0 && (
                   <ScrollArea className="h-[400px] border rounded-lg">
@@ -590,7 +617,7 @@ export default function NewCasePage() {
                                   }
                                 }}
                               >
-                                {isRequired ? 'Obligatorio' : 'aÃ±adir obligatorio'}
+                                {isRequired ? 'Obligatorio' : 'añadir obligatorio'}
                               </Button>
                               <Button
                                 variant={isOptional ? 'secondary' : 'outline'}
@@ -604,7 +631,7 @@ export default function NewCasePage() {
                                   }
                                 }}
                               >
-                                {isOptional ? 'Opcional' : 'aÃ±adir opcional'}
+                                {isOptional ? 'Opcional' : 'añadir opcional'}
                               </Button>
                             </div>
                           </div>
@@ -622,7 +649,7 @@ export default function NewCasePage() {
                 <CardHeader>
                   <CardTitle className="text-lg text-success flex items-center gap-2">
                     <BookOpen className="h-5 w-5" />
-                    artÃ­culos obligatorios ({requiredArticles.length})
+                    artículos obligatorios ({requiredArticles.length})
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -651,7 +678,7 @@ export default function NewCasePage() {
                     </ScrollArea>
                   ) : (
                     <p className="text-sm text-muted-foreground text-center py-8">
-                      Sin artÃ­culos obligatorios
+                      Sin artículos obligatorios
                     </p>
                   )}
                 </CardContent>
@@ -661,7 +688,7 @@ export default function NewCasePage() {
                 <CardHeader>
                   <CardTitle className="text-lg text-muted-foreground flex items-center gap-2">
                     <BookOpen className="h-5 w-5" />
-                    artÃ­culos opcionales ({optionalArticles.length})
+                    artículos opcionales ({optionalArticles.length})
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -690,7 +717,7 @@ export default function NewCasePage() {
                     </ScrollArea>
                   ) : (
                     <p className="text-sm text-muted-foreground text-center py-8">
-                      Sin artÃ­culos opcionales
+                      Sin artículos opcionales
                     </p>
                   )}
                 </CardContent>
@@ -705,14 +732,14 @@ export default function NewCasePage() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-lg">Preguntas guÃ­a</CardTitle>
+                  <CardTitle className="text-lg">Preguntas guía</CardTitle>
                   <CardDescription>
-                    Define las preguntas que orientarÃ¡n a los estudiantes
+                    Define las preguntas que orientarán a los estudiantes
                   </CardDescription>
                 </div>
                 <Button onClick={addQuestion}>
                   <Plus className="mr-2 h-4 w-4" />
-                  aÃ±adir pregunta
+                  añadir pregunta
                 </Button>
               </div>
             </CardHeader>
@@ -730,7 +757,7 @@ export default function NewCasePage() {
                       <div className="flex items-center gap-2">
                         <Badge variant="outline">{index + 1}</Badge>
                         <Input
-                          placeholder="Escribe la pregunta guÃ­a..."
+                          placeholder="Escribe la pregunta guía..."
                           value={question.question}
                           onChange={(e) => updateQuestion(question.id, { question: e.target.value })}
                         />
@@ -748,7 +775,7 @@ export default function NewCasePage() {
                             <SelectContent>
                               <SelectItem value="access">Acceso</SelectItem>
                               <SelectItem value="process">Procesamiento</SelectItem>
-                              <SelectItem value="communicate">ComunicaciÃ³n</SelectItem>
+                              <SelectItem value="communicate">Comunicación</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -792,14 +819,14 @@ export default function NewCasePage() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-lg">rÃºbrica de evaluaciÃ³n</CardTitle>
+                  <CardTitle className="text-lg">rúbrica de evaluación</CardTitle>
                   <CardDescription>
-                    Define los criterios y niveles de desempeÃ±o
+                    Define los criterios y niveles de desempeño
                   </CardDescription>
                 </div>
                 <Button onClick={addRubricItem}>
                   <Plus className="mr-2 h-4 w-4" />
-                  aÃ±adir criterio
+                  añadir criterio
                 </Button>
               </div>
             </CardHeader>
@@ -827,7 +854,7 @@ export default function NewCasePage() {
                               <SelectContent>
                                 <SelectItem value="access">Acceso</SelectItem>
                                 <SelectItem value="process">Procesamiento</SelectItem>
-                                <SelectItem value="communicate">ComunicaciÃ³n</SelectItem>
+                                <SelectItem value="communicate">Comunicación</SelectItem>
                               </SelectContent>
                             </Select>
                             <div className="flex items-center gap-1">
@@ -847,7 +874,7 @@ export default function NewCasePage() {
                             <div className="space-y-1">
                               <Label className="text-xs text-success">Excelente</Label>
                               <Textarea
-                                placeholder="Describe el desempeÃ±o excelente..."
+                                placeholder="Describe el desempeño excelente..."
                                 className="min-h-[80px] text-sm"
                                 value={item.levels.excellent}
                                 onChange={(e) => updateRubricItem(item.id, {
@@ -858,7 +885,7 @@ export default function NewCasePage() {
                             <div className="space-y-1">
                               <Label className="text-xs text-warning">Bueno</Label>
                               <Textarea
-                                placeholder="Describe el desempeÃ±o bueno..."
+                                placeholder="Describe el desempeño bueno..."
                                 className="min-h-[80px] text-sm"
                                 value={item.levels.good}
                                 onChange={(e) => updateRubricItem(item.id, {
@@ -869,7 +896,7 @@ export default function NewCasePage() {
                             <div className="space-y-1">
                               <Label className="text-xs text-destructive">Necesita mejorar</Label>
                               <Textarea
-                                placeholder="Describe el desempeÃ±o a mejorar..."
+                                placeholder="Describe el desempeño a mejorar..."
                                 className="min-h-[80px] text-sm"
                                 value={item.levels.needs_improvement}
                                 onChange={(e) => updateRubricItem(item.id, {
@@ -894,7 +921,7 @@ export default function NewCasePage() {
 
               <div className="mt-4 p-4 bg-muted/50 rounded-lg">
                 <p className="text-sm font-medium">
-                  Total mÃ¡ximo: {rubricItems.reduce((sum, item) => sum + item.maxPoints, 0)} puntos
+                  Total máximo: {rubricItems.reduce((sum, item) => sum + item.maxPoints, 0)} puntos
                 </p>
               </div>
             </CardContent>
@@ -904,4 +931,5 @@ export default function NewCasePage() {
     </div>
   )
 }
+
 

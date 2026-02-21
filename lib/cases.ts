@@ -5,11 +5,12 @@ import type {
   GuidingQuestion,
   RubricItem,
 } from '@/types'
-import { api } from './api-client'
+import { ApiHttpError, api } from './api-client'
 import { isConnectivityError } from './api-errors'
 import {
   STUDENT_FALLBACK_KEYS,
   createLocalId,
+  getScopedStorageKey,
   isBackendReachable,
   readLocalStorage,
   writeLocalStorage,
@@ -248,19 +249,28 @@ function serializeCaseStudy(caseStudy: Partial<CaseStudy>): BackendCaseStudy {
 
 function normalizeDateTime(value?: string): string | undefined {
   if (!value) return undefined
-  if (value.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(value)) {
-    return value
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return `${trimmed}T00:00:00Z`
   }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return `${value}T00:00:00Z`
+
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(trimmed)) {
+    return `${trimmed}:00Z`
   }
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) {
-    return `${value}:00Z`
+
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(trimmed)) {
+    return `${trimmed}Z`
   }
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(value)) {
-    return `${value}Z`
+
+  const parsed = new Date(trimmed)
+  if (!Number.isNaN(parsed.getTime())) {
+    // Backend expects UTC without milliseconds: yyyy-MM-ddTHH:mm:ssZ
+    return parsed.toISOString().replace(/\.\d{3}Z$/, 'Z')
   }
-  return value
+
+  return trimmed
 }
 
 function buildLocalGuidingQuestions(): GuidingQuestion[] {
@@ -347,20 +357,28 @@ function buildDefaultLocalCases(): CaseStudy[] {
   ]
 }
 
+function getCaseStudiesStorageKey(): string {
+  return getScopedStorageKey(STUDENT_FALLBACK_KEYS.caseStudies)
+}
+
+function getCaseSubmissionsStorageKey(): string {
+  return getScopedStorageKey(STUDENT_FALLBACK_KEYS.caseSubmissions)
+}
+
 function readCasesLocal(): CaseStudy[] {
-  return readLocalStorage<CaseStudy[]>(STUDENT_FALLBACK_KEYS.caseStudies, [])
+  return readLocalStorage<CaseStudy[]>(getCaseStudiesStorageKey(), [])
 }
 
 function writeCasesLocal(cases: CaseStudy[]): void {
-  writeLocalStorage(STUDENT_FALLBACK_KEYS.caseStudies, cases)
+  writeLocalStorage(getCaseStudiesStorageKey(), cases)
 }
 
 function readSubmissionsLocal(): CaseSubmission[] {
-  return readLocalStorage<CaseSubmission[]>(STUDENT_FALLBACK_KEYS.caseSubmissions, [])
+  return readLocalStorage<CaseSubmission[]>(getCaseSubmissionsStorageKey(), [])
 }
 
 function writeSubmissionsLocal(submissions: CaseSubmission[]): void {
-  writeLocalStorage(STUDENT_FALLBACK_KEYS.caseSubmissions, submissions)
+  writeLocalStorage(getCaseSubmissionsStorageKey(), submissions)
 }
 
 function upsertCaseLocal(caseStudy: CaseStudy): void {
@@ -599,18 +617,20 @@ export const casesApi = {
         return fallbackSubmission
       }),
 
-  getMySubmission: (caseId: string) =>
-    api
-      .get<CaseSubmission>(`/cases/${caseId}/submission`)
-      .then((response) => {
-        upsertSubmissionLocal(response)
-        return response
-      })
-      .catch(async (error) => {
-        if (!isConnectivityError(error)) throw error
-        await isBackendReachable()
-        const local = readSubmissionsLocal().find((submission) => submission.caseId === caseId)
-        if (local) return local
-        throw new Error('Submission not found')
-      }),
+  getMySubmission: async (caseId: string) => {
+    try {
+      const response = await api.get<CaseSubmission | undefined>(`/cases/${caseId}/submission`)
+      if (!response) return null
+      upsertSubmissionLocal(response)
+      return response
+    } catch (error) {
+      if (error instanceof ApiHttpError && error.status === 404) {
+        return null
+      }
+      if (!isConnectivityError(error)) throw error
+      await isBackendReachable()
+      const local = readSubmissionsLocal().find((submission) => submission.caseId === caseId)
+      return local ?? null
+    }
+  },
 }

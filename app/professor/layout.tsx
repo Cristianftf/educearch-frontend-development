@@ -31,6 +31,7 @@ import {
   User,
   ChevronRight,
   Search,
+  MessageCircle,
 } from 'lucide-react'
 
 const navigation = [
@@ -41,6 +42,7 @@ const navigation = [
   { name: 'Estudiantes', href: '/professor/students', icon: Users },
   { name: 'Analíticas', href: '/professor/analytics', icon: BarChart3 },
   { name: 'Búsqueda', href: '/professor/search', icon: Search },
+  { name: 'Chat', href: '/professor/chat', icon: MessageCircle },
 ]
 
 export default function ProfessorLayout({

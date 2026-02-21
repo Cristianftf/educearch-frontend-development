@@ -3,6 +3,7 @@ import { api } from './api-client'
 import {
   STUDENT_FALLBACK_KEYS,
   createLocalId,
+  getScopedStorageKey,
   readLocalStorage,
   writeLocalStorage,
 } from './student-resilience'
@@ -84,11 +85,14 @@ function normalizeSubmission(raw: Record<string, any>): CaseSubmission {
 }
 
 function readSubmissionsLocal(): CaseSubmission[] {
-  return readLocalStorage<CaseSubmission[]>(STUDENT_FALLBACK_KEYS.caseSubmissions, [])
+  return readLocalStorage<CaseSubmission[]>(
+    getScopedStorageKey(STUDENT_FALLBACK_KEYS.caseSubmissions),
+    []
+  )
 }
 
 function writeSubmissionsLocal(submissions: CaseSubmission[]): void {
-  writeLocalStorage(STUDENT_FALLBACK_KEYS.caseSubmissions, submissions)
+  writeLocalStorage(getScopedStorageKey(STUDENT_FALLBACK_KEYS.caseSubmissions), submissions)
 }
 
 function upsertSubmissionLocal(submission: CaseSubmission): void {

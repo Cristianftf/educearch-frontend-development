@@ -1,5 +1,6 @@
 package com.uci.competencia.controller.api;
 
+import com.uci.competencia.exception.ResourceNotFoundException;
 import com.uci.competencia.model.dto.request.UserBatchImportDTO;
 import com.uci.competencia.model.dto.response.AuditLogDTO;
 import com.uci.competencia.model.dto.response.UserDTO;
@@ -154,11 +155,28 @@ public class AdminController {
     }
 
     @DeleteMapping("/users/{id}")
-    public ResponseEntity<Void> deleteUser(@PathVariable String id) {
+    public ResponseEntity<Map<String, Object>> deleteUser(@PathVariable String id) {
         log.info("Deleting user: {}", id);
 
-        adminService.deleteUser(id);
-        return ResponseEntity.noContent().build();
+        try {
+            adminService.deleteUser(id);
+            return ResponseEntity.noContent().build();
+        } catch (ResourceNotFoundException ex) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "User not found");
+            error.put("message", ex.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
+        } catch (IllegalArgumentException ex) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "Invalid user id");
+            error.put("message", ex.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+        } catch (IllegalStateException ex) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "User deletion conflict");
+            error.put("message", ex.getMessage());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+        }
     }
 
     @PutMapping("/users/{id}/role")
@@ -625,6 +643,25 @@ public class AdminController {
         } catch (Exception e) {
             log.error("Error deleting alert: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
+    }
+
+    @PostMapping("/external-apis/check")
+    public ResponseEntity<Map<String, Object>> checkExternalApis(
+            @RequestBody(required = false) Map<String, Object> request) {
+        String queryText = request != null ? Objects.toString(request.get("queryText"), null) : null;
+        log.info("Checking external APIs connectivity with query: {}", queryText);
+
+        try {
+            Map<String, Object> response = adminService.checkExternalApis(queryText);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error checking external APIs: {}", e.getMessage());
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("status", "DOWN");
+            errorResponse.put("message", "Error al comprobar APIs externas: " + e.getMessage());
+            errorResponse.put("testedAt", LocalDateTime.now());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
         }
     }
 

@@ -304,7 +304,7 @@ export function CSVUserImporter() {
               {/* Template Download */}
               <div className="flex justify-between items-center p-3 bg-blue-50 rounded-lg border border-blue-200">
                 <div className="text-sm text-blue-900">
-                  ðŸ“‹ Necesitas ayuda con el formato? Descarga la plantilla
+                  ¿Necesitas ayuda con el formato? Descarga la plantilla
                 </div>
                 <Button
                   variant="outline"
@@ -451,7 +451,7 @@ export function CSVUserImporter() {
                           )}
                           {user.importStatus === "warning" && (
                             <Badge className="bg-yellow-100 text-yellow-800">
-                              âš ï¸ Aviso
+                              Aviso
                             </Badge>
                           )}
                           {user.importStatus === "error" && (
@@ -547,7 +547,7 @@ export function CSVUserImporter() {
                     <Alert className="border-green-200 bg-green-50">
                       <CheckCircle className="w-4 h-4 text-green-700" />
                       <AlertDescription className="text-green-800">
-                        âœ… Se importaron exitosamente {importStats.imported} usuario
+                        Se importaron exitosamente {importStats.imported} usuario
                         {importStats.imported !== 1 ? "s" : ""}.
                         {importStats.updated > 0 && (
                           <> Se actualizaron {importStats.updated} usuario{importStats.updated !== 1 ? "s" : ""}.</>
@@ -610,3 +610,4 @@ export function CSVUserImporter() {
     </div>
   )
 }
+

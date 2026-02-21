@@ -28,6 +28,8 @@ type BibliographyResponseDTO = {
     sampleSize?: number
     hasConflictOfInterest?: boolean
     doi?: string
+    source?: string
+    sourceUrl?: string
   }>
 }
 
@@ -44,6 +46,8 @@ const mapArticle = (article: NonNullable<BibliographyResponseDTO['articles']>[nu
   sampleSize: article.sampleSize,
   hasConflictOfInterest: article.hasConflictOfInterest ?? false,
   doi: article.doi,
+  source: article.source,
+  sourceUrl: article.sourceUrl,
 })
 
 const mapBibliography = (dto: BibliographyResponseDTO): Bibliography => ({
@@ -127,6 +131,8 @@ export const bibliographyApi = {
           journal: article.journal,
           year: article.year,
           doi: article.doi,
+          source: article.source,
+          sourceUrl: article.sourceUrl,
         })),
       })
       .then(mapBibliography)

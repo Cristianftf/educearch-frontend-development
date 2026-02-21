@@ -1,6 +1,7 @@
 import type { SearchQuery, SearchSession, MeshTerm, SearchResult } from '@/types'
-import { api } from './api-client'
+import { api, ApiHttpError } from './api-client'
 import { isConnectivityError } from './api-errors'
+import { getCachedHealthSearchResults, searchHealthSources } from './health-sources'
 import {
   STUDENT_FALLBACK_KEYS,
   createLocalId,
@@ -25,6 +26,8 @@ type SearchResponseDTO = {
     sampleSize?: number
     hasConflictOfInterest?: boolean
     doi?: string
+    source?: string
+    sourceUrl?: string
   }>
   metadata?: {
     totalResults?: number
@@ -68,6 +71,8 @@ function mapResults(results: SearchResponseDTO['results'] = []): SearchResult[] 
       sampleSize,
       hasConflictOfInterest: item.hasConflictOfInterest ?? false,
       doi: item.doi,
+      source: item.source,
+      sourceUrl: item.sourceUrl,
     }
   })
 }
@@ -88,6 +93,8 @@ function buildSearchRequest(query: SearchQuery) {
       studyTypes: filters.studyTypes,
       minSampleSize: filters.minSampleSize,
       language: filters.languages?.[0],
+      hasFullText: filters.hasFullText,
+      maxResults: filters.maxResults,
     },
     context: {
       sessionId: query.id,
@@ -155,6 +162,13 @@ function normalizeSearchResult(value: unknown, index: number): SearchResult {
         : undefined,
     hasConflictOfInterest: Boolean(item.hasConflictOfInterest),
     doi: typeof item.doi === 'string' ? item.doi : undefined,
+    source: typeof item.source === 'string' ? item.source : undefined,
+    sourceUrl:
+      typeof item.sourceUrl === 'string'
+        ? item.sourceUrl
+        : typeof item.fullTextUrl === 'string'
+          ? item.fullTextUrl
+          : undefined,
   }
 }
 
@@ -190,9 +204,7 @@ function normalizeSearchSession(value: unknown, fallbackQuery?: SearchQuery): Se
   const query = normalizeSearchQuery(item.query, fallbackQuery?.id)
   const results = Array.isArray(item.results)
     ? item.results.map((result, index) => normalizeSearchResult(result, index))
-    : fallbackQuery
-      ? buildFallbackResults(fallbackQuery)
-      : []
+    : []
 
   return {
     id: typeof item.id === 'string' && item.id ? item.id : createLocalId('search'),
@@ -248,54 +260,12 @@ function mergeSearchHistory(primary: SearchQuery[], secondary: SearchQuery[]): S
   return merged
 }
 
-function buildFallbackSuggestions(term: string): MeshTerm[] {
-  const cleaned = term.trim()
-  if (!cleaned) return []
-  return [
-    {
-      id: cleaned.toUpperCase(),
-      term: cleaned,
-      description: 'Sugerencia local de respaldo',
-    },
-  ]
-}
-
-function buildFallbackResults(query: SearchQuery): SearchResult[] {
-  const year = new Date().getFullYear()
-  const joinedTerms = query.terms.map((t) => t.term).filter(Boolean).join(' ')
-  const baseTerm = joinedTerms || query.rawQuery || 'salud'
-  const safeTerm = baseTerm.trim()
-
-  return [
-    {
-      id: `fallback-${Date.now()}-1`,
-      pmid: '',
-      title: `Resultado simulado 1 sobre ${safeTerm}`,
-      authors: ['Sistema Local'],
-      journal: 'Fallback Journal',
-      year,
-      abstract: 'Resultado de respaldo generado localmente por fallo de comunicacion con API.',
-      studyType: 'Unknown',
-      evidenceLevel: 0,
-      sampleSize: undefined,
-      hasConflictOfInterest: false,
-      doi: undefined,
-    },
-    {
-      id: `fallback-${Date.now()}-2`,
-      pmid: '',
-      title: `Resultado simulado 2 sobre ${safeTerm}`,
-      authors: ['Sistema Local'],
-      journal: 'Fallback Journal',
-      year: year - 1,
-      abstract: 'Usa estos datos solo como referencia temporal mientras se restablece la API.',
-      studyType: 'Unknown',
-      evidenceLevel: 0,
-      sampleSize: undefined,
-      hasConflictOfInterest: false,
-      doi: undefined,
-    },
-  ]
+function buildUnavailableSearchError(backendReachable: boolean): Error {
+  return new Error(
+    backendReachable
+      ? 'No fue posible obtener resultados verificables en este momento. Intenta nuevamente.'
+      : 'No hay conectividad para recuperar resultados reales.'
+  )
 }
 
 function canUseLocalFallback(): boolean {
@@ -309,7 +279,7 @@ export const searchApi = {
       .catch((error) => {
         if (!isConnectivityError(error)) throw error
         if (!canUseLocalFallback()) throw error
-        return buildFallbackSuggestions(term)
+        return []
       }),
 
   execute: async (query: Omit<SearchQuery, 'createdAt'> | SearchQuery) => {
@@ -331,28 +301,50 @@ export const searchApi = {
       })
       return session
     } catch (error) {
-      if (!isConnectivityError(error)) throw error
+      const shouldFallback =
+        isConnectivityError(error) || (error instanceof ApiHttpError && error.status >= 500)
+      if (!shouldFallback) throw error
       if (!canUseLocalFallback()) throw error
       const backendReachable = await isBackendReachable()
-      const fallbackResults = buildFallbackResults(normalizedQuery)
-      const session = {
-        id: `fallback-search-${Date.now()}`,
-        query: normalizedQuery,
-        results: fallbackResults.map((result) => ({
-          ...result,
-          abstract: backendReachable
-            ? result.abstract
-            : 'Respaldo local activado por perdida de conexion con backend/API.',
-        })),
-        totalResults: fallbackResults.length,
-        executedAt: new Date().toISOString(),
-      } as SearchSession
-      upsertSearchSessionLocal(session)
-      upsertSearchHistoryLocal({
-        ...normalizedQuery,
-        resultCount: session.totalResults,
-      })
-      return session
+      const externalFallback = await searchHealthSources(normalizedQuery).catch(() => null)
+
+      if (externalFallback?.results?.length) {
+        const session = {
+          id: `external-search-${Date.now()}`,
+          query: normalizedQuery,
+          results: externalFallback.results,
+          totalResults: externalFallback.results.length,
+          executedAt: new Date().toISOString(),
+        } as SearchSession
+        upsertSearchSessionLocal(session)
+        upsertSearchHistoryLocal({
+          ...normalizedQuery,
+          resultCount: session.totalResults,
+        })
+        return session
+      }
+
+      const cachedExternal = getCachedHealthSearchResults(normalizedQuery)
+      if (cachedExternal?.results?.length) {
+        const session = {
+          id: `cached-search-${Date.now()}`,
+          query: normalizedQuery,
+          results: cachedExternal.results.map((result) => ({
+            ...result,
+            abstract: `${result.abstract}\n\n[Datos recuperados desde cache local de ${cachedExternal.provider}]`,
+          })),
+          totalResults: cachedExternal.results.length,
+          executedAt: new Date().toISOString(),
+        } as SearchSession
+        upsertSearchSessionLocal(session)
+        upsertSearchHistoryLocal({
+          ...normalizedQuery,
+          resultCount: session.totalResults,
+        })
+        return session
+      }
+
+      throw buildUnavailableSearchError(backendReachable)
     }
   },
 
@@ -427,33 +419,11 @@ export const searchApi = {
       .catch(async (error) => {
         if (!isConnectivityError(error)) throw error
         if (!canUseLocalFallback()) throw error
-        await isBackendReachable()
+        const backendReachable = await isBackendReachable()
         const session = readSearchSessionsLocal().find((entry) => entry.id === sessionId)
         if (session) {
           return session
         }
-        const fallbackQuery = normalizeSearchQuery(
-          {
-            id: createLocalId('query'),
-            terms: [{ id: 'LOCAL', term: 'salud', description: 'Respaldo local' }],
-            operators: [],
-            filters: {},
-            rawQuery: 'salud',
-            createdAt: new Date().toISOString(),
-          },
-          createLocalId('query')
-        )
-        const fallbackSession = normalizeSearchSession(
-          {
-            id: sessionId,
-            query: fallbackQuery,
-            results: buildFallbackResults(fallbackQuery),
-            totalResults: 2,
-            executedAt: new Date().toISOString(),
-          },
-          fallbackQuery
-        )
-        upsertSearchSessionLocal(fallbackSession)
-        return fallbackSession
+        throw buildUnavailableSearchError(backendReachable)
       }),
 }

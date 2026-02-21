@@ -4,13 +4,24 @@ export class ApiHttpError extends Error {
   readonly status: number
   readonly statusText: string
   readonly endpoint: string
+  readonly details?: string
+  readonly payload?: unknown
 
-  constructor(endpoint: string, status: number, statusText: string) {
-    super(`API Error: ${status} ${statusText}`)
+  constructor(
+    endpoint: string,
+    status: number,
+    statusText: string,
+    details?: string,
+    payload?: unknown
+  ) {
+    const suffix = details ? ` - ${details}` : ''
+    super(`API Error: ${status} ${statusText}${suffix}`)
     this.name = 'ApiHttpError'
     this.endpoint = endpoint
     this.status = status
     this.statusText = statusText
+    this.details = details
+    this.payload = payload
   }
 }
 
@@ -69,6 +80,27 @@ class ApiClient {
       headers,
     })
     if (!response.ok) {
+      let details: string | undefined
+      let payload: unknown
+      try {
+        const raw = await response.text()
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw) as Record<string, unknown>
+            payload = parsed
+            if (typeof parsed.message === 'string' && parsed.message.trim()) {
+              details = parsed.message.trim()
+            } else if (typeof parsed.error === 'string' && parsed.error.trim()) {
+              details = parsed.error.trim()
+            }
+          } catch {
+            details = raw.trim()
+          }
+        }
+      } catch {
+        details = undefined
+      }
+
       if (response.status === 401) {
         const isAuthEndpoint =
           endpoint.startsWith('/auth/login') ||
@@ -81,7 +113,7 @@ class ApiClient {
           window.location.href = '/login'
         }
       }
-      throw new ApiHttpError(endpoint, response.status, response.statusText)
+      throw new ApiHttpError(endpoint, response.status, response.statusText, details, payload)
     }
 
     if (responseType === 'blob') {

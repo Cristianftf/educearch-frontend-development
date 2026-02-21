@@ -28,7 +28,7 @@ public class SearchSession {
     private Integer resultsCount;
     private String searchEngine;
     
-    @Lob
+    @Column(columnDefinition = "TEXT")
     private String filtersApplied;
     
     private Boolean isPractice = false;
@@ -36,7 +36,7 @@ public class SearchSession {
 
     private Boolean isFavorite = false;
     
-    @Lob
+    @Column(columnDefinition = "TEXT")
     private String feedback;
     
     @PrePersist

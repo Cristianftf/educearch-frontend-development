@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { evaluationApi } from '@/lib/api'
-import type { CaseSubmission, Evaluation, CompetencyType } from '@/types'
+import { ApiHttpError } from '@/lib/api-client'
+import type { CaseSubmission, CompetencyType } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -64,6 +65,7 @@ export default function ProfessorEvaluationsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [activeTab, setActiveTab] = useState('pending')
+  const [error, setError] = useState<string | null>(null)
 
   // Evaluation form state
   const [scores, setScores] = useState<Record<CompetencyType, number>>({
@@ -80,14 +82,21 @@ export default function ProfessorEvaluationsPage() {
 
   const loadSubmissions = useCallback(async () => {
     setIsLoading(true)
+    setError(null)
     try {
-      const [pending, reviewed] = await Promise.all([
+      const [pendingResult, reviewedResult] = await Promise.allSettled([
         evaluationApi.getPending(),
         evaluationApi.getReviewed(),
       ])
+      const pending = pendingResult.status === 'fulfilled' ? pendingResult.value : []
+      const reviewed = reviewedResult.status === 'fulfilled' ? reviewedResult.value : []
       setSubmissions([...pending, ...reviewed])
+      if (pendingResult.status === 'rejected' || reviewedResult.status === 'rejected') {
+        setError('No se pudieron cargar todas las entregas.')
+      }
     } catch (err) {
       console.error('[professor evaluations] Error loading submissions:', err)
+      setError('No se pudieron cargar las entregas.')
     } finally {
       setIsLoading(false)
     }
@@ -108,10 +117,12 @@ export default function ProfessorEvaluationsPage() {
   const handleSubmitEvaluation = useCallback(async () => {
     if (!selectedSubmission) return
 
-    const totalScore =
+    const totalScore = Math.round(
       (scores.access + scores.process + scores.communicate) / 3
+    )
 
     setIsSubmitting(true)
+    setError(null)
     try {
       await evaluationApi.submit(selectedSubmission.id, {
         submissionId: selectedSubmission.id,
@@ -126,6 +137,11 @@ export default function ProfessorEvaluationsPage() {
       setSelectedSubmission(null)
     } catch (err) {
       console.error('[v0] Error submitting evaluation:', err)
+      if (err instanceof ApiHttpError) {
+        setError(err.details || err.message)
+      } else {
+        setError('No se pudo enviar la evaluacion.')
+      }
     } finally {
       setIsSubmitting(false)
     }
@@ -156,6 +172,12 @@ export default function ProfessorEvaluationsPage() {
           Revisa y evalúa las entregas de tus estudiantes
         </p>
       </div>
+
+      {error && (
+        <div className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
+          {error}
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Submissions List */}

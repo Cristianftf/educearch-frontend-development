@@ -40,6 +40,15 @@ const toPercent = (value?: number) => {
   return value <= 1 ? Math.round(value * 100) : Math.round(value)
 }
 
+const emptyDashboardData: ProfessorAnalyticsOverview = {
+  studentCount: 0,
+  averageProgress: { access: 0, process: 0, communicate: 0 },
+  lowProgressStudents: [],
+  commonSearchTerms: [],
+  problematicTerms: [],
+  studentCompetencies: [],
+}
+
 export default function ProfessorDashboard() {
   const { user } = useAuth()
   const [dashboardData, setDashboardData] = useState<ProfessorAnalyticsOverview | null>(null)
@@ -51,15 +60,32 @@ export default function ProfessorDashboard() {
     setIsLoading(true)
     setError(null)
     try {
-      const [analytics, submissions] = await Promise.all([
+      const [analyticsResult, submissionsResult] = await Promise.allSettled([
         professorAnalyticsApi.getClassOverview(),
         evaluationApi.getPending(),
       ])
-      setDashboardData(analytics)
-      setPendingSubmissions(submissions)
+      if (analyticsResult.status === 'fulfilled') {
+        setDashboardData(analyticsResult.value)
+      } else {
+        console.error('[professor dashboard] Error loading analytics:', analyticsResult.reason)
+        setDashboardData(emptyDashboardData)
+      }
+
+      if (submissionsResult.status === 'fulfilled') {
+        setPendingSubmissions(submissionsResult.value)
+      } else {
+        console.error('[professor dashboard] Error loading pending submissions:', submissionsResult.reason)
+        setPendingSubmissions([])
+      }
+
+      if (analyticsResult.status === 'rejected' || submissionsResult.status === 'rejected') {
+        setError('Algunos datos no se pudieron cargar.')
+      }
     } catch (err) {
       console.error('[professor dashboard] Error loading data:', err)
       setError('No se pudo cargar el panel.')
+      setDashboardData(emptyDashboardData)
+      setPendingSubmissions([])
     } finally {
       setIsLoading(false)
     }

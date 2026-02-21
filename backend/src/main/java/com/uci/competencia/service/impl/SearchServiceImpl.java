@@ -372,10 +372,9 @@ public class SearchServiceImpl implements SearchService {
             session.setIsPractice(request.getContext() != null && Boolean.TRUE.equals(request.getContext().getIsPractice()));
             session.setFiltersApplied(objectMapper.writeValueAsString(request));
 
-            String userId = getCurrentUserId();
-            if (userId != null) {
-                Optional<User> user = userRepository.findById(userId);
-                user.ifPresent(session::setUser);
+            String userIdentifier = getCurrentUserIdentifier();
+            if (userIdentifier != null && !userIdentifier.isBlank()) {
+                findUserByIdentifier(userIdentifier).ifPresent(session::setUser);
             }
 
             SearchSession saved = searchSessionRepository.save(session);
@@ -395,11 +394,34 @@ public class SearchServiceImpl implements SearchService {
         return String.join(" ", request.getQuery().getTerms());
     }
 
-    private String getCurrentUserId() {
+    private String getCurrentUserIdentifier() {
         Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         if (principal instanceof UserDetails) {
             return ((UserDetails) principal).getUsername();
         }
         return principal != null ? principal.toString() : null;
+    }
+
+    private Optional<User> findUserByIdentifier(String identifier) {
+        if (identifier == null || identifier.isBlank()) {
+            return Optional.empty();
+        }
+
+        String normalized = identifier.trim();
+        try {
+            Optional<User> byId = userRepository.findById(normalized);
+            if (byId.isPresent()) {
+                return byId;
+            }
+        } catch (Exception e) {
+            log.debug("Identifier {} is not a direct user ID", normalized);
+        }
+
+        Optional<User> byEmail = userRepository.findByEmail(normalized);
+        if (byEmail.isPresent()) {
+            return byEmail;
+        }
+
+        return userRepository.findByUsername(normalized);
     }
 }

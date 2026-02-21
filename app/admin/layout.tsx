@@ -33,6 +33,7 @@ import {
   ChevronRight,
   Server,
   HardDrive,
+  MessageCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -43,6 +44,7 @@ const adminNavItems = [
   { href: "/admin/system", label: "Sistema", icon: Server },
   { href: "/admin/health", label: "Salud del Sistema", icon: Activity },
   { href: "/admin/settings", label: "Configuración", icon: Settings },
+  { href: "/admin/chat", label: "Chat", icon: MessageCircle },
 ]
 
 export default function AdminLayout({

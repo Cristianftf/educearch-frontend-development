@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
+import { AdminExternalApisMonitor } from "@/components/admin-external-apis-monitor"
 import { adminSystemApi } from "@/lib/admin-system"
 import type { SystemOverview } from "@/types"
 import {
@@ -258,6 +259,8 @@ export default function AdminSystemPage() {
           {error}
         </div>
       )}
+
+      <AdminExternalApisMonitor />
 
       {/* System Info Cards */}
       <div className="grid gap-4 md:grid-cols-3">

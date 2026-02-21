@@ -36,6 +36,7 @@ import {
   FileText,
   BarChart3,
   FolderOpen,
+  MessageCircle,
   Menu,
   X,
   LogOut,
@@ -49,6 +50,7 @@ const navigation = [
   { name: 'Verificación', href: '/student/verify', icon: ShieldCheck },
   { name: 'Bibliografías', href: '/student/bibliography', icon: FileText },
   { name: 'Casos Asignados', href: '/student/cases', icon: FolderOpen },
+  { name: 'Chat', href: '/student/chat', icon: MessageCircle },
 ]
 
 function StudentDataProvider({ children }: { children: React.ReactNode }) {
@@ -246,7 +248,7 @@ export default function StudentLayout({
         <DialogHeader>
           <DialogTitle>Mi Perfil</DialogTitle>
           <DialogDescription>
-            InformaciÃ³n bÃ¡sica de tu cuenta.
+            Información básica de tu cuenta.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2 text-sm">
@@ -269,3 +271,4 @@ export default function StudentLayout({
     </StudentProvider>
   )
 }
+

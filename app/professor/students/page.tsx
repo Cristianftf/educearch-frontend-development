@@ -660,7 +660,7 @@ export default function ProfessorStudentsPage() {
                 </Card>
                 <Card>
                   <CardContent className="pt-4">
-                    <p className="text-xs text-muted-foreground">ComunicaciÃ³n</p>
+                    <p className="text-xs text-muted-foreground">Comunicación</p>
                     <p className="text-xl font-bold">{toScore(selectedStudentDetails.competencies.communicate.score)}%</p>
                   </CardContent>
                 </Card>
@@ -669,9 +669,9 @@ export default function ProfessorStudentsPage() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <Card>
                   <CardContent className="pt-4 text-sm space-y-1">
-                    <p>BÃºsquedas: {selectedStudentDetails.totalSearches}</p>
+                    <p>Búsquedas: {selectedStudentDetails.totalSearches}</p>
                     <p>Verificaciones: {selectedStudentDetails.totalVerifications}</p>
-                    <p>BibliografÃ­as: {selectedStudentDetails.totalBibliographies}</p>
+                    <p>Bibliografías: {selectedStudentDetails.totalBibliographies}</p>
                   </CardContent>
                 </Card>
                 <Card>
@@ -704,3 +704,4 @@ export default function ProfessorStudentsPage() {
     </div>
   )
 }
+

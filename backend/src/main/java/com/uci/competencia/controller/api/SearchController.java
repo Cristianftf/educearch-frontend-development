@@ -2,16 +2,22 @@ package com.uci.competencia.controller.api;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.uci.competencia.model.dto.request.ExternalHealthSearchRequestDTO;
 import com.uci.competencia.model.dto.request.SearchRequestDTO;
+import com.uci.competencia.model.dto.response.ExternalHealthSearchResponseDTO;
 import com.uci.competencia.model.dto.response.SearchResponseDTO;
 import com.uci.competencia.model.entity.SearchSession;
+import com.uci.competencia.model.entity.User;
 import com.uci.competencia.repository.SearchSessionRepository;
+import com.uci.competencia.repository.UserRepository;
 import com.uci.competencia.service.SearchService;
+import com.uci.competencia.service.external.HealthSearchProxyService;
 import com.uci.competencia.service.external.PubMedApiService;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -19,8 +25,13 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/search")
@@ -35,16 +46,41 @@ public class SearchController {
     private SearchSessionRepository searchSessionRepository;
 
     @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
     private ObjectMapper objectMapper;
 
     @Autowired
     private PubMedApiService pubMedApiService;
+
+    @Autowired
+    private HealthSearchProxyService healthSearchProxyService;
 
     @PostMapping("/execute")
     @PreAuthorize("hasAnyRole('STUDENT', 'PROFESSOR')")
     public ResponseEntity<SearchResponseDTO> executeSearch(@Valid @RequestBody SearchRequestDTO request) {
         log.info("Executing search with query: {}", request.getQuery().getTerms());
         SearchResponseDTO response = searchService.executeSearch(request);
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/external-fallback")
+    @PreAuthorize("hasAnyRole('STUDENT', 'PROFESSOR')")
+    public ResponseEntity<ExternalHealthSearchResponseDTO> executeExternalFallback(
+            @RequestBody ExternalHealthSearchRequestDTO request) {
+        String queryText = buildExternalQuery(request);
+        if (queryText.isBlank()) {
+            return ResponseEntity.ok(new ExternalHealthSearchResponseDTO(
+                "none",
+                List.of(),
+                0,
+                false,
+                java.time.Instant.now().toString()
+            ));
+        }
+        int maxResults = request != null && request.getMaxResults() != null ? request.getMaxResults() : 14;
+        ExternalHealthSearchResponseDTO response = healthSearchProxyService.search(queryText, maxResults, request);
         return ResponseEntity.ok(response);
     }
 
@@ -90,22 +126,26 @@ public class SearchController {
     public ResponseEntity<Map<String, Object>> getSearchHistory(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int limit) {
-        String userId = getCurrentUserId();
-        log.info("Getting search history for user: {}, page: {}, limit: {}", userId, page, limit);
+        String userIdentifier = getCurrentUserId();
+        Set<String> userIds = resolveUserIds(userIdentifier);
+        log.info("Getting search history for user: {}, page: {}, limit: {}", userIdentifier, page, limit);
 
         if (page < 1) page = 1;
         if (limit < 1 || limit > 100) limit = 10;
 
-        var pageable = org.springframework.data.domain.PageRequest.of(page - 1, limit);
-        var sessions = searchSessionRepository.findByUser_Id(userId, pageable);
+        List<SearchSession> sessions = loadSessionsForUserIds(userIds);
+        int total = sessions.size();
+        int from = Math.min((page - 1) * limit, total);
+        int to = Math.min(from + limit, total);
+        List<SearchSession> paged = sessions.subList(from, to);
 
-        List<Map<String, Object>> searches = sessions.getContent().stream()
+        List<Map<String, Object>> searches = paged.stream()
             .map(this::mapSessionToSearchQuery)
             .toList();
 
         Map<String, Object> response = new HashMap<>();
         response.put("searches", searches);
-        response.put("total", sessions.getTotalElements());
+        response.put("total", total);
 
         return ResponseEntity.ok(response);
     }
@@ -119,10 +159,11 @@ public class SearchController {
     public ResponseEntity<Map<String, Object>> updateSearch(
             @PathVariable String searchId,
             @RequestBody Map<String, Object> updates) {
-        String userId = getCurrentUserId();
-        log.info("Updating search {} for user: {}", searchId, userId);
+        String userIdentifier = getCurrentUserId();
+        Set<String> userIds = resolveUserIds(userIdentifier);
+        log.info("Updating search {} for user: {}", searchId, userIdentifier);
 
-        return searchSessionRepository.findByIdAndUser_Id(searchId, userId)
+        return findSessionForUser(searchId, userIds)
             .map(session -> {
                 Object favorite = updates.get("isFavorite");
                 if (favorite instanceof Boolean) {
@@ -141,10 +182,11 @@ public class SearchController {
     @DeleteMapping("/{searchId}")
     @PreAuthorize("hasAnyRole('STUDENT', 'PROFESSOR')")
     public ResponseEntity<Void> deleteSearch(@PathVariable String searchId) {
-        String userId = getCurrentUserId();
-        log.info("Deleting search {} for user: {}", searchId, userId);
+        String userIdentifier = getCurrentUserId();
+        Set<String> userIds = resolveUserIds(userIdentifier);
+        log.info("Deleting search {} for user: {}", searchId, userIdentifier);
 
-        var session = searchSessionRepository.findByIdAndUser_Id(searchId, userId);
+        var session = findSessionForUser(searchId, userIds);
         if (session.isEmpty()) {
             return ResponseEntity.status(org.springframework.http.HttpStatus.NOT_FOUND).build();
         }
@@ -170,10 +212,11 @@ public class SearchController {
     @GetMapping("/sessions/{sessionId}")
     @PreAuthorize("hasAnyRole('STUDENT', 'PROFESSOR')")
     public ResponseEntity<Map<String, Object>> getSearchSession(@PathVariable String sessionId) {
-        String userId = getCurrentUserId();
-        log.info("Getting search session {} for user: {}", sessionId, userId);
+        String userIdentifier = getCurrentUserId();
+        Set<String> userIds = resolveUserIds(userIdentifier);
+        log.info("Getting search session {} for user: {}", sessionId, userIdentifier);
 
-        return searchSessionRepository.findByIdAndUser_Id(sessionId, userId)
+        return findSessionForUser(sessionId, userIds)
             .map(session -> {
                 Map<String, Object> query = mapSessionToSearchQuery(session);
                 Map<String, Object> response = new HashMap<>();
@@ -188,6 +231,76 @@ public class SearchController {
                 return ResponseEntity.ok(response);
             })
             .orElse(ResponseEntity.notFound().build());
+    }
+
+    private List<SearchSession> loadSessionsForUserIds(Set<String> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return List.of();
+        }
+        var pageable = org.springframework.data.domain.PageRequest.of(
+            0,
+            1000,
+            Sort.by(Sort.Direction.DESC, "startedAt")
+        );
+        Map<String, SearchSession> merged = new LinkedHashMap<>();
+        for (String userId : userIds) {
+            searchSessionRepository.findByUser_Id(userId, pageable)
+                .forEach(session -> merged.putIfAbsent(session.getId(), session));
+        }
+        return merged.values().stream()
+            .sorted((left, right) -> {
+                var leftTime = left.getStartedAt();
+                var rightTime = right.getStartedAt();
+                if (leftTime == null && rightTime == null) return 0;
+                if (leftTime == null) return 1;
+                if (rightTime == null) return -1;
+                return rightTime.compareTo(leftTime);
+            })
+            .toList();
+    }
+
+    private Optional<SearchSession> findSessionForUser(String sessionId, Set<String> userIds) {
+        if (sessionId == null || sessionId.isBlank() || userIds == null || userIds.isEmpty()) {
+            return Optional.empty();
+        }
+        for (String userId : userIds) {
+            Optional<SearchSession> session = searchSessionRepository.findByIdAndUser_Id(sessionId, userId);
+            if (session.isPresent()) {
+                return session;
+            }
+        }
+        return Optional.empty();
+    }
+
+    private Set<String> resolveUserIds(String userIdentifier) {
+        if (userIdentifier == null || userIdentifier.isBlank()) {
+            return Set.of();
+        }
+        LinkedHashSet<String> userIds = new LinkedHashSet<>();
+        findUserByIdentifier(userIdentifier)
+            .map(User::getId)
+            .ifPresentOrElse(userIds::add, () -> userIds.add(userIdentifier.trim()));
+        return userIds;
+    }
+
+    private Optional<User> findUserByIdentifier(String identifier) {
+        if (identifier == null || identifier.isBlank()) {
+            return Optional.empty();
+        }
+        String normalized = identifier.trim();
+        try {
+            Optional<User> byId = userRepository.findById(normalized);
+            if (byId.isPresent()) {
+                return byId;
+            }
+        } catch (Exception e) {
+            log.debug("Identifier {} is not a direct user ID", normalized);
+        }
+        Optional<User> byEmail = userRepository.findByEmail(normalized);
+        if (byEmail.isPresent()) {
+            return byEmail;
+        }
+        return userRepository.findByUsername(normalized);
     }
 
     private Map<String, Object> mapSessionToSearchQuery(SearchSession session) {
@@ -300,6 +413,14 @@ public class SearchController {
         if (minSampleSize != null) {
             mapped.put("minSampleSize", minSampleSize);
         }
+        Boolean hasFullText = asBoolean(filters.get("hasFullText"));
+        if (hasFullText != null) {
+            mapped.put("hasFullText", hasFullText);
+        }
+        Integer maxResults = asInteger(filters.get("maxResults"));
+        if (maxResults != null) {
+            mapped.put("maxResults", maxResults);
+        }
         return mapped;
     }
 
@@ -315,6 +436,34 @@ public class SearchController {
             }
         }
         return null;
+    }
+
+    private Boolean asBoolean(Object value) {
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        if (value instanceof String) {
+            String normalized = ((String) value).trim().toLowerCase();
+            if ("true".equals(normalized)) return true;
+            if ("false".equals(normalized)) return false;
+        }
+        return null;
+    }
+
+    private String buildExternalQuery(ExternalHealthSearchRequestDTO request) {
+        if (request == null) {
+            return "";
+        }
+        if (request.getQueryText() != null && !request.getQueryText().isBlank()) {
+            return request.getQueryText().trim();
+        }
+        if (request.getTerms() == null || request.getTerms().isEmpty()) {
+            return "";
+        }
+        return request.getTerms().stream()
+            .filter(item -> item != null && !item.isBlank())
+            .map(String::trim)
+            .collect(Collectors.joining(" "));
     }
 }
 

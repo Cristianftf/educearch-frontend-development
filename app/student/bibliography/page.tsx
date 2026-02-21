@@ -425,6 +425,11 @@ export default function BibliographyPage() {
                                 <Badge variant="outline" className="text-xs">
                                   {article.year}
                                 </Badge>
+                                {article.source && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    {article.source}
+                                  </Badge>
+                                )}
                                 <Badge
                                   variant="outline"
                                   className={`text-xs ${
@@ -471,6 +476,9 @@ export default function BibliographyPage() {
                           <p className="text-xs text-muted-foreground">
                             {article.journal} ({article.year})
                           </p>
+                          {article.source && (
+                            <p className="text-xs text-muted-foreground">{article.source}</p>
+                          )}
                         </div>
                         <Button
                           variant="ghost"

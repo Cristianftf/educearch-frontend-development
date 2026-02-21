@@ -1,5 +1,7 @@
 import type { VerificationResult } from '@/types'
-import { api } from './api-client'
+import { api, ApiHttpError } from './api-client'
+import { isConnectivityError } from './api-errors'
+import { getCachedHealthVerification, verifyClaimWithHealthSources } from './health-sources'
 import {
   STUDENT_FALLBACK_KEYS,
   createLocalId,
@@ -8,6 +10,7 @@ import {
   readLocalStorage,
   writeLocalStorage,
 } from './student-resilience'
+import { validateContentSourceUrl } from './url-validation'
 
 type VerificationHistoryResponse = {
   verifications: VerificationResult[]
@@ -17,9 +20,8 @@ type VerificationHistoryResponse = {
 function normalizeEvidenceItem(value: unknown, index: number, supports: boolean) {
   const item = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
   const articleId =
-    typeof item.articleId === 'string' && item.articleId
-      ? item.articleId
-      : `evidence-${index}`
+    typeof item.articleId === 'string' && item.articleId ? item.articleId : `evidence-${index}`
+
   return {
     articleId,
     title: typeof item.title === 'string' ? item.title : 'Evidencia local',
@@ -29,6 +31,8 @@ function normalizeEvidenceItem(value: unknown, index: number, supports: boolean)
       typeof item.relevanceScore === 'number' && Number.isFinite(item.relevanceScore)
         ? item.relevanceScore
         : 50,
+    source: typeof item.source === 'string' ? item.source : undefined,
+    sourceUrl: typeof item.sourceUrl === 'string' ? item.sourceUrl : undefined,
   }
 }
 
@@ -42,9 +46,7 @@ function normalizeVerificationResult(value: unknown, fallbackClaim?: string): Ve
   return {
     id: typeof item.id === 'string' && item.id ? item.id : createLocalId('verification'),
     claim:
-      typeof item.claim === 'string' && item.claim
-        ? item.claim
-        : fallbackClaim || 'Claim no disponible',
+      typeof item.claim === 'string' && item.claim ? item.claim : fallbackClaim || 'Claim no disponible',
     status:
       item.status === 'verified' ||
       item.status === 'conflicting' ||
@@ -57,14 +59,12 @@ function normalizeVerificationResult(value: unknown, fallbackClaim?: string): Ve
       ? item.supportingEvidence.map((evidence, index) => normalizeEvidenceItem(evidence, index, true))
       : [],
     contradictingEvidence: Array.isArray(item.contradictingEvidence)
-      ? item.contradictingEvidence.map((evidence, index) =>
-          normalizeEvidenceItem(evidence, index, false)
-        )
+      ? item.contradictingEvidence.map((evidence, index) => normalizeEvidenceItem(evidence, index, false))
       : [],
     explanation:
       typeof item.explanation === 'string' && item.explanation
         ? item.explanation
-        : 'Resultado de respaldo local.',
+        : 'Resultado sin explicacion disponible.',
     recommendations: Array.isArray(item.recommendations)
       ? item.recommendations.filter((entry): entry is string => typeof entry === 'string')
       : [],
@@ -89,46 +89,91 @@ function addVerificationHistoryLocal(result: VerificationResult): void {
   writeVerificationHistoryLocal(next)
 }
 
-function buildFallbackVerification(claim: string, sourceUrl?: string, backendReachable?: boolean): VerificationResult {
-  const analyzedClaim = claim || sourceUrl || 'Claim no disponible'
-  return {
-    id: createLocalId('verification'),
-    claim: analyzedClaim,
-    status: 'pending',
-    score: 50,
-    supportingEvidence: [],
-    contradictingEvidence: [],
-    explanation: backendReachable
-      ? 'No fue posible completar la verificacion con el servicio actual. Se activo modo local.'
-      : 'Backend/API no disponible. Se activo modo local con datos de respaldo.',
-    recommendations: [
-      'Reintenta en unos minutos para ejecutar la verificacion completa.',
-      'Valida el claim con terminos MeSH especificos en el modulo de busqueda.',
-      'Contrasta la afirmacion con revisiones sistematicas recientes.',
-    ],
-    verifiedAt: new Date().toISOString(),
+function canUseFallback(error: unknown): boolean {
+  if (error instanceof ApiHttpError) {
+    return error.status >= 500
   }
+  return isConnectivityError(error)
+}
+
+function buildUnavailableVerificationError(backendReachable: boolean, isUrlMode: boolean): Error {
+  if (isUrlMode) {
+    return new Error(
+      backendReachable
+        ? 'No fue posible verificar la URL con datos confiables en este momento. Intenta nuevamente.'
+        : 'La verificacion por URL requiere conexion al backend para extraer contenido real.'
+    )
+  }
+
+  return new Error(
+    backendReachable
+      ? 'No fue posible completar la verificacion con evidencia real en este momento. Intenta nuevamente.'
+      : 'No hay conectividad para verificar el claim con fuentes reales.'
+  )
 }
 
 export const verifyApi = {
-  verifyClaim: (claim: string, url?: string, options?: RequestInit) =>
-    api
-      .post<VerificationResult>(
-        '/verify/claim',
-        { claimText: claim, sourceUrl: url },
-        options
-      )
-      .then((result) => {
-        const normalized = normalizeVerificationResult(result, claim || url)
-        addVerificationHistoryLocal(normalized)
-        return normalized
-      })
-      .catch(async () => {
-        const backendReachable = await isBackendReachable()
-        const fallback = buildFallbackVerification(claim, url, backendReachable)
-        addVerificationHistoryLocal(fallback)
-        return fallback
-      }),
+  verifyClaim: async (claim: string, url?: string, options?: RequestInit) => {
+    const normalizedClaim = typeof claim === 'string' ? claim.trim() : ''
+
+    let normalizedUrl: string | undefined
+    if (typeof url === 'string' && url.trim()) {
+      const urlValidation = validateContentSourceUrl(url)
+      if (!urlValidation.normalizedUrl || urlValidation.error) {
+        throw new Error(urlValidation.error || 'La URL no es valida para verificacion')
+      }
+      normalizedUrl = urlValidation.normalizedUrl
+    }
+
+    if (!normalizedClaim && !normalizedUrl) {
+      throw new Error('Debes enviar un claim o una URL valida para verificar.')
+    }
+
+    try {
+      const payload: { claimText?: string; sourceUrl?: string } = {}
+      if (normalizedClaim) payload.claimText = normalizedClaim
+      if (normalizedUrl) payload.sourceUrl = normalizedUrl
+
+      const result = await api.post<VerificationResult>('/verify/claim', payload, options)
+      const normalized = normalizeVerificationResult(result, normalizedClaim || normalizedUrl)
+      addVerificationHistoryLocal(normalized)
+      return normalized
+    } catch (error) {
+      if (!canUseFallback(error)) {
+        throw error
+      }
+
+      const backendReachable = await isBackendReachable()
+
+      if (normalizedClaim) {
+        const externalVerification = await verifyClaimWithHealthSources(normalizedClaim, normalizedUrl).catch(
+          () => null
+        )
+        if (externalVerification) {
+          addVerificationHistoryLocal(externalVerification)
+          return externalVerification
+        }
+
+        const cachedVerification = getCachedHealthVerification(normalizedClaim)
+        if (cachedVerification) {
+          const normalizedCached = normalizeVerificationResult(cachedVerification, normalizedClaim)
+          addVerificationHistoryLocal(normalizedCached)
+          return normalizedCached
+        }
+      }
+
+      if (normalizedUrl && !normalizedClaim) {
+        const cachedByUrl = getCachedHealthVerification(normalizedUrl)
+        if (cachedByUrl) {
+          const normalizedCached = normalizeVerificationResult(cachedByUrl, normalizedUrl)
+          addVerificationHistoryLocal(normalizedCached)
+          return normalizedCached
+        }
+      }
+
+      throw buildUnavailableVerificationError(backendReachable, Boolean(normalizedUrl && !normalizedClaim))
+    }
+  },
 
   getHistory: (page = 1, limit = 10) =>
     api
