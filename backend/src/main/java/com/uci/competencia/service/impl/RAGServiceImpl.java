@@ -22,10 +22,15 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Service
 @Slf4j
@@ -43,12 +48,69 @@ public class RAGServiceImpl implements RAGService {
 
     @Override
     public GenTextResult generateEvidenceBasedText(GenTextRequest request) {
+        long startedAt = System.currentTimeMillis();
+        String query = request != null ? safeText(request.getQuery()) : "";
+        String context = request != null ? safeText(request.getContext()) : "";
+        int maxArticles = request != null && request.getMaxArticles() > 0
+            ? Math.min(request.getMaxArticles(), 30)
+            : 12;
+
+        if (query.isBlank()) {
+            GenTextResult empty = new GenTextResult();
+            empty.setGeneratedText("No se proporciono una consulta valida para generar texto basado en evidencia.");
+            empty.setSummary("Solicitud incompleta.");
+            empty.setGeneratedAt(LocalDateTime.now());
+            empty.setEvidence(List.of());
+            empty.setConfidenceScore(0.0);
+            empty.setSourceCount(0);
+            empty.setWarnings(List.of("query_empty"));
+            empty.setMetadata(Map.of("usedAi", false, "pipeline", "rag"));
+            return empty;
+        }
+
+        List<RelevantArticle> semanticArticles = semanticSearch(query, maxArticles);
+        List<RelevantArticle> rankedArticles = rerankByEvidenceLevel(semanticArticles);
+        List<RelevantArticle> selectedArticles = rankedArticles.stream()
+            .limit(Math.min(8, rankedArticles.size()))
+            .collect(Collectors.toList());
+
+        String prompt = buildEvidencePrompt(query, context, selectedArticles);
+        String aiText = openAIService.generateText(prompt);
+        boolean usedAi = aiText != null && !aiText.isBlank();
+        String generatedText = usedAi
+            ? aiText.trim()
+            : buildFallbackGeneratedText(query, selectedArticles);
+        String attributed = validateAndAttributeCitations(generatedText, selectedArticles);
+
+        double avgRelevance = selectedArticles.stream()
+            .map(article -> article.relevanceScore)
+            .filter(score -> score != null && score > 0)
+            .mapToDouble(Double::doubleValue)
+            .average()
+            .orElse(0.0);
+        double qualityScore = calculateQualityScore(attributed);
+        double confidence = Math.max(0.0, Math.min(1.0, (avgRelevance * 0.6) + (qualityScore * 0.4)));
+        long processingMs = Math.max(1L, System.currentTimeMillis() - startedAt);
+
         GenTextResult result = new GenTextResult();
-        result.setGeneratedText("Funcionalidad no implementada en esta versi\u00f3n.");
+        result.setGeneratedText(attributed);
+        result.setSummary(buildSummary(attributed));
+        result.setEvidence(toEvidenceArticles(selectedArticles));
+        result.setConfidenceScore(Math.round(confidence * 1000.0) / 1000.0);
+        result.setSourceCount(selectedArticles.size());
         result.setGeneratedAt(LocalDateTime.now());
-        result.setEvidence(List.of());
-        result.setConfidenceScore(0.0);
-        result.setSourceCount(0);
+        result.setSessionId(request != null ? request.getSessionId() : null);
+        result.setWarnings(usedAi ? List.of() : List.of("ai_unavailable_using_fallback"));
+        result.setMetadata(buildGenTextMetadata(usedAi, query, context, selectedArticles.size(), maxArticles));
+        result.setStats(
+            GenTextResult.GenerationStats.builder()
+                .processingTimeMs(processingMs)
+                .articlesRetrieved(semanticArticles.size())
+                .articlesUsed(selectedArticles.size())
+                .queriesExecuted(1)
+                .averageRelevance(Math.round(avgRelevance * 1000.0) / 1000.0)
+                .build()
+        );
         return result;
     }
 
@@ -167,22 +229,134 @@ public class RAGServiceImpl implements RAGService {
 
     @Override
     public List<RelevantArticle> semanticSearch(String query, int maxResults) {
-        return List.of();
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
+        int effectiveMax = maxResults > 0 ? Math.min(maxResults, 50) : 15;
+
+        List<String> terms = extractQueryTerms(query);
+        SearchRequestDTO.SearchQueryDTO queryDTO = new SearchRequestDTO.SearchQueryDTO();
+        queryDTO.setTerms(terms);
+        queryDTO.setOperators(buildOperators(terms.size()));
+
+        SearchRequestDTO.SearchFiltersDTO filtersDTO = new SearchRequestDTO.SearchFiltersDTO();
+        filtersDTO.setYearFrom(LocalDateTime.now().getYear() - 12);
+        filtersDTO.setYearTo(LocalDateTime.now().getYear());
+        filtersDTO.setMaxResults(effectiveMax);
+
+        String pubmedQuery = pubMedQueryBuilder.buildPubMedQuery(queryDTO, filtersDTO);
+        List<PubMedApiService.PubMedArticle> articles = pubMedApiService.searchArticles(pubmedQuery, effectiveMax);
+        if (articles == null || articles.isEmpty()) {
+            return List.of();
+        }
+
+        List<RelevantArticle> relevant = new ArrayList<>();
+        for (PubMedApiService.PubMedArticle article : articles) {
+            String title = safeText(article.title());
+            String abstractText = safeText(article.abstractText());
+            String combinedText = (title + " " + abstractText).trim();
+            SimilarityCalculator.StanceDetection detection = similarityCalculator.detectStance(query, combinedText);
+
+            StudyType studyType = EvidenceLevelMapper.mapStudyType(article.publicationTypes());
+            int evidenceLevel = EvidenceLevelMapper.evidenceLevelForStudyType(studyType);
+            Integer publicationYear = extractYear(article.publicationDate());
+            double weighted = detection.score * evidenceWeight(evidenceLevel) * recencyWeight(publicationYear);
+            if (weighted <= 0.10) {
+                continue;
+            }
+
+            RelevantArticle mapped = new RelevantArticle();
+            mapped.pmid = safeText(article.pmid());
+            mapped.title = title.isBlank() ? "Untitled article" : title;
+            mapped.snippet = extractSnippet(abstractText, title);
+            mapped.relevanceScore = Math.round(weighted * 1000.0) / 1000.0;
+            mapped.evidenceLevel = evidenceLevel;
+            mapped.stance = detection.stance.name();
+            mapped.similarityScore = detection.score;
+            mapped.publicationYear = publicationYear;
+            mapped.journal = safeText(article.journal());
+            mapped.authors = joinAuthors(article.authors());
+            mapped.sourceUrl = buildSourceUrl(article.pmid(), article.doi());
+            relevant.add(mapped);
+        }
+
+        return relevant.stream()
+            .sorted((left, right) -> Double.compare(
+                right.relevanceScore != null ? right.relevanceScore : 0.0,
+                left.relevanceScore != null ? left.relevanceScore : 0.0
+            ))
+            .limit(effectiveMax)
+            .collect(Collectors.toList());
     }
 
     @Override
     public List<RelevantArticle> rerankByEvidenceLevel(List<RelevantArticle> articles) {
-        return articles == null ? List.of() : articles;
+        if (articles == null || articles.isEmpty()) {
+            return List.of();
+        }
+        List<RelevantArticle> sorted = new ArrayList<>(articles);
+        sorted.sort(Comparator.comparingDouble(this::rerankScore).reversed());
+        return sorted;
     }
 
     @Override
     public String validateAndAttributeCitations(String text, List<RelevantArticle> sourceArticles) {
-        return text;
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        if (sourceArticles == null || sourceArticles.isEmpty()) {
+            return text.trim();
+        }
+
+        Set<String> sourcePmids = sourceArticles.stream()
+            .map(article -> article.pmid)
+            .filter(pmid -> pmid != null && !pmid.isBlank())
+            .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        if (sourcePmids.isEmpty()) {
+            return text.trim();
+        }
+
+        String normalized = text.trim();
+        Matcher citationMatcher = Pattern.compile("\\[PMID:(\\d+)\\]").matcher(normalized);
+        Set<String> citationsInText = new LinkedHashSet<>();
+        while (citationMatcher.find()) {
+            citationsInText.add(citationMatcher.group(1));
+        }
+
+        boolean hasValidCitation = citationsInText.stream().anyMatch(sourcePmids::contains);
+        if (hasValidCitation) {
+            return normalized;
+        }
+
+        String citations = sourcePmids.stream()
+            .limit(4)
+            .map(pmid -> "[PMID:" + pmid + "]")
+            .collect(Collectors.joining(" "));
+        return normalized + "\n\nFuentes: " + citations;
     }
 
     @Override
     public Double calculateQualityScore(String genText) {
-        return 0.0;
+        if (genText == null || genText.isBlank()) {
+            return 0.0;
+        }
+        String normalized = genText.trim();
+        int length = normalized.length();
+        int sentenceCount = normalized.split("[.!?]+").length;
+
+        Matcher matcher = Pattern.compile("\\[PMID:(\\d+)\\]").matcher(normalized);
+        Set<String> uniqueCitations = new LinkedHashSet<>();
+        while (matcher.find()) {
+            uniqueCitations.add(matcher.group(1));
+        }
+
+        double lengthScore = Math.min(1.0, length / 950.0);
+        double structureScore = sentenceCount >= 3 ? 1.0 : sentenceCount >= 2 ? 0.75 : 0.5;
+        double citationScore = Math.min(1.0, uniqueCitations.size() / 4.0);
+
+        double score = (lengthScore * 0.35) + (structureScore * 0.25) + (citationScore * 0.40);
+        return Math.round(score * 1000.0) / 1000.0;
     }
 
     private List<String> extractQueryTerms(String claim) {
@@ -334,6 +508,134 @@ public class RAGServiceImpl implements RAGService {
             return text.substring(start, end + 1);
         }
         return null;
+    }
+
+    private String buildEvidencePrompt(String query, String context, List<RelevantArticle> selectedArticles) {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Responde en espanol clinico claro. ");
+        prompt.append("Genera un texto basado solo en evidencia y cita PMIDs como [PMID:123456]. ");
+        prompt.append("No inventes fuentes ni datos.\n");
+        prompt.append("Consulta principal: ").append(query).append("\n");
+        if (context != null && !context.isBlank()) {
+            prompt.append("Contexto adicional: ").append(context).append("\n");
+        }
+        prompt.append("Evidencia disponible:\n");
+        int index = 1;
+        for (RelevantArticle article : selectedArticles) {
+            prompt.append(index++)
+                .append(". PMID: ").append(safeText(article.pmid))
+                .append(" | Nivel: ").append(article.evidenceLevel)
+                .append(" | Titulo: ").append(safeText(article.title))
+                .append(" | Resumen: ").append(safeText(article.snippet))
+                .append("\n");
+        }
+        prompt.append("Entrega 2-4 parrafos y evita afirmaciones absolutas.");
+        return prompt.toString();
+    }
+
+    private String buildFallbackGeneratedText(String query, List<RelevantArticle> selectedArticles) {
+        if (selectedArticles == null || selectedArticles.isEmpty()) {
+            return "No se recupero evidencia suficiente para responder sobre: " + query + ".";
+        }
+        StringBuilder text = new StringBuilder();
+        text.append("Sintesis de evidencia para: ").append(query).append(". ");
+        text.append("Se priorizaron articulos con mejor nivel metodologico y mayor relevancia semantica. ");
+        text.append("Los hallazgos apuntan a una tendencia general que debe interpretarse junto al contexto clinico local.");
+
+        String citations = selectedArticles.stream()
+            .map(article -> safeText(article.pmid))
+            .filter(pmid -> !pmid.isBlank())
+            .limit(4)
+            .map(pmid -> "[PMID:" + pmid + "]")
+            .collect(Collectors.joining(" "));
+        if (!citations.isBlank()) {
+            text.append("\n\nFuentes: ").append(citations);
+        }
+        return text.toString();
+    }
+
+    private String buildSummary(String text) {
+        if (text == null || text.isBlank()) {
+            return "No summary available.";
+        }
+        String normalized = text.replaceAll("\\s+", " ").trim();
+        if (normalized.length() <= 220) {
+            return normalized;
+        }
+        return normalized.substring(0, 220) + "...";
+    }
+
+    private List<GenTextResult.EvidenceArticle> toEvidenceArticles(List<RelevantArticle> articles) {
+        if (articles == null || articles.isEmpty()) {
+            return List.of();
+        }
+        List<GenTextResult.EvidenceArticle> evidenceArticles = new ArrayList<>();
+        for (RelevantArticle article : articles) {
+            GenTextResult.EvidenceArticle evidence = GenTextResult.EvidenceArticle.builder()
+                .pubmedId(safeText(article.pmid))
+                .title(safeText(article.title))
+                .authors(article.authors != null ? article.authors : "")
+                .publicationYear(article.publicationYear != null ? article.publicationYear : 0)
+                .journal(article.journal != null ? article.journal : "")
+                .relevanceScore(article.relevanceScore != null ? article.relevanceScore : 0.0)
+                .snippet(article.snippet != null ? article.snippet : "")
+                .url(article.sourceUrl != null ? article.sourceUrl : "")
+                .build();
+            evidenceArticles.add(evidence);
+        }
+        return evidenceArticles;
+    }
+
+    private Map<String, Object> buildGenTextMetadata(
+        boolean usedAi,
+        String query,
+        String context,
+        int usedArticles,
+        int requestedArticles
+    ) {
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("pipeline", "rag");
+        metadata.put("usedAi", usedAi);
+        metadata.put("query", query);
+        metadata.put("context", context);
+        metadata.put("usedArticles", usedArticles);
+        metadata.put("requestedArticles", requestedArticles);
+        return metadata;
+    }
+
+    private double rerankScore(RelevantArticle article) {
+        if (article == null) {
+            return 0.0;
+        }
+        double relevance = article.relevanceScore != null ? article.relevanceScore : 0.0;
+        double evidenceFactor = article.evidenceLevel != null
+            ? evidenceWeight(article.evidenceLevel)
+            : evidenceWeight(6);
+        return (relevance * 0.7) + (evidenceFactor * 0.3);
+    }
+
+    private String joinAuthors(List<String> authors) {
+        if (authors == null || authors.isEmpty()) {
+            return "";
+        }
+        return authors.stream()
+            .filter(author -> author != null && !author.isBlank())
+            .limit(4)
+            .collect(Collectors.joining(", "));
+    }
+
+    private String buildSourceUrl(String pmid, String doi) {
+        if (pmid != null && !pmid.isBlank()) {
+            return "https://pubmed.ncbi.nlm.nih.gov/" + pmid + "/";
+        }
+        if (doi != null && !doi.isBlank()) {
+            return "https://doi.org/" + doi;
+        }
+        return "";
+    }
+
+    private String safeText(String value) {
+        return value == null ? "" : value.replaceAll("\\s+", " ").trim();
     }
 
     private double evidenceWeight(int level) {

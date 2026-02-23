@@ -1,44 +1,44 @@
-# UCI Competencia Informacional - Backend Spring Boot
+﻿# UCI Competencia Informacional - Backend Spring Boot
 
-## 📚 Descripción General
+## ðŸ“š DescripciÃ³n General
 
-Backend de la Plataforma de Competencia Informacional para la Universidad de Ciencias Informáticas (UCI), basado en Spring Boot 4.0.2 con Java 21.
+Backend de la Plataforma de Competencia Informacional para la Universidad de Ciencias InformÃ¡ticas (UCI), basado en Spring Boot 4.0.2 con Java 21.
 
 Esta es una API REST completa que soporta:
-- Autenticación y autorización basada en roles
-- Búsqueda de artículos científicos en PubMed
-- Verificación de claims usando Retrieval Augmented Generation (RAG)
-- Gestión de casos de estudio y evaluaciones
+- AutenticaciÃ³n y autorizaciÃ³n basada en roles
+- BÃºsqueda de artÃ­culos cientÃ­ficos en PubMed
+- VerificaciÃ³n de claims usando Retrieval Augmented Generation (RAG)
+- GestiÃ³n de casos de estudio y evaluaciones
 - Seguimiento de progreso en competencias informacionales
-- Auditoría completa del sistema
+- AuditorÃ­a completa del sistema
 
-## 🏗️ Estructura del Proyecto
+## ðŸ—ï¸ Estructura del Proyecto
 
 ```
 backend/
-├── src/
-│   ├── main/
-│   │   ├── java/com/uci/competencia/
-│   │   │   ├── CompetenciaInformacionalApplication.java
-│   │   │   ├── config/           # Configuraciones
-│   │   │   ├── controller/api/   # Controladores REST
-│   │   │   ├── service/          # Servicios de negocio
-│   │   │   ├── repository/       # Repositorios JPA
-│   │   │   ├── model/            # Entidades y DTOs
-│   │   │   ├── security/         # JWT y seguridad
-│   │   │   ├── exception/        # Manejo de excepciones
-│   │   │   ├── aspect/           # Aspectos AOP
-│   │   │   ├── scheduler/        # Tareas programadas
-│   │   │   └── util/             # Utilidades
-│   │   └── resources/
-│   │       ├── application.yml
-│   │       └── db/migration/    # Flyway migrations
-│   └── test/                     # Tests unitarios e integración
-├── pom.xml                        # Dependencias Maven
-└── README.md                      # Este archivo
+â”œâ”€â”€ src/
+â”‚   â”œâ”€â”€ main/
+â”‚   â”‚   â”œâ”€â”€ java/com/uci/competencia/
+â”‚   â”‚   â”‚   â”œâ”€â”€ CompetenciaInformacionalApplication.java
+â”‚   â”‚   â”‚   â”œâ”€â”€ config/           # Configuraciones
+â”‚   â”‚   â”‚   â”œâ”€â”€ controller/api/   # Controladores REST
+â”‚   â”‚   â”‚   â”œâ”€â”€ service/          # Servicios de negocio
+â”‚   â”‚   â”‚   â”œâ”€â”€ repository/       # Repositorios JPA
+â”‚   â”‚   â”‚   â”œâ”€â”€ model/            # Entidades y DTOs
+â”‚   â”‚   â”‚   â”œâ”€â”€ security/         # JWT y seguridad
+â”‚   â”‚   â”‚   â”œâ”€â”€ exception/        # Manejo de excepciones
+â”‚   â”‚   â”‚   â”œâ”€â”€ aspect/           # Aspectos AOP
+â”‚   â”‚   â”‚   â”œâ”€â”€ scheduler/        # Tareas programadas
+â”‚   â”‚   â”‚   â””â”€â”€ util/             # Utilidades
+â”‚   â”‚   â””â”€â”€ resources/
+â”‚   â”‚       â”œâ”€â”€ application.yml
+â”‚   â”‚       â””â”€â”€ db/migration/    # Flyway migrations
+â”‚   â””â”€â”€ test/                     # Tests unitarios e integraciÃ³n
+â”œâ”€â”€ pom.xml                        # Dependencias Maven
+â””â”€â”€ README.md                      # Este archivo
 ```
 
-## 🚀 Requisitos Previos
+## ðŸš€ Requisitos Previos
 
 - **Java 21** LTS
 - **Maven 3.8.0+**
@@ -46,7 +46,7 @@ backend/
 - **Redis 7.0+**
 - **Docker** (opcional, para desarrollo con containers)
 
-## 📦 Instalación
+## ðŸ“¦ InstalaciÃ³n
 
 ### 1. Clonar el repositorio
 
@@ -57,7 +57,7 @@ cd educearch-frontend-development/backend
 
 ### 2. Variables de Entorno
 
-Crear archivo `.env` en la raíz del proyecto:
+Crear archivo `.env` en la raÃ­z del proyecto:
 
 ```bash
 # Base de Datos
@@ -80,6 +80,22 @@ JWT_REFRESH_EXPIRATION=604800000
 # PubMed API
 PUBMED_API_KEY=<your-api-key>
 
+# LLM API (OpenAI-compatible)
+# Opcion gratuita recomendada: Groq
+LLM_BASE_URL=https://api.groq.com/openai/v1
+GROQ_API_KEY=<your-groq-api-key>
+GROQ_MODEL=llama-3.3-70b-versatile
+
+# Google AI Studio (Gemini)
+AI_PROVIDER=auto
+GOOGLE_AI_API_KEY=<your-google-ai-studio-key>
+GOOGLE_AI_MODEL=gemini-2.5-flash
+
+# Fallback local sin costo (Ollama)
+LOCAL_LLM_FALLBACK_ENABLED=true
+LOCAL_LLM_BASE_URL=http://localhost:11434/v1
+LOCAL_LLM_MODEL=llama3.2:3b
+
 # Servidor
 SERVER_PORT=8080
 
@@ -95,7 +111,7 @@ LDAP_BASE_DN=dc=uci,dc=cu
 mvn clean install
 ```
 
-### 4. Ejecutar la Aplicación
+### 4. Ejecutar la AplicaciÃ³n
 
 ```bash
 mvn spring-boot:run
@@ -107,9 +123,39 @@ O usando Java directamente:
 java -jar target/backend-1.0.0.jar
 ```
 
-## 🗄️ Base de Datos
+### IA en tiempo real (obligatorio para asistente conectado)
 
-El proyecto usa **Flyway** para migraciones automáticas de base de datos.
+Opcion A (API externa gratuita - Groq):
+
+```bash
+set GROQ_API_KEY=tu_key_aqui
+set LLM_BASE_URL=https://api.groq.com/openai/v1
+set GROQ_MODEL=llama-3.3-70b-versatile
+```
+
+Opcion B (modelo local sin key - Ollama):
+
+```bash
+ollama pull llama3.2:3b
+ollama serve
+set LOCAL_LLM_FALLBACK_ENABLED=true
+set LOCAL_LLM_BASE_URL=http://localhost:11434/v1
+set LOCAL_LLM_MODEL=llama3.2:3b
+```
+
+Opcion C (Google AI Studio - Gemini):
+
+```bash
+set AI_PROVIDER=gemini
+set GOOGLE_AI_API_KEY=tu_key_aqui
+set GOOGLE_AI_MODEL=gemini-2.5-flash
+```
+
+Si no hay key externa y Ollama no estÃ¡ corriendo, el asistente entra en modo respaldo.
+
+## ðŸ—„ï¸ Base de Datos
+
+El proyecto usa **Flyway** para migraciones automÃ¡ticas de base de datos.
 
 ### Crear base de datos PostgreSQL
 
@@ -117,10 +163,10 @@ El proyecto usa **Flyway** para migraciones automáticas de base de datos.
 createdb uci_competencia -U postgres
 ```
 
-Las migraciones se ejecutarán automáticamente al iniciar la aplicación:
+Las migraciones se ejecutarÃ¡n automÃ¡ticamente al iniciar la aplicaciÃ³n:
 - `V1.0__Initial_Schema.sql` - Schema inicial con todas las tablas
 
-## 🔑 Autenticación
+## ðŸ”‘ AutenticaciÃ³n
 
 ### Login
 
@@ -150,48 +196,49 @@ curl -X GET http://localhost:8080/api/student/dashboard/overview \
   -H "Authorization: Bearer <token>"
 ```
 
-## 📡 Endpoints Principales
+## ðŸ“¡ Endpoints Principales
 
-### Autenticación (`/api/auth`)
-- `POST /login` - Iniciar sesión
+### AutenticaciÃ³n (`/api/auth`)
+- `POST /login` - Iniciar sesiÃ³n
 - `POST /refresh` - Refrescar token
-- `POST /logout` - Cerrar sesión
-- `GET /me` - Información del usuario actual
+- `POST /logout` - Cerrar sesiÃ³n
+- `GET /me` - InformaciÃ³n del usuario actual
 
-### Búsqueda (`/api/search`)
-- `POST /execute` - Ejecutar búsqueda en PubMed
-- `GET /mesh/suggestions` - Obtener sugerencias de términos MeSH
-- `GET /results/{searchId}/evidence-pyramid` - Obtener pirámide de evidencia
+### BÃºsqueda (`/api/search`)
+- `POST /execute` - Ejecutar bÃºsqueda en PubMed
+- `POST /assistant` - Obtener sugerencias IA para optimizar query y filtros
+- `GET /mesh/suggestions` - Obtener sugerencias de tÃ©rminos MeSH
+- `GET /results/{searchId}/evidence-pyramid` - Obtener pirÃ¡mide de evidencia
 
-### Verificación (`/api/verify`)
+### VerificaciÃ³n (`/api/verify`)
 - `POST /claim` - Verificar un claim con RAG
-- `GET /result/{verificationId}` - Obtener resultado de verificación
+- `GET /result/{verificationId}` - Obtener resultado de verificaciÃ³n
 - `GET /history` - Historial de verificaciones
 
 ### Estudiante (`/api/student`)
 - `GET /dashboard/overview` - Dashboard del estudiante
 - `GET /progress/detailed` - Progreso detallado
-- `GET /search/history` - Historial de búsquedas
+- `GET /search/history` - Historial de bÃºsquedas
 
 ### Profesor (`/api/professor`)
 - `GET /dashboard/overview` - Dashboard del profesor
 - `GET /students` - Lista de estudiantes
 - `GET /cases` - Casos de estudio
 - `POST /cases` - Crear nuevo caso
-- `GET /analytics/class-performance` - Análisis de desempeño
+- `GET /analytics/class-performance` - AnÃ¡lisis de desempeÃ±o
 
 ### Administrador (`/api/admin`)
 - `GET /users` - Lista de usuarios
 - `POST /users/batch` - Importar usuarios en lote
-- `GET /audit/logs` - Registros de auditoría
+- `GET /audit/logs` - Registros de auditorÃ­a
 - `GET /system/health` - Estado del sistema
-- `GET /settings` - Configuración del sistema
+- `GET /settings` - ConfiguraciÃ³n del sistema
 
 ### Sistema (`/api/system`)
 - `GET /health` - Health check del sistema
-- `GET /metrics/prometheus` - Métricas para Prometheus
+- `GET /metrics/prometheus` - MÃ©tricas para Prometheus
 
-## 🔍 Documentación API
+## ðŸ” DocumentaciÃ³n API
 
 Swagger/OpenAPI disponible en:
 ```
@@ -203,7 +250,7 @@ O ver JSON de OpenAPI:
 http://localhost:8080/v3/api-docs
 ```
 
-## 🏥 Monitoreo
+## ðŸ¥ Monitoreo
 
 ### Health Check
 
@@ -224,7 +271,7 @@ curl http://localhost:8080/actuator/metrics
 curl http://localhost:8080/api/system/metrics/prometheus
 ```
 
-## 🧪 Testing
+## ðŸ§ª Testing
 
 Ejecutar tests:
 
@@ -238,7 +285,7 @@ Con cobertura:
 mvn test jacoco:report
 ```
 
-## 🐳 Docker
+## ðŸ³ Docker
 
 ### Build Docker Image
 
@@ -264,7 +311,7 @@ Detener:
 docker-compose down
 ```
 
-## 🛠️ Desarrollo
+## ðŸ› ï¸ Desarrollo
 
 ### Hot Reload
 
@@ -278,85 +325,85 @@ mvn spring-boot:run
 
 ```
 com.uci.competencia
-├── config/              # Configuraciones de Spring
-├── controller/api/      # Controladores REST
-├── service/             # Interfaces de servicios
-│   ├── impl/           # Implementaciones
-│   └── external/       # Servicios externos
-├── repository/          # Repositorios JPA
-├── model/
-│   ├── entity/         # Entidades JPA
-│   ├── dto/            # Data Transfer Objects
-│   └── enums/          # Enumeraciones
-├── security/            # JWT, autenticación
-├── exception/           # Excepciones personalizadas
-├── aspect/              # Aspectos AOP (logging, auditoría)
-├── scheduler/           # Tareas programadas
-└── util/                # Utilidades
+â”œâ”€â”€ config/              # Configuraciones de Spring
+â”œâ”€â”€ controller/api/      # Controladores REST
+â”œâ”€â”€ service/             # Interfaces de servicios
+â”‚   â”œâ”€â”€ impl/           # Implementaciones
+â”‚   â””â”€â”€ external/       # Servicios externos
+â”œâ”€â”€ repository/          # Repositorios JPA
+â”œâ”€â”€ model/
+â”‚   â”œâ”€â”€ entity/         # Entidades JPA
+â”‚   â”œâ”€â”€ dto/            # Data Transfer Objects
+â”‚   â””â”€â”€ enums/          # Enumeraciones
+â”œâ”€â”€ security/            # JWT, autenticaciÃ³n
+â”œâ”€â”€ exception/           # Excepciones personalizadas
+â”œâ”€â”€ aspect/              # Aspectos AOP (logging, auditorÃ­a)
+â”œâ”€â”€ scheduler/           # Tareas programadas
+â””â”€â”€ util/                # Utilidades
 ```
 
-## 📋 Características Implementadas
+## ðŸ“‹ CaracterÃ­sticas Implementadas
 
-### ✅ Completado
+### âœ… Completado
 
 - [x] Estructura Spring Boot completa
-- [x] Autenticación con JWT
+- [x] AutenticaciÃ³n con JWT
 - [x] Role-Based Access Control (RBAC)
 - [x] Entidades y repositorios
 - [x] Servicios base
 - [x] Controladores REST
-- [x] Configuración de seguridad
-- [x] Configuración de CORS
-- [x] Redis para caché
-- [x] WebSocket para comunicación en tiempo real
+- [x] ConfiguraciÃ³n de seguridad
+- [x] ConfiguraciÃ³n de CORS
+- [x] Redis para cachÃ©
+- [x] WebSocket para comunicaciÃ³n en tiempo real
 - [x] Manejo centralizado de excepciones
-- [x] Logging y auditoría
+- [x] Logging y auditorÃ­a
 - [x] Migrations de base de datos con Flyway
 - [x] OpenAPI/Swagger
 - [x] Health checks
 - [x] Prometheus metrics
 
-### 🔄 En Desarrollo
+### ðŸ”„ En Desarrollo
 
-- [ ] Integración completa con PubMed API
-- [ ] Implementación del motor RAG
-- [ ] Integración con LDAP de UCI
-- [ ] Envío de emails
+- [ ] IntegraciÃ³n completa con PubMed API
+- [x] ImplementaciÃ³n base del motor RAG (verificaciÃ³n y generaciÃ³n asistida)
+- [ ] IntegraciÃ³n con LDAP de UCI
+- [ ] EnvÃ­o de emails
 - [ ] Vector database (Weaviate) para embeddings
-- [ ] Cálculos complejos de competencias
+- [ ] CÃ¡lculos complejos de competencias
 
-### 📅 Próximas Fases
+### ðŸ“… PrÃ³ximas Fases
 
-- [ ] Tests unitarios e integración
+- [ ] Tests unitarios e integraciÃ³n
 - [ ] Performance tuning
-- [ ] Caching estratégico
-- [ ] Documentación avanzada
-- [ ] Deployment en producción
+- [ ] Caching estratÃ©gico
+- [ ] DocumentaciÃ³n avanzada
+- [ ] Deployment en producciÃ³n
 
-## 🤝 Contribuir
+## ðŸ¤ Contribuir
 
 1. Crear una rama feature: `git checkout -b feature/nueva-funcionalidad`
 2. Hacer cambios y commits: `git commit -am 'Agregar nueva funcionalidad'`
 3. Push a la rama: `git push origin feature/nueva-funcionalidad`
 4. Abrir Pull Request
 
-## 📝 Convenciones de Código
+## ðŸ“ Convenciones de CÃ³digo
 
 - **Nombres de clases:** PascalCase (ej: `UserService`)
-- **Nombres de métodos:** camelCase (ej: `getUserById()`)
+- **Nombres de mÃ©todos:** camelCase (ej: `getUserById()`)
 - **Nombres de variables:** camelCase (ej: `userId`)
 - **Constantes:** UPPER_SNAKE_CASE (ej: `MAX_USERS`)
 
-## 🔐 Seguridad
+## ðŸ” Seguridad
 
-- Todas las contraseñas se hashean con BCrypt
-- JWT tokens con expiración configurable
-- CORS configurado para dominios específicos
-- Validación de entrada en DTOs
+- Todas las contraseÃ±as se hashean con BCrypt
+- JWT tokens con expiraciÃ³n configurable
+- CORS configurado para dominios especÃ­ficos
+- ValidaciÃ³n de entrada en DTOs
 - Manejo de excepciones seguro
-- Auditoría completa de acciones
+- AuditorÃ­a completa de acciones
 
-## 📊 Logging
+## ðŸ“Š Logging
 
 Los logs se guardan en:
 ```
@@ -365,36 +412,37 @@ logs/application.log
 
 Niveles configurables por paquete en `application.yml`
 
-## 🚨 Troubleshooting
+## ðŸš¨ Troubleshooting
 
-### Error de conexión a PostgreSQL
+### Error de conexiÃ³n a PostgreSQL
 ```
-Verificar que PostgreSQL está ejecutándose
+Verificar que PostgreSQL estÃ¡ ejecutÃ¡ndose
 psql -U postgres -c "SELECT 1"
 ```
 
-### Error de conexión a Redis
+### Error de conexiÃ³n a Redis
 ```
-Verificar que Redis está ejecutándose
+Verificar que Redis estÃ¡ ejecutÃ¡ndose
 redis-cli ping
 ```
 
-### Error de compilación Java
+### Error de compilaciÃ³n Java
 ```
 Limpiar Maven cache:
 mvn clean install -DskipTests
 ```
 
-## 📞 Soporte
+## ðŸ“ž Soporte
 
 Para reportar bugs o sugerencias, contactar al equipo de desarrollo.
 
-## 📄 Licencia
+## ðŸ“„ Licencia
 
-Este proyecto es propiedad de la Universidad de Ciencias Informáticas (UCI).
+Este proyecto es propiedad de la Universidad de Ciencias InformÃ¡ticas (UCI).
 
 ---
 
-**Última actualización:** Enero 2026
-**Versión:** 1.0.0
+**Ãšltima actualizaciÃ³n:** Enero 2026
+**VersiÃ³n:** 1.0.0
 **Estado:** EN DESARROLLO
+

@@ -75,6 +75,10 @@ public interface RAGService {
         public String pmid;
         public String title;
         public String snippet;
+        public String authors;
+        public String journal;
+        public Integer publicationYear;
+        public String sourceUrl;
         public Double relevanceScore;
         public Integer evidenceLevel;
         public String stance; // SUPPORTS, CONFLICTING, NEUTRAL

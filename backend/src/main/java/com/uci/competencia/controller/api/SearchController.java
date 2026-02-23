@@ -3,13 +3,16 @@ package com.uci.competencia.controller.api;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.uci.competencia.model.dto.request.ExternalHealthSearchRequestDTO;
+import com.uci.competencia.model.dto.request.SearchAssistantRequestDTO;
 import com.uci.competencia.model.dto.request.SearchRequestDTO;
 import com.uci.competencia.model.dto.response.ExternalHealthSearchResponseDTO;
+import com.uci.competencia.model.dto.response.SearchAssistantResponseDTO;
 import com.uci.competencia.model.dto.response.SearchResponseDTO;
 import com.uci.competencia.model.entity.SearchSession;
 import com.uci.competencia.model.entity.User;
 import com.uci.competencia.repository.SearchSessionRepository;
 import com.uci.competencia.repository.UserRepository;
+import com.uci.competencia.service.SearchAssistantService;
 import com.uci.competencia.service.SearchService;
 import com.uci.competencia.service.external.HealthSearchProxyService;
 import com.uci.competencia.service.external.PubMedApiService;
@@ -43,6 +46,9 @@ public class SearchController {
     private SearchService searchService;
 
     @Autowired
+    private SearchAssistantService searchAssistantService;
+
+    @Autowired
     private SearchSessionRepository searchSessionRepository;
 
     @Autowired
@@ -62,6 +68,14 @@ public class SearchController {
     public ResponseEntity<SearchResponseDTO> executeSearch(@Valid @RequestBody SearchRequestDTO request) {
         log.info("Executing search with query: {}", request.getQuery().getTerms());
         SearchResponseDTO response = searchService.executeSearch(request);
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/assistant")
+    @PreAuthorize("hasAnyRole('STUDENT', 'PROFESSOR')")
+    public ResponseEntity<SearchAssistantResponseDTO> askSearchAssistant(
+            @Valid @RequestBody SearchAssistantRequestDTO request) {
+        SearchAssistantResponseDTO response = searchAssistantService.generateResponse(request);
         return ResponseEntity.ok(response);
     }
 

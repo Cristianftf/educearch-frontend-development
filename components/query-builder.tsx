@@ -75,7 +75,7 @@ function DraggableChip({ element, isDragging }: { element: QueryElement; isDragg
       {...attributes}
       {...listeners}
       className={`
-        inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium
+        inline-flex max-w-full items-center gap-2 px-3 py-1 rounded-full text-sm font-medium
         cursor-grab active:cursor-grabbing select-none
         ${element.color || 'bg-gray-100 text-gray-800'}
         ${isDragging ? 'opacity-50' : 'hover:shadow-md'}
@@ -86,7 +86,7 @@ function DraggableChip({ element, isDragging }: { element: QueryElement; isDragg
       {element.type === 'term' && <Search className="h-3 w-3" />}
       {element.type === 'operator' && <Hash className="h-3 w-3" />}
       {element.type === 'group' && <Parentheses className="h-3 w-3" />}
-      {element.label}
+      <span className="truncate max-w-[42vw] sm:max-w-[260px]">{element.label}</span>
     </div>
   )
 }
@@ -120,7 +120,7 @@ function DroppableZone({
           <SortableContext items={elements.map(e => e.id)} strategy={verticalListSortingStrategy}>
             <div className="flex flex-wrap gap-2">
               {elements.map((element) => (
-                <div key={element.id} className="relative group">
+                <div key={element.id} className="relative group max-w-full">
                   <DraggableChip element={element} />
                   <Button
                     variant="ghost"
@@ -264,7 +264,7 @@ export default function QueryBuilder({ availableTerms, onQueryChange }: QueryBui
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {/* MeSH Terms */}
               <div>
                 <h4 className="font-medium mb-2 text-sm">Términos MeSH</h4>
@@ -312,7 +312,7 @@ export default function QueryBuilder({ availableTerms, onQueryChange }: QueryBui
             <CardTitle className="text-sm">Preview de Query</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="bg-muted p-4 rounded-lg font-mono text-sm">
+            <div className="bg-muted p-4 rounded-lg font-mono text-sm overflow-x-auto">
               {buildQueryString() || 'La query aparecerá aquí...'}
             </div>
           </CardContent>

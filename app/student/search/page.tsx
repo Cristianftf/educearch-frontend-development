@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { searchApi } from '@/lib/api'
+import { searchAssistantApi } from '@/lib/search-assistant'
 import type { MeshTerm, SearchQuery, SearchSession, SearchFilters, SearchResult } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -32,6 +33,7 @@ import {
   Plus,
   X,
   Sparkles,
+  MessageSquare,
   History,
   Star,
   StarOff,
@@ -77,6 +79,29 @@ type NormalizedSearchFilters = Required<
   Pick<SearchFilters, 'yearRange' | 'studyTypes' | 'minSampleSize' | 'languages' | 'hasFullText' | 'maxResults'>
 >
 
+type AssistantMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+}
+
+type AssistantSuggestedFilters = {
+  yearFrom?: number
+  yearTo?: number
+  studyTypes?: string[]
+  hasFullText?: boolean
+  language?: string
+  minSampleSize?: number
+  maxResults?: number
+}
+
+type AssistantAutoPlan = {
+  terms: string[]
+  operators: BooleanOperator[]
+  filters?: AssistantSuggestedFilters
+  rationale: string
+}
+
 const DEFAULT_FILTERS: NormalizedSearchFilters = {
   yearRange: [2018, 2026],
   studyTypes: [],
@@ -85,6 +110,9 @@ const DEFAULT_FILTERS: NormalizedSearchFilters = {
   hasFullText: false,
   maxResults: 30,
 }
+
+const INITIAL_ASSISTANT_MESSAGE =
+  'Soy tu asistente IA de busqueda clinica. Puedo sugerir terminos MeSH, operadores y filtros listos para aplicar.'
 
 const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
@@ -273,6 +301,17 @@ export default function SearchPage() {
   const [selectedArticle, setSelectedArticle] = useState<SearchResult | null>(null)
   const [selectedResults, setSelectedResults] = useState<SearchResult[]>([])
   const [exportMessage, setExportMessage] = useState<string | null>(null)
+  const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([
+    { id: 'assistant-init', role: 'assistant', content: INITIAL_ASSISTANT_MESSAGE },
+  ])
+  const [assistantInput, setAssistantInput] = useState('')
+  const [assistantLoading, setAssistantLoading] = useState(false)
+  const [assistantStatus, setAssistantStatus] = useState<string | null>(null)
+  const [assistantTips, setAssistantTips] = useState<string[]>([])
+  const [assistantSuggestedTerms, setAssistantSuggestedTerms] = useState<MeshTerm[]>([])
+  const [assistantSuggestedOperators, setAssistantSuggestedOperators] = useState<BooleanOperator[]>([])
+  const [assistantSuggestedFilters, setAssistantSuggestedFilters] = useState<AssistantSuggestedFilters | null>(null)
+  const [assistantAutoPlan, setAssistantAutoPlan] = useState<AssistantAutoPlan | null>(null)
   const { toggleSearchFavorite } = useStudent()
   const router = useRouter()
 
@@ -461,6 +500,193 @@ export default function SearchPage() {
     })
   }, [])
 
+  const recentSearchTerms = useMemo(() => {
+    const unique = new Set<string>()
+    for (const query of searchHistory.slice(0, 6)) {
+      for (const term of query.terms ?? []) {
+        const value = typeof term?.term === 'string' ? term.term.trim() : ''
+        if (!value) continue
+        unique.add(value)
+        if (unique.size >= 8) break
+      }
+      if (unique.size >= 8) break
+    }
+    return Array.from(unique)
+  }, [searchHistory])
+
+  const askAssistant = useCallback(async (message: string) => {
+    const trimmed = message.trim()
+    if (!trimmed) return
+
+    const userMessage: AssistantMessage = {
+      id: `assistant-user-${Date.now()}`,
+      role: 'user',
+      content: trimmed,
+    }
+    setAssistantMessages((prev) => [...prev, userMessage])
+    setAssistantLoading(true)
+    setAssistantStatus(null)
+
+    try {
+      const response = await searchAssistantApi.ask({
+        message: trimmed,
+        selectedTerms: selectedTerms.map((term) => term.term),
+        operators,
+        recentTerms: recentSearchTerms,
+        filters: {
+          yearFrom: filters.yearRange[0],
+          yearTo: filters.yearRange[1],
+          studyTypes: filters.studyTypes,
+          hasFullText: filters.hasFullText,
+          language: filters.languages[0],
+          minSampleSize: filters.minSampleSize,
+          maxResults: filters.maxResults,
+        },
+      })
+
+      setAssistantMessages((prev) => [
+        ...prev,
+        {
+          id: `assistant-reply-${Date.now()}`,
+          role: 'assistant',
+          content: response.reply,
+        },
+      ])
+
+      const mappedTerms: MeshTerm[] = response.suggestedTerms.map((term, index) => ({
+        id: term.id || `${term.term.toUpperCase().replace(/\s+/g, '_')}-${index + 1}`,
+        term: term.term,
+        description: term.description,
+      }))
+
+      setAssistantSuggestedTerms(mappedTerms)
+      setAssistantSuggestedOperators(response.suggestedOperators as BooleanOperator[])
+      setAssistantSuggestedFilters(response.suggestedFilters ?? null)
+      const normalizedAutoPlan: AssistantAutoPlan | null =
+        response.canAutoApply && response.autoPlan && response.autoPlan.terms.length > 0
+          ? {
+              terms: response.autoPlan.terms.slice(0, 4),
+              operators: response.autoPlan.operators.filter((operator): operator is BooleanOperator =>
+                BOOLEAN_OPERATORS.includes(operator)
+              ),
+              filters: response.autoPlan.filters ?? undefined,
+              rationale: response.autoPlan.rationale,
+            }
+          : null
+      setAssistantAutoPlan(normalizedAutoPlan)
+      setAssistantTips(response.tips ?? [])
+      setAssistantStatus(
+        response.usedAi
+          ? 'Respuesta generada por IA en tiempo real.'
+          : 'Sin conexion a modelo IA. Configura GEMINI_API_KEY (o GOOGLE_AI_API_KEY) o GROQ_API_KEY en backend, o ejecuta Ollama en localhost:11434.'
+      )
+      setAssistantInput('')
+    } catch (err) {
+      const fallbackMessage =
+        err instanceof Error
+          ? `No pude consultar la IA externa ahora: ${err.message}`
+          : 'No pude consultar la IA externa ahora. Intenta de nuevo.'
+      setAssistantMessages((prev) => [
+        ...prev,
+        {
+          id: `assistant-error-${Date.now()}`,
+          role: 'assistant',
+          content: fallbackMessage,
+        },
+      ])
+      setAssistantAutoPlan(null)
+      setAssistantStatus('Fallo temporal del asistente.')
+    } finally {
+      setAssistantLoading(false)
+    }
+  }, [selectedTerms, operators, recentSearchTerms, filters])
+
+  const requestAssistantSuggestions = useCallback(() => {
+    const defaultPrompt =
+      selectedTerms.length > 0
+        ? `Optimiza mi estrategia para: ${selectedTerms.map((item) => item.term).join(', ')}`
+        : 'Sugiere terminos MeSH iniciales para una busqueda clinica.'
+    void askAssistant(defaultPrompt)
+  }, [askAssistant, selectedTerms])
+
+  const applySuggestedFiltersValue = useCallback((value: AssistantSuggestedFilters | null | undefined) => {
+    if (!value) return
+    setFilters((prev) => {
+      const nextYearRange = normalizeYearRange([
+        value.yearFrom ?? prev.yearRange[0],
+        value.yearTo ?? prev.yearRange[1],
+      ])
+
+      const nextStudyTypes = Array.isArray(value.studyTypes)
+        ? value.studyTypes
+            .map((entry) => normalizeStudyTypeValue(entry))
+            .filter((entry) => STUDY_TYPE_IDS.has(entry))
+        : prev.studyTypes
+
+      const languageCandidate =
+        typeof value.language === 'string'
+          ? [value.language]
+          : prev.languages
+
+      return {
+        ...prev,
+        yearRange: nextYearRange,
+        studyTypes: nextStudyTypes,
+        hasFullText:
+          typeof value.hasFullText === 'boolean'
+            ? value.hasFullText
+            : prev.hasFullText,
+        languages: normalizeLanguages(languageCandidate),
+        minSampleSize:
+          typeof value.minSampleSize === 'number' &&
+          Number.isFinite(value.minSampleSize)
+            ? clampNumber(Math.round(value.minSampleSize), 0, 1000)
+            : prev.minSampleSize,
+        maxResults:
+          typeof value.maxResults === 'number' &&
+          Number.isFinite(value.maxResults)
+            ? clampNumber(Math.round(value.maxResults), 5, 200)
+            : prev.maxResults,
+      }
+    })
+  }, [])
+
+  const applyAssistantFilters = useCallback(() => {
+    if (!assistantSuggestedFilters) return
+    applySuggestedFiltersValue(assistantSuggestedFilters)
+    setAssistantStatus('Filtros sugeridos aplicados al query.')
+  }, [assistantSuggestedFilters, applySuggestedFiltersValue])
+
+  const submitAssistantInput = useCallback(() => {
+    if (!assistantInput.trim()) return
+    void askAssistant(assistantInput)
+  }, [assistantInput, askAssistant])
+
+  const applyAssistantTerm = useCallback((term: MeshTerm) => {
+    setQueryMode('advanced')
+    addTerm(term)
+  }, [addTerm])
+
+  const applyAssistantOperator = useCallback((operator: BooleanOperator) => {
+    setQueryMode('advanced')
+    addOperator(operator)
+  }, [addOperator])
+
+  const applyAssistantAutoPlan = useCallback(() => {
+    if (!assistantAutoPlan) return
+    const mappedTerms: MeshTerm[] = assistantAutoPlan.terms.map((term, index) => ({
+      id: `${term.toUpperCase().replace(/\s+/g, '_')}-${index + 1}`,
+      term,
+      description: 'Termino aplicado desde plan IA',
+    }))
+    const normalized = normalizeQueryParts(mappedTerms, assistantAutoPlan.operators)
+    setQueryMode('advanced')
+    setSelectedTerms(normalized.terms)
+    setOperators(normalized.operators)
+    applySuggestedFiltersValue(assistantAutoPlan.filters)
+    setAssistantStatus(assistantAutoPlan.rationale || 'Plan IA aplicado.')
+  }, [assistantAutoPlan, applySuggestedFiltersValue])
+
   const yearRangeValue = filters.yearRange
   const minSampleValue = [filters.minSampleSize]
   const maxResultsValue = [filters.maxResults]
@@ -577,11 +803,11 @@ export default function SearchPage() {
         </p>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-6 xl:grid-cols-3">
         {/* Query Builder */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="space-y-6 min-w-0 xl:col-span-2">
           <Tabs value={queryMode} onValueChange={(value) => setQueryMode(value as 'visual' | 'advanced')} className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList className="grid h-auto w-full grid-cols-1 gap-2 sm:grid-cols-2">
               <TabsTrigger value="visual" className="flex items-center gap-2">
                 <Palette className="h-4 w-4" />
                 Constructor Visual
@@ -623,29 +849,28 @@ export default function SearchPage() {
                 {isLoadingSuggestions && (
                   <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin" />
                 )}
+                {/* Suggestions dropdown */}
+                {suggestions.length > 0 && (
+                  <Card className="absolute left-0 top-full z-10 mt-1 w-full max-h-64 overflow-auto shadow-lg">
+                    <CardContent className="p-2">
+                      {suggestions.map((term) => (
+                        <button
+                          key={term.id}
+                          className="w-full text-left px-3 py-2 rounded-md hover:bg-muted transition-colors"
+                          onClick={() => addTerm(term)}
+                        >
+                          <p className="font-medium">{term.term}</p>
+                          {term.description && (
+                            <p className="text-sm text-muted-foreground line-clamp-1">
+                              {term.description}
+                            </p>
+                          )}
+                        </button>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
               </div>
-
-              {/* Suggestions dropdown */}
-              {suggestions.length > 0 && (
-                <Card className="absolute z-10 w-full mt-1 max-h-64 overflow-auto shadow-lg">
-                  <CardContent className="p-2">
-                    {suggestions.map((term) => (
-                      <button
-                        key={term.id}
-                        className="w-full text-left px-3 py-2 rounded-md hover:bg-muted transition-colors"
-                        onClick={() => addTerm(term)}
-                      >
-                        <p className="font-medium">{term.term}</p>
-                        {term.description && (
-                          <p className="text-sm text-muted-foreground line-clamp-1">
-                            {term.description}
-                          </p>
-                        )}
-                      </button>
-                    ))}
-                  </CardContent>
-                </Card>
-              )}
 
               {/* Selected terms */}
               {selectedTerms.length > 0 && (
@@ -653,10 +878,10 @@ export default function SearchPage() {
                   <Label>Terminos seleccionados</Label>
                   <div className="flex flex-wrap gap-2">
                     {selectedTerms.map((term, index) => (
-                      <div key={term.id} className="flex items-center gap-1">
+                      <div key={term.id} className="flex max-w-full items-center gap-1">
                         {index > 0 && (
                           <select
-                            className="h-8 px-2 rounded border bg-background text-sm font-mono"
+                            className="h-8 max-w-[96px] px-2 rounded border bg-background text-sm font-mono"
                             value={operators[index - 1] || 'AND'}
                             onChange={(e) => {
                               const newOps = [...operators]
@@ -671,9 +896,9 @@ export default function SearchPage() {
                             ))}
                           </select>
                         )}
-                        <Badge variant="secondary" className="px-3 py-1.5 gap-2">
+                        <Badge variant="secondary" className="max-w-full px-3 py-1.5 gap-2">
                           <GripVertical className="h-3 w-3 text-muted-foreground" />
-                          {term.term}
+                          <span className="max-w-[40vw] truncate sm:max-w-[360px]">{term.term}</span>
                           <button
                             onClick={() => removeTerm(term.id)}
                             className="hover:text-destructive"
@@ -688,7 +913,7 @@ export default function SearchPage() {
               )}
 
               {/* Quick add operators */}
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {BOOLEAN_OPERATORS.map((op) => (
                   <Button
                     key={op}
@@ -759,7 +984,7 @@ export default function SearchPage() {
           {currentSession && (
             <Card>
               <CardHeader>
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <CardTitle className="text-lg">Resultados</CardTitle>
                     <CardDescription>
@@ -772,13 +997,13 @@ export default function SearchPage() {
                       )}
                     </CardDescription>
                   </div>
-                  <Button variant="outline" size="sm" onClick={exportSelection}>
+                  <Button variant="outline" size="sm" onClick={exportSelection} className="w-full sm:w-auto">
                     Exportar seleccion
                   </Button>
                 </div>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="h-[500px] pr-4">
+                <ScrollArea className="h-[420px] pr-4 sm:h-[500px]">
                   <div className="space-y-4">
                     {filteredResults.map((result) => {
                       const isSelected = selectedResults.some((item) => item.id === result.id)
@@ -789,7 +1014,7 @@ export default function SearchPage() {
                           onClick={() => setSelectedArticle(result)}
                         >
                         <CardContent className="p-4">
-                          <div className="flex items-start gap-4">
+                          <div className="flex items-start gap-3 sm:gap-4">
                             <Checkbox
                               id={`select-${result.id}`}
                               checked={isSelected}
@@ -797,7 +1022,7 @@ export default function SearchPage() {
                               onClick={(e) => e.stopPropagation()}
                             />
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-start justify-between gap-2">
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                                 <h3 className="font-medium leading-snug line-clamp-2">
                                   {result.title}
                                 </h3>
@@ -818,10 +1043,10 @@ export default function SearchPage() {
                                 {result.authors.slice(0, 3).join(', ')}
                                 {result.authors.length > 3 && ' et al.'}
                               </p>
-                              <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                                <span className="flex items-center gap-1">
+                              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                <span className="flex min-w-0 items-center gap-1">
                                   <BookOpen className="h-3 w-3" />
-                                  {result.journal}
+                                  <span className="truncate">{result.journal}</span>
                                 </span>
                                 <span className="flex items-center gap-1">
                                   <Calendar className="h-3 w-3" />
@@ -858,7 +1083,7 @@ export default function SearchPage() {
         </div>
 
         {/* Sidebar */}
-        <div className="space-y-6">
+        <div className="space-y-6 xl:sticky xl:top-4 self-start">
           {/* AI Assistant */}
           <Card className="border-primary/20 bg-primary/5">
             <CardHeader>
@@ -866,22 +1091,146 @@ export default function SearchPage() {
                 <Sparkles className="h-5 w-5 text-primary" />
                 Asistente IA
               </CardTitle>
-              <CardDescription>Sugerencias inteligentes para tu busqueda</CardDescription>
+              <CardDescription>Analiza tus terminos y propone mejoras aplicables</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Basandote en tus terminos, considera anadir:
-              </p>
-              <div className="space-y-2">
-                <Button variant="outline" size="sm" className="w-full justify-start bg-transparent">
-                  <Plus className="h-3 w-3 mr-2" />
-                  Treatment Outcome
+              <div className="rounded-lg border bg-background/70 p-3 space-y-3">
+                <div className="space-y-2 max-h-44 overflow-y-auto sm:max-h-52">
+                  {assistantMessages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`rounded-md px-3 py-2 text-xs leading-relaxed ${
+                        message.role === 'assistant'
+                          ? 'bg-muted text-foreground'
+                          : 'bg-primary text-primary-foreground'
+                      }`}
+                    >
+                      {message.content}
+                    </div>
+                  ))}
+                  {assistantLoading && (
+                    <div className="rounded-md px-3 py-2 text-xs bg-muted text-muted-foreground">
+                      Generando respuesta...
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    value={assistantInput}
+                    onChange={(event) => setAssistantInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        submitAssistantInput()
+                      }
+                    }}
+                    placeholder="Ej: optimiza mi query para evidencia reciente"
+                    className="h-8 text-xs min-w-0"
+                    disabled={assistantLoading}
+                  />
+                  <Button
+                    size="sm"
+                    variant="default"
+                    className="h-8 px-3 w-full sm:w-auto"
+                    disabled={assistantLoading || !assistantInput.trim()}
+                    onClick={submitAssistantInput}
+                  >
+                    <MessageSquare className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full sm:flex-1"
+                  onClick={requestAssistantSuggestions}
+                  disabled={assistantLoading}
+                >
+                  <Sparkles className="h-3.5 w-3.5 mr-2" />
+                  Generar sugerencias
                 </Button>
-                <Button variant="outline" size="sm" className="w-full justify-start bg-transparent">
-                  <Plus className="h-3 w-3 mr-2" />
-                  Clinical Trials as Topic
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full sm:flex-1"
+                  onClick={applyAssistantFilters}
+                  disabled={assistantLoading || !assistantSuggestedFilters}
+                >
+                  Aplicar filtros IA
                 </Button>
               </div>
+
+              {assistantAutoPlan && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="w-full"
+                  onClick={applyAssistantAutoPlan}
+                  disabled={assistantLoading}
+                >
+                  Aplicar plan IA completo
+                </Button>
+              )}
+
+              {assistantStatus && (
+                <p className="text-xs text-muted-foreground">{assistantStatus}</p>
+              )}
+
+              {assistantAutoPlan?.rationale && (
+                <p className="text-xs text-muted-foreground">{assistantAutoPlan.rationale}</p>
+              )}
+
+              {assistantSuggestedTerms.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">Terminos sugeridos:</p>
+                  <div className="space-y-2">
+                    {assistantSuggestedTerms.map((term) => (
+                      <Button
+                        key={term.id}
+                        variant="outline"
+                        size="sm"
+                        className="w-full justify-start bg-transparent h-auto py-2"
+                        onClick={() => applyAssistantTerm(term)}
+                      >
+                        <Plus className="h-3 w-3 mr-2 shrink-0" />
+                        <span className="text-left whitespace-normal break-words">{term.term}</span>
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {assistantSuggestedOperators.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">Operadores sugeridos:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {assistantSuggestedOperators.map((operator) => (
+                      <Button
+                        key={`assistant-operator-${operator}`}
+                        variant="secondary"
+                        size="sm"
+                        className="font-mono min-w-[64px]"
+                        onClick={() => applyAssistantOperator(operator)}
+                      >
+                        {operator}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {assistantTips.length > 0 && (
+                <div className="space-y-1">
+                  {assistantTips.map((tip, index) => (
+                    <p key={`assistant-tip-${index + 1}`} className="text-xs text-muted-foreground">
+                      {tip}
+                    </p>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -1038,7 +1387,7 @@ export default function SearchPage() {
                       <AccordionTrigger className="text-sm">
                         <div className="flex items-center gap-2">
                           {search.isFavorite && <Star className="h-3 w-3 text-warning" />}
-                          <span className="truncate max-w-[150px]">{search.rawQuery}</span>
+                          <span className="truncate max-w-[180px] sm:max-w-[240px]">{search.rawQuery}</span>
                         </div>
                       </AccordionTrigger>
                       <AccordionContent>
@@ -1120,9 +1469,9 @@ export default function SearchPage() {
                   </div>
                 )}
 
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <Button
-                    className="flex-1"
+                    className="w-full sm:flex-1"
                     onClick={() => {
                       addResultSelection(selectedArticle)
                       setSelectedArticle(null)
@@ -1131,7 +1480,7 @@ export default function SearchPage() {
                     Anadir a bibliografia
                   </Button>
                   {(selectedArticle.sourceUrl || selectedArticle.doi) && (
-                    <Button variant="outline" asChild>
+                    <Button variant="outline" asChild className="w-full sm:w-auto">
                       <a
                         href={selectedArticle.sourceUrl || `https://doi.org/${selectedArticle.doi}`}
                         target="_blank"
