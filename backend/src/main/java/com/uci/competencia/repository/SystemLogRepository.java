@@ -24,7 +24,21 @@ public interface SystemLogRepository extends JpaRepository<SystemLog, String>, J
     long countByTimestampBetween(LocalDateTime start, LocalDateTime end);
     long countByTimestampBetweenAndLevel(LocalDateTime start, LocalDateTime end, LogLevel level);
     Page<SystemLog> findByTimestampAfter(LocalDateTime start, Pageable pageable);
+    Page<SystemLog> findByLevelAndTimestampAfterOrderByTimestampDesc(LogLevel level, LocalDateTime start, Pageable pageable);
 
     @Query("select s.responseTime from SystemLog s where s.timestamp >= :start and s.responseTime is not null")
     List<Long> findResponseTimesSince(@Param("start") LocalDateTime start, Pageable pageable);
+
+    @Query("""
+        select s.endpoint,
+               count(s),
+               max(case when coalesce(s.responseStatus, 0) >= 400 then 1 else 0 end)
+        from SystemLog s
+        where s.timestamp >= :start
+          and s.endpoint is not null
+          and s.endpoint <> ''
+        group by s.endpoint
+        order by count(s) desc
+        """)
+    List<Object[]> summarizeEndpointUsageSince(@Param("start") LocalDateTime start, Pageable pageable);
 }

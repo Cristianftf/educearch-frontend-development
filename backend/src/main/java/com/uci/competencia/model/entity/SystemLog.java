@@ -38,16 +38,18 @@ public class SystemLog {
     
     private String endpoint;
     
-    @Lob
+    @Column(columnDefinition = "TEXT")
     private String requestDetails;
     
-    @Lob
+    @Column(columnDefinition = "TEXT")
     private String responseDetails;
     
     private Long responseTime;
     private Integer responseStatus;
     
+    @Column(columnDefinition = "TEXT")
     private String errorMessage;
+    @Column(columnDefinition = "TEXT")
     private String stackTrace;
     
     private String sessionId;

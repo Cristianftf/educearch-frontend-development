@@ -15,14 +15,6 @@ function areArraysEqual(a?: number[], b?: number[]) {
   return true
 }
 
-function useStableArray(values?: number[]) {
-  const ref = React.useRef<number[] | undefined>(values)
-  if (!areArraysEqual(values, ref.current)) {
-    ref.current = values ? [...values] : values
-  }
-  return ref.current
-}
-
 function Slider({
   className,
   defaultValue,
@@ -33,32 +25,31 @@ function Slider({
   ...props
 }: React.ComponentProps<typeof SliderPrimitive.Root>) {
   const isControlled = Array.isArray(value)
-  const sliderValue = useStableArray(isControlled ? value : undefined)
-  const sliderDefault = useStableArray(
-    !isControlled
-      ? Array.isArray(defaultValue)
-        ? defaultValue
-        : [min, max]
-      : undefined
-  )
+  const sliderValue = isControlled ? value : undefined
+  const sliderDefault = !isControlled && Array.isArray(defaultValue) ? defaultValue : undefined
+  
+  // Use ref to track the previously reported value to avoid recreating the callback
+  const lastReportedValueRef = React.useRef<number[] | undefined>(undefined)
 
   const _values = React.useMemo(
     () => {
-      const resolved = sliderValue ?? sliderDefault ?? [min, max]
+      const resolved = sliderValue ?? sliderDefault ?? [min]
       return resolved.length > 0 ? resolved : [min]
     },
-    [sliderValue, sliderDefault, min, max],
+    [sliderValue, sliderDefault, min],
   )
 
   const handleValueChange = React.useCallback(
     (nextValue: number[]) => {
       if (!onValueChange) return
-      if (areArraysEqual(nextValue, sliderValue)) {
+      // Compare with the last reported value, not the potentially stale prop value
+      if (areArraysEqual(nextValue, lastReportedValueRef.current)) {
         return
       }
+      lastReportedValueRef.current = nextValue
       onValueChange(nextValue)
     },
-    [onValueChange, sliderValue]
+    [onValueChange]
   )
 
   return (

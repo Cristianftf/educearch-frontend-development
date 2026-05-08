@@ -1,5 +1,6 @@
 import type { EvidenceItem, SearchQuery, SearchResult, VerificationResult, VerificationStatus } from '@/types'
 import { api } from './api-client'
+import { emitExternalApiActivity } from './external-api-activity'
 import { createLocalId, readLocalStorage, writeLocalStorage } from './student-resilience'
 
 const EXTERNAL_SEARCH_CACHE_KEY = 'student_fallback_health_external_search_cache_v1'
@@ -10,6 +11,7 @@ const FETCH_TIMEOUT_MS = 8000
 const SEARCH_CACHE_TTL_MS = 1000 * 60 * 60 * 12
 const VERIFICATION_CACHE_TTL_MS = 1000 * 60 * 60 * 24
 const BACKEND_PROXY_ATTEMPTS = 2
+const BACKEND_PROXY_TIMEOUT_MS = 7000
 
 type HealthProviderName = 'PubMed' | 'Europe PMC' | 'ClinicalTrials.gov'
 
@@ -35,6 +37,13 @@ type CachedVerificationEntry = {
 type SearchFallbackMatch = {
   provider: string
   results: SearchResult[]
+}
+
+type ExternalSearchActivityOptions = {
+  activityRunId?: string
+  preferDirectProviders?: boolean
+  backendProxyAttempts?: number
+  backendProxyTimeoutMs?: number
 }
 
 type ExternalSearchFilters = {
@@ -244,11 +253,50 @@ function applyFiltersToResults(results: SearchResult[], filters: ExternalSearchF
   })
 }
 
+function sanitizeQueryTerm(value: string): string {
+  return value.replace(/[\[\]{}()]/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function formatTermForQuery(term: string): string {
+  const sanitized = sanitizeQueryTerm(term).replace(/^"+|"+$/g, '').trim()
+  if (!sanitized) return ''
+  return /\s/.test(sanitized) ? `"${sanitized}"` : sanitized
+}
+
+function sanitizeAdvancedRawQuery(rawQuery: string): string {
+  if (!rawQuery) return ''
+  const withoutFilterBlocks = rawQuery.replace(
+    /\[(?:\d{4}\s*:\s*\d{4}|lang:[^\]]+|max:\d+|full-text)\]/gi,
+    ' '
+  )
+  return withoutFilterBlocks
+    .replace(/[\[\]{}()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function buildQueryFromTerms(query: SearchQuery): string {
+  const safeTerms = query.terms
+    .map((term) => formatTermForQuery(term.term))
+    .filter(Boolean)
+  if (!safeTerms.length) return ''
+
+  let composed = safeTerms[0]
+  for (let index = 1; index < safeTerms.length; index += 1) {
+    const operator = query.operators[index - 1]
+    const safeOperator = operator === 'OR' || operator === 'NOT' ? operator : 'AND'
+    composed += ` ${safeOperator} ${safeTerms[index]}`
+  }
+
+  return composed.trim()
+}
+
 function buildQueryText(query: SearchQuery): string {
-  const fromRaw = query.rawQuery?.trim()
+  const fromTerms = buildQueryFromTerms(query)
+  if (fromTerms) return fromTerms
+  const fromRaw = sanitizeAdvancedRawQuery(query.rawQuery?.trim() || '')
   if (fromRaw) return fromRaw
-  const joined = query.terms.map((term) => term.term).filter(Boolean).join(' ')
-  return joined || 'health evidence'
+  return 'health evidence'
 }
 
 function splitAuthorList(authorsRaw?: string): string[] {
@@ -299,6 +347,32 @@ function isRecentTimestamp(value: string, ttlMs: number): boolean {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function emitExternalSearchActivity(
+  runId: string | undefined,
+  provider: string,
+  status: 'info' | 'success' | 'warning' | 'error',
+  message: string,
+  latencyMs?: number,
+  resultCount?: number
+): void {
+  if (!runId) return
+  emitExternalApiActivity({
+    runId,
+    provider,
+    status,
+    message,
+    latencyMs,
+    resultCount,
+  })
+}
+
+function formatProviderError(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message.trim()
+  }
+  return 'Error desconocido'
 }
 
 function normalizeBackendResult(value: BackendProxyResult, index: number): SearchResult {
@@ -366,7 +440,10 @@ async function fetchJsonWithTimeout<T>(url: string): Promise<T> {
 async function searchHealthSourcesViaBackend(
   query: SearchQuery,
   limit: number,
-  filters: ExternalSearchFilters
+  filters: ExternalSearchFilters,
+  activityRunId?: string,
+  attempts = BACKEND_PROXY_ATTEMPTS,
+  requestTimeoutMs = BACKEND_PROXY_TIMEOUT_MS
 ): Promise<SearchFallbackMatch | null> {
   const queryText = buildQueryText(query).trim()
   if (!queryText) return null
@@ -383,10 +460,27 @@ async function searchHealthSourcesViaBackend(
     maxResults: filters.maxResults ?? limit,
   }
 
-  for (let attempt = 1; attempt <= BACKEND_PROXY_ATTEMPTS; attempt += 1) {
+  emitExternalSearchActivity(
+    activityRunId,
+    'Backend proxy',
+    'info',
+    'Consultando endpoint de respaldo del backend.'
+  )
+
+  const safeAttempts = Math.max(1, Math.min(3, Math.trunc(attempts)))
+  const safeRequestTimeoutMs = Math.max(1500, Math.min(9000, Math.trunc(requestTimeoutMs)))
+
+  for (let attempt = 1; attempt <= safeAttempts; attempt += 1) {
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 2500)
+    const timeoutId = setTimeout(() => controller.abort(), safeRequestTimeoutMs)
+    const startedAt = Date.now()
     try {
+      emitExternalSearchActivity(
+        activityRunId,
+        'Backend proxy',
+        'info',
+        `Intento ${attempt} de ${safeAttempts}.`
+      )
       const response = await api.post<BackendProxyResponse>(
         '/search/external-fallback',
         payload,
@@ -398,18 +492,41 @@ async function searchHealthSourcesViaBackend(
       const filtered = applyFiltersToResults(results, filters)
       const deduped = dedupeResults(filtered).slice(0, limit)
       if (!deduped.length) {
+        emitExternalSearchActivity(
+          activityRunId,
+          'Backend proxy',
+          'warning',
+          'Sin resultados útiles en el backend proxy.',
+          Date.now() - startedAt,
+          0
+        )
         return null
       }
       const provider =
         typeof response.provider === 'string' && response.provider.trim().length > 0
           ? response.provider
           : 'Backend proxy'
+      emitExternalSearchActivity(
+        activityRunId,
+        provider,
+        'success',
+        'Resultados obtenidos desde backend proxy.',
+        Date.now() - startedAt,
+        deduped.length
+      )
       return {
         provider,
         results: deduped,
       }
-    } catch {
-      if (attempt >= BACKEND_PROXY_ATTEMPTS) break
+    } catch (error) {
+      emitExternalSearchActivity(
+        activityRunId,
+        'Backend proxy',
+        attempt >= safeAttempts ? 'error' : 'warning',
+        `Fallo de proxy: ${formatProviderError(error)}`,
+        Date.now() - startedAt
+      )
+      if (attempt >= safeAttempts) break
       await sleep(140 * attempt)
     } finally {
       clearTimeout(timeoutId)
@@ -498,7 +615,14 @@ function buildEuropePmcQuery(queryText: string, filters: ExternalSearchFilters):
 }
 
 function buildClinicalTrialsQuery(queryText: string, filters: ExternalSearchFilters): string {
-  if (!Array.isArray(filters.studyTypes) || filters.studyTypes.length === 0) return queryText
+  const sanitizedBaseQuery = queryText
+    .replace(/\b(AND|OR|NOT)\b/gi, ' ')
+    .replace(/["'()[\]{}]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  const baseQuery = sanitizedBaseQuery || 'health evidence'
+  if (!Array.isArray(filters.studyTypes) || filters.studyTypes.length === 0) return baseQuery
   const keywords = filters.studyTypes
     .map((studyType) => normalizeStudyTypeValue(studyType))
     .map((studyType) => {
@@ -520,8 +644,8 @@ function buildClinicalTrialsQuery(queryText: string, filters: ExternalSearchFilt
       }
     })
     .filter(Boolean)
-  if (!keywords.length) return queryText
-  return `${queryText} ${keywords.join(' ')}`
+  if (!keywords.length) return baseQuery
+  return `${baseQuery} ${keywords.join(' ')}`
 }
 
 type PubMedSearchResponse = {
@@ -551,62 +675,95 @@ type PubMedSummaryResponse = {
 async function searchPubMed(
   queryText: string,
   limit: number,
-  filters: ExternalSearchFilters
+  filters: ExternalSearchFilters,
+  activityRunId?: string
 ): Promise<SearchProviderResponse> {
-  const effectiveQuery = buildPubMedQuery(queryText, filters)
-  const searchUrl =
-    `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi` +
-    `?db=pubmed&retmode=json&retmax=${limit}&sort=relevance&term=${encodeURIComponent(effectiveQuery)}`
-  const searchResponse = await fetchJsonWithTimeout<PubMedSearchResponse>(searchUrl)
-  const ids = searchResponse.esearchresult?.idlist?.filter(Boolean) ?? []
-  if (!ids.length) {
-    return { provider: 'PubMed', results: [] }
+  emitExternalSearchActivity(activityRunId, 'PubMed', 'info', 'Consultando PubMed en vivo.')
+  const startedAt = Date.now()
+  try {
+    const effectiveQuery = buildPubMedQuery(queryText, filters)
+    const searchUrl =
+      `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi` +
+      `?db=pubmed&retmode=json&retmax=${limit}&sort=relevance&term=${encodeURIComponent(effectiveQuery)}`
+    const searchResponse = await fetchJsonWithTimeout<PubMedSearchResponse>(searchUrl)
+    const ids = searchResponse.esearchresult?.idlist?.filter(Boolean) ?? []
+    if (!ids.length) {
+      emitExternalSearchActivity(
+        activityRunId,
+        'PubMed',
+        'warning',
+        'PubMed respondió sin coincidencias.',
+        Date.now() - startedAt,
+        0
+      )
+      return { provider: 'PubMed', results: [] }
+    }
+
+    const summaryUrl =
+      `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi` +
+      `?db=pubmed&retmode=json&id=${encodeURIComponent(ids.join(','))}`
+    const summaryResponse = await fetchJsonWithTimeout<PubMedSummaryResponse>(summaryUrl)
+    const resultContainer = summaryResponse.result
+    const uids = resultContainer?.uids ?? ids
+
+    const results: SearchResult[] = uids
+      .map((uid) => {
+        const item = resultContainer?.[uid]
+        if (!item || Array.isArray(item) || typeof item !== 'object') return null
+        const record = item as PubMedSummaryRecord
+        const doi = toDoi(
+          record.articleids?.find((entry) => normalizeText(entry.idtype || '') === 'doi')?.value
+        )
+        const authors = Array.isArray(record.authors)
+          ? record.authors
+              .map((author) => author.name?.trim())
+              .filter((author): author is string => Boolean(author))
+          : []
+        const pmid = record.uid || uid
+        const studyType = Array.isArray(record.pubtype) ? record.pubtype[0] || 'Journal Article' : 'Journal Article'
+        return withSource(
+          {
+            id: pmid || createLocalId('pmid'),
+            pmid: pmid || '',
+            title: record.title || 'Untitled PubMed record',
+            authors,
+            journal: record.fulljournalname || record.source || 'PubMed',
+            year: parseYear(record.pubdate),
+            abstract: 'Abstract available in PubMed detail page.',
+            studyType,
+            evidenceLevel: mapEvidenceLevel(studyType),
+            sampleSize: undefined,
+            hasConflictOfInterest: false,
+            doi,
+            sourceUrl: pmid ? `https://pubmed.ncbi.nlm.nih.gov/${pmid}/` : undefined,
+          },
+          'PubMed'
+        )
+      })
+      .filter((entry): entry is SearchResult => Boolean(entry))
+
+    const filteredResults = applyFiltersToResults(results, filters)
+    emitExternalSearchActivity(
+      activityRunId,
+      'PubMed',
+      filteredResults.length > 0 ? 'success' : 'warning',
+      filteredResults.length > 0
+        ? 'PubMed completó la búsqueda.'
+        : 'PubMed no aportó resultados tras aplicar filtros.',
+      Date.now() - startedAt,
+      filteredResults.length
+    )
+    return { provider: 'PubMed', results: filteredResults }
+  } catch (error) {
+    emitExternalSearchActivity(
+      activityRunId,
+      'PubMed',
+      'error',
+      `Error consultando PubMed: ${formatProviderError(error)}`,
+      Date.now() - startedAt
+    )
+    throw error
   }
-
-  const summaryUrl =
-    `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi` +
-    `?db=pubmed&retmode=json&id=${encodeURIComponent(ids.join(','))}`
-  const summaryResponse = await fetchJsonWithTimeout<PubMedSummaryResponse>(summaryUrl)
-  const resultContainer = summaryResponse.result
-  const uids = resultContainer?.uids ?? ids
-
-  const results: SearchResult[] = uids
-    .map((uid) => {
-      const item = resultContainer?.[uid]
-      if (!item || Array.isArray(item) || typeof item !== 'object') return null
-      const record = item as PubMedSummaryRecord
-      const doi = toDoi(
-        record.articleids?.find((entry) => normalizeText(entry.idtype || '') === 'doi')?.value
-      )
-      const authors = Array.isArray(record.authors)
-        ? record.authors
-            .map((author) => author.name?.trim())
-            .filter((author): author is string => Boolean(author))
-        : []
-      const pmid = record.uid || uid
-      const studyType = Array.isArray(record.pubtype) ? record.pubtype[0] || 'Journal Article' : 'Journal Article'
-      return withSource(
-        {
-          id: pmid || createLocalId('pmid'),
-          pmid: pmid || '',
-          title: record.title || 'Untitled PubMed record',
-          authors,
-          journal: record.fulljournalname || record.source || 'PubMed',
-          year: parseYear(record.pubdate),
-          abstract: 'Abstract available in PubMed detail page.',
-          studyType,
-          evidenceLevel: mapEvidenceLevel(studyType),
-          sampleSize: undefined,
-          hasConflictOfInterest: false,
-          doi,
-          sourceUrl: pmid ? `https://pubmed.ncbi.nlm.nih.gov/${pmid}/` : undefined,
-        },
-        'PubMed'
-      )
-    })
-    .filter((entry): entry is SearchResult => Boolean(entry))
-
-  return { provider: 'PubMed', results: applyFiltersToResults(results, filters) }
 }
 
 type EuropePmcResult = {
@@ -631,46 +788,71 @@ type EuropePmcResponse = {
 async function searchEuropePmc(
   queryText: string,
   limit: number,
-  filters: ExternalSearchFilters
+  filters: ExternalSearchFilters,
+  activityRunId?: string
 ): Promise<SearchProviderResponse> {
-  const effectiveQuery = buildEuropePmcQuery(queryText, filters)
-  const url =
-    `https://www.ebi.ac.uk/europepmc/webservices/rest/search` +
-    `?query=${encodeURIComponent(effectiveQuery)}&format=json&pageSize=${limit}&resultType=core`
-  const response = await fetchJsonWithTimeout<EuropePmcResponse>(url)
-  const items = response.resultList?.result ?? []
-  const results = items.map((item, index) => {
-    const pmid = item.pmid || ''
-    const doi = toDoi(item.doi)
-    const sourceRecordId = item.id || pmid || doi || `${Date.now()}-${index}`
-    const studyType = item.pubType || 'Journal Article'
-    const sourceUrl = pmid
-      ? `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`
-      : doi
-        ? `https://doi.org/${doi}`
-        : item.source && item.id
-          ? `https://europepmc.org/article/${item.source}/${item.id}`
-          : undefined
-    return withSource(
-      {
-        id: sourceRecordId,
-        pmid,
-        title: item.title || 'Untitled Europe PMC record',
-        authors: splitAuthorList(item.authorString),
-        journal: item.journalTitle || 'Europe PMC',
-        year: parseYear(item.pubYear),
-        abstract: safeSnippet(item.abstractText),
-        studyType,
-        evidenceLevel: mapEvidenceLevel(studyType),
-        sampleSize: undefined,
-        hasConflictOfInterest: false,
-        doi,
-        sourceUrl,
-      },
-      'Europe PMC'
+  emitExternalSearchActivity(activityRunId, 'Europe PMC', 'info', 'Consultando Europe PMC en vivo.')
+  const startedAt = Date.now()
+  try {
+    const effectiveQuery = buildEuropePmcQuery(queryText, filters)
+    const url =
+      `https://www.ebi.ac.uk/europepmc/webservices/rest/search` +
+      `?query=${encodeURIComponent(effectiveQuery)}&format=json&pageSize=${limit}&resultType=core`
+    const response = await fetchJsonWithTimeout<EuropePmcResponse>(url)
+    const items = response.resultList?.result ?? []
+    const results = items.map((item, index) => {
+      const pmid = item.pmid || ''
+      const doi = toDoi(item.doi)
+      const sourceRecordId = item.id || pmid || doi || `${Date.now()}-${index}`
+      const studyType = item.pubType || 'Journal Article'
+      const sourceUrl = pmid
+        ? `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`
+        : doi
+          ? `https://doi.org/${doi}`
+          : item.source && item.id
+            ? `https://europepmc.org/article/${item.source}/${item.id}`
+            : undefined
+      return withSource(
+        {
+          id: sourceRecordId,
+          pmid,
+          title: item.title || 'Untitled Europe PMC record',
+          authors: splitAuthorList(item.authorString),
+          journal: item.journalTitle || 'Europe PMC',
+          year: parseYear(item.pubYear),
+          abstract: safeSnippet(item.abstractText),
+          studyType,
+          evidenceLevel: mapEvidenceLevel(studyType),
+          sampleSize: undefined,
+          hasConflictOfInterest: false,
+          doi,
+          sourceUrl,
+        },
+        'Europe PMC'
+      )
+    })
+    const filteredResults = applyFiltersToResults(results, filters)
+    emitExternalSearchActivity(
+      activityRunId,
+      'Europe PMC',
+      filteredResults.length > 0 ? 'success' : 'warning',
+      filteredResults.length > 0
+        ? 'Europe PMC completó la búsqueda.'
+        : 'Europe PMC no aportó resultados tras aplicar filtros.',
+      Date.now() - startedAt,
+      filteredResults.length
     )
-  })
-  return { provider: 'Europe PMC', results: applyFiltersToResults(results, filters) }
+    return { provider: 'Europe PMC', results: filteredResults }
+  } catch (error) {
+    emitExternalSearchActivity(
+      activityRunId,
+      'Europe PMC',
+      'error',
+      `Error consultando Europe PMC: ${formatProviderError(error)}`,
+      Date.now() - startedAt
+    )
+    throw error
+  }
 }
 
 type ClinicalTrialsStudy = {
@@ -712,56 +894,86 @@ type ClinicalTrialsResponse = {
 async function searchClinicalTrials(
   queryText: string,
   limit: number,
-  filters: ExternalSearchFilters
+  filters: ExternalSearchFilters,
+  activityRunId?: string
 ): Promise<SearchProviderResponse> {
-  const effectiveQuery = buildClinicalTrialsQuery(queryText, filters)
-  const url =
-    `https://clinicaltrials.gov/api/v2/studies` +
-    `?query.term=${encodeURIComponent(effectiveQuery)}&pageSize=${limit}`
-  const response = await fetchJsonWithTimeout<ClinicalTrialsResponse>(url)
-  const studies = response.studies ?? []
-  const results = studies
-    .map((study, index) => {
-      const identification = study.protocolSection?.identificationModule
-      const statusModule = study.protocolSection?.statusModule
-      const designModule = study.protocolSection?.designModule
-      const nctId = identification?.nctId
-      if (!nctId) return null
-      const sponsor = study.protocolSection?.sponsorCollaboratorsModule?.leadSponsor?.name
-      const title = identification.briefTitle || identification.officialTitle || `Clinical trial ${index + 1}`
-      const summary = study.protocolSection?.descriptionModule?.briefSummary
-      const studyType = designModule?.studyType || 'Clinical Trial'
-      const rawSampleSize = designModule?.enrollmentInfo?.count
-      const sampleSize =
-        typeof rawSampleSize === 'number'
-          ? rawSampleSize
-          : typeof rawSampleSize === 'string'
-            ? Number.parseInt(rawSampleSize, 10)
-            : undefined
-      return withSource(
-        {
-          id: nctId,
-          pmid: '',
-          title,
-          authors: sponsor ? [sponsor] : ['ClinicalTrials.gov'],
-          journal: 'ClinicalTrials.gov',
-          year: parseYear(statusModule?.startDateStruct?.date || statusModule?.completionDateStruct?.date),
-          abstract: safeSnippet(summary),
-          studyType,
-          evidenceLevel: mapEvidenceLevel(studyType),
-          sampleSize:
-            typeof sampleSize === 'number' && Number.isFinite(sampleSize)
-              ? sampleSize
-              : undefined,
-          hasConflictOfInterest: false,
-          sourceUrl: `https://clinicaltrials.gov/study/${nctId}`,
-        },
-        'ClinicalTrials.gov'
-      )
-    })
-    .filter((entry): entry is SearchResult => Boolean(entry))
+  emitExternalSearchActivity(
+    activityRunId,
+    'ClinicalTrials.gov',
+    'info',
+    'Consultando ClinicalTrials.gov en vivo.'
+  )
+  const startedAt = Date.now()
+  try {
+    const effectiveQuery = buildClinicalTrialsQuery(queryText, filters)
+    const url =
+      `https://clinicaltrials.gov/api/v2/studies` +
+      `?query.term=${encodeURIComponent(effectiveQuery)}&pageSize=${limit}`
+    const response = await fetchJsonWithTimeout<ClinicalTrialsResponse>(url)
+    const studies = response.studies ?? []
+    const results = studies
+      .map((study, index) => {
+        const identification = study.protocolSection?.identificationModule
+        const statusModule = study.protocolSection?.statusModule
+        const designModule = study.protocolSection?.designModule
+        const nctId = identification?.nctId
+        if (!nctId) return null
+        const sponsor = study.protocolSection?.sponsorCollaboratorsModule?.leadSponsor?.name
+        const title = identification.briefTitle || identification.officialTitle || `Clinical trial ${index + 1}`
+        const summary = study.protocolSection?.descriptionModule?.briefSummary
+        const studyType = designModule?.studyType || 'Clinical Trial'
+        const rawSampleSize = designModule?.enrollmentInfo?.count
+        const sampleSize =
+          typeof rawSampleSize === 'number'
+            ? rawSampleSize
+            : typeof rawSampleSize === 'string'
+              ? Number.parseInt(rawSampleSize, 10)
+              : undefined
+        return withSource(
+          {
+            id: nctId,
+            pmid: '',
+            title,
+            authors: sponsor ? [sponsor] : ['ClinicalTrials.gov'],
+            journal: 'ClinicalTrials.gov',
+            year: parseYear(statusModule?.startDateStruct?.date || statusModule?.completionDateStruct?.date),
+            abstract: safeSnippet(summary),
+            studyType,
+            evidenceLevel: mapEvidenceLevel(studyType),
+            sampleSize:
+              typeof sampleSize === 'number' && Number.isFinite(sampleSize)
+                ? sampleSize
+                : undefined,
+            hasConflictOfInterest: false,
+            sourceUrl: `https://clinicaltrials.gov/study/${nctId}`,
+          },
+          'ClinicalTrials.gov'
+        )
+      })
+      .filter((entry): entry is SearchResult => Boolean(entry))
 
-  return { provider: 'ClinicalTrials.gov', results: applyFiltersToResults(results, filters) }
+    const filteredResults = applyFiltersToResults(results, filters)
+    emitExternalSearchActivity(
+      activityRunId,
+      'ClinicalTrials.gov',
+      filteredResults.length > 0 ? 'success' : 'warning',
+      filteredResults.length > 0
+        ? 'ClinicalTrials.gov completó la búsqueda.'
+        : 'ClinicalTrials.gov no aportó resultados tras aplicar filtros.',
+      Date.now() - startedAt,
+      filteredResults.length
+    )
+    return { provider: 'ClinicalTrials.gov', results: filteredResults }
+  } catch (error) {
+    emitExternalSearchActivity(
+      activityRunId,
+      'ClinicalTrials.gov',
+      'error',
+      `Error consultando ClinicalTrials.gov: ${formatProviderError(error)}`,
+      Date.now() - startedAt
+    )
+    throw error
+  }
 }
 
 function readSearchCache(): CachedSearchEntry[] {
@@ -821,23 +1033,62 @@ export function getCachedHealthSearchResults(query: SearchQuery): SearchFallback
 
 export async function searchHealthSources(
   query: SearchQuery,
-  limit = DEFAULT_RESULTS_LIMIT
+  limit = DEFAULT_RESULTS_LIMIT,
+  options?: ExternalSearchActivityOptions
 ): Promise<SearchFallbackMatch | null> {
+  const activityRunId = options?.activityRunId
+  const preferDirectProviders = options?.preferDirectProviders === true
+  const backendProxyAttempts = options?.backendProxyAttempts
+  const backendProxyTimeoutMs = options?.backendProxyTimeoutMs
   const queryText = buildQueryText(query)
   const safeLimit = Math.max(4, Math.min(30, Math.trunc(limit)))
   const normalizedFilters = normalizeExternalFilters(query, safeLimit)
   const effectiveLimit = normalizedFilters.maxResults ?? safeLimit
 
-  const backendProxyMatch = await searchHealthSourcesViaBackend(query, effectiveLimit, normalizedFilters)
+  emitExternalSearchActivity(
+    activityRunId,
+    'Fallback externo',
+    'info',
+    'Iniciando consultas de evidencia en fuentes externas.'
+  )
+
+  const backendProxyMatch = await searchHealthSourcesViaBackend(
+    query,
+    effectiveLimit,
+    normalizedFilters,
+    activityRunId,
+    typeof backendProxyAttempts === 'number'
+      ? backendProxyAttempts
+      : preferDirectProviders
+        ? 1
+        : BACKEND_PROXY_ATTEMPTS,
+    typeof backendProxyTimeoutMs === 'number'
+      ? backendProxyTimeoutMs
+      : preferDirectProviders
+        ? BACKEND_PROXY_TIMEOUT_MS
+        : BACKEND_PROXY_TIMEOUT_MS
+  )
   if (backendProxyMatch?.results?.length) {
     writeSearchCacheEntry(queryText, normalizedFilters, backendProxyMatch.provider, backendProxyMatch.results)
     return backendProxyMatch
   }
 
+  emitExternalSearchActivity(
+    activityRunId,
+    'Fallback externo',
+    'info',
+    'Consultando proveedores públicos en paralelo.'
+  )
+
   const providers: Array<() => Promise<SearchProviderResponse>> = [
-    () => searchPubMed(queryText, effectiveLimit, normalizedFilters),
-    () => searchEuropePmc(queryText, effectiveLimit, normalizedFilters),
-    () => searchClinicalTrials(queryText, Math.max(5, Math.min(20, effectiveLimit)), normalizedFilters),
+    () => searchPubMed(queryText, effectiveLimit, normalizedFilters, activityRunId),
+    () => searchEuropePmc(queryText, effectiveLimit, normalizedFilters, activityRunId),
+    () => searchClinicalTrials(
+      queryText,
+      Math.max(5, Math.min(20, effectiveLimit)),
+      normalizedFilters,
+      activityRunId
+    ),
   ]
 
   const settledResponses = await Promise.allSettled(providers.map((runProvider) => runProvider()))
@@ -853,9 +1104,25 @@ export async function searchHealthSources(
   }
 
   const deduped = dedupeResults(aggregated).slice(0, effectiveLimit)
-  if (!deduped.length) return null
+  if (!deduped.length) {
+    emitExternalSearchActivity(
+      activityRunId,
+      'Fallback externo',
+      'error',
+      'No se recuperaron resultados reales desde proveedores externos.'
+    )
+    return null
+  }
 
   const providerLabel = usedProviders.join(' + ')
+  emitExternalSearchActivity(
+    activityRunId,
+    providerLabel || 'Fallback externo',
+    'success',
+    'Agregación de proveedores completada.',
+    undefined,
+    deduped.length
+  )
   writeSearchCacheEntry(queryText, normalizedFilters, providerLabel, deduped)
   return {
     provider: providerLabel,
@@ -931,6 +1198,10 @@ function buildEvidenceItem(
     relevanceScore,
     source: result.source,
     sourceUrl: result.sourceUrl || (result.doi ? `https://doi.org/${result.doi}` : undefined),
+    evidenceLevel: typeof result.evidenceLevel === 'number' ? result.evidenceLevel : undefined,
+    similarityScore: relevanceScore / 100,
+    year: parseYear(result.year),
+    studyType: result.studyType,
   }
 }
 
@@ -977,13 +1248,32 @@ function buildClaimQuery(claim: string): SearchQuery {
 
 export async function verifyClaimWithHealthSources(
   claim: string,
-  _sourceUrl?: string
+  _sourceUrl?: string,
+  options?: {
+    activityRunId?: string
+    maxResults?: number
+    preferDirectProviders?: boolean
+    backendProxyAttempts?: number
+    backendProxyTimeoutMs?: number
+  }
 ): Promise<VerificationResult | null> {
   const targetClaim = claim.trim()
   if (!targetClaim) return null
 
   const query = buildClaimQuery(targetClaim)
-  const response = (await searchHealthSources(query, 10)) ?? getCachedHealthSearchResults(query)
+  const safeLimit =
+    typeof options?.maxResults === 'number' && Number.isFinite(options.maxResults)
+      ? Math.max(4, Math.min(20, Math.trunc(options.maxResults)))
+      : 10
+
+  const response =
+    (await searchHealthSources(query, safeLimit, {
+      activityRunId: options?.activityRunId,
+      preferDirectProviders: options?.preferDirectProviders ?? false,
+      backendProxyAttempts: options?.backendProxyAttempts ?? BACKEND_PROXY_ATTEMPTS,
+      backendProxyTimeoutMs: options?.backendProxyTimeoutMs ?? BACKEND_PROXY_TIMEOUT_MS,
+    })) ??
+    getCachedHealthSearchResults(query)
   if (!response || !response.results.length) {
     return null
   }
@@ -992,8 +1282,8 @@ export async function verifyClaimWithHealthSources(
   const claimHasNegation = NEGATION_REGEX.test(targetClaim)
   const evidence = response.results.map((result) => buildEvidenceItem(result, claimTokens, claimHasNegation))
   const sortedEvidence = evidence.sort((a, b) => b.relevanceScore - a.relevanceScore)
-  const supportingEvidence = sortedEvidence.filter((item) => item.supports).slice(0, 4)
-  const contradictingEvidence = sortedEvidence.filter((item) => !item.supports).slice(0, 4)
+  const supportingEvidence = sortedEvidence.filter((item) => item.supports).slice(0, 5)
+  const contradictingEvidence = sortedEvidence.filter((item) => !item.supports).slice(0, 5)
   const { status, score } = computeStatusAndScore(supportingEvidence, contradictingEvidence)
 
   const result: VerificationResult = {

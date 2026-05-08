@@ -28,7 +28,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/chat")
-@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:3001", "https://frontend.uci.cu"})
 @PreAuthorize("hasAnyRole('STUDENT', 'PROFESSOR', 'ADMIN')")
 @RequiredArgsConstructor
 @Slf4j

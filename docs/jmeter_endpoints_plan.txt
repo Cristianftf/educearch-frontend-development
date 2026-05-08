@@ -1,0 +1,479 @@
+JMeter Performance Test Plan - Endpoints Importantes
+====================================================
+
+Base URL para pruebas:
+- http://localhost:8080/api
+
+Nota:
+- El frontend en desarrollo reescribe /api hacia el backend.
+- Para JMeter conviene probar directamente contra el backend en http://localhost:8080/api.
+- Casi todos los endpoints requieren JWT Bearer Authorization salvo /api/auth/login y /api/auth/register.
+- En desarrollo, el backend también puede bloquear endpoints sensibles por IP whitelist; use localhost/127.0.0.1/::1.
+
+Headers comunes para JMeter:
+- Content-Type: application/json
+- Accept: application/json
+- Authorization: Bearer ${auth_token}
+- X-UCI-Platform: competencia-informacional
+
+Variables JMeter sugeridas:
+- ${auth_token}
+- ${refresh_token}
+- ${user_email}
+- ${user_password}
+- ${student_id}
+- ${professor_id}
+- ${verificationId}
+- ${searchId}
+- ${caseId}
+- ${submissionId}
+- ${admin_backupId}
+
+Test flow recomendados:
+1. Login
+2. Extraer token del login
+3. Probar búsqueda /search/execute
+4. Probar verificación /verify/claim
+5. Probar dashboard correspondiente según rol
+6. Probar endpoints admin de carga ligera /admin/dashboard, /admin/health
+
+------------------------------
+1. Autenticación
+------------------------------
+
+POST /api/auth/login
+- Auth: no
+- Payload JSON:
+  {
+    "email": "admin@uci.cu",
+    "password": "Admin123!"
+  }
+- Respuesta: token + refreshToken + user datos
+- JMeter: usar JSON Extractor para capturar ${auth_token} desde $.token
+- Prueba: alto volumen de logins concurrentes y errores de credencial.
+
+POST /api/auth/refresh
+- Auth: Bearer refresh token
+- Header: Authorization: Bearer ${refresh_token}
+- Payload: ninguno
+- Respuesta: nuevo token + refreshToken
+- Prueba: medir latencia de renovación y carga de token refresh.
+
+GET /api/auth/me
+- Auth: Bearer ${auth_token}
+- Respuesta: datos del usuario autenticado
+- Prueba: útil como comprobación de autorización antes de otros endpoints.
+
+POST /api/auth/logout
+- Auth: Bearer ${auth_token}
+- Payload: ninguno
+- Prueba: función normal, carga baja.
+
+POST /api/auth/register
+- Auth: no
+- Payload ejemplo:
+  {
+    "email": "student1@uci.cu",
+    "username": "student1",
+    "name": "Alumno Uno",
+    "password": "Password1!",
+    "faculty": "Medicina",
+    "department": "Salud"
+  }
+- Prueba: solo si desea simular registro de nuevos usuarios.
+
+------------------------------
+2. Búsqueda
+------------------------------
+
+POST /api/search/execute
+- Auth: Bearer STUDENT o PROFESSOR
+- Payload ejemplo:
+  {
+    "query": {
+      "terms": ["COVID-19 vacunas"],
+      "operators": ["AND"]
+    },
+    "filters": {
+      "yearFrom": 2020,
+      "yearTo": 2024,
+      "studyTypes": ["clinical trial"],
+      "hasFullText": true,
+      "language": "en",
+      "maxResults": 50
+    },
+    "context": {
+      "userId": "${student_id}",
+      "isPractice": false
+    }
+  }
+- Respuesta: SearchResponseDTO con resultados
+- Prueba: uno de los endpoints de carga más importantes.
+- Datos de prueba: queries reales de salud pública o evidencia.
+
+POST /api/search/assistant
+- Auth: Bearer STUDENT o PROFESSOR
+- Payload similar a:
+  {
+    "query": {
+      "terms": ["diagnóstico de tuberculosis"],
+      "operators": ["AND"]
+    },
+    "context": {
+      "userId": "${student_id}"
+    }
+  }
+- Respuesta: asistencia tipo chat / sugerencias
+- Prueba: mide integración con IA/servicios externos.
+
+POST /api/search/external-fallback
+- Auth: Bearer STUDENT o PROFESSOR
+- Payload ejemplo:
+  {
+    "queryText": "inflamación crónica intestino",
+    "maxResults": 10
+  }
+- Respuesta: ExternalHealthSearchResponseDTO
+- Prueba: carga sobre consulta externa de fallback.
+
+GET /api/search/mesh/suggestions?term={term}
+- Auth: Bearer STUDENT o PROFESSOR
+- Ejemplo: /api/search/mesh/suggestions?term=diabetes
+- Respuesta: lista de sugerencias MeSH
+- Prueba: carga ligera para autocompletado.
+
+GET /api/search/results/{searchId}/evidence-pyramid
+- Auth: Bearer STUDENT o PROFESSOR
+- Requiere searchId válido
+- Respuesta: datos de pirámide de evidencia
+- Prueba: acceso a datos ya guardados en historial.
+
+GET /api/search/history?page=1&limit=10
+- Auth: Bearer STUDENT o PROFESSOR
+- Respuesta: historial paginado
+- Prueba: tráfico de lectura de historial.
+
+PUT /api/search/{searchId}
+- Auth: Bearer STUDENT o PROFESSOR
+- Payload ejemplo:
+  { "isFavorite": true }
+- Respuesta: actualiza búsqueda guardada
+- Prueba: carga de actualización de estado.
+
+DELETE /api/search/{searchId}
+- Auth: Bearer STUDENT o PROFESSOR
+- Prueba: eliminación de historia.
+
+GET /api/search/sessions/{sessionId}
+- Auth: Bearer STUDENT o PROFESSOR
+- Respuesta: detalle de sesión de búsqueda
+- Prueba: lectura de sesión y resultados.
+
+------------------------------
+3. Verificación de claims
+------------------------------
+
+POST /api/verify/claim
+- Auth: Bearer STUDENT o PROFESSOR
+- Payload ejemplo:
+  {
+    "claimText": "Los antibióticos son efectivos contra virus",
+    "sourceUrl": "",
+    "context": {
+      "caseId": "${caseId}",
+      "studentId": "${student_id}"
+    }
+  }
+- Respuesta: VerificationResponseDTO
+- Prueba: endpoint crítico y pesado si conecta con servicios externos.
+
+GET /api/verify/result/{verificationId}
+- Auth: Bearer STUDENT o PROFESSOR
+- Prueba: obtener resultado posterior a la petición de verificación.
+
+GET /api/verify/history?page=1&limit=10
+- Auth: Bearer STUDENT o PROFESSOR
+- Prueba: historial de verificaciones.
+
+------------------------------
+4. Dashboard estudiante
+------------------------------
+
+GET /api/student/dashboard/overview
+- Auth: Bearer STUDENT
+- Respuesta: StudentProgressDTO
+- Prueba: carga de inicio de sesión / vista estudiante.
+
+GET /api/student/progress/detailed
+- Auth: Bearer STUDENT
+- Respuesta: progreso detallado
+- Prueba: métricas de rendimiento de consulta de progreso.
+
+GET /api/student/search/history
+- Auth: Bearer STUDENT
+- Respuesta: lista de búsquedas guardadas
+- Prueba: carga de lectura de historial de usuario.
+
+------------------------------
+5. Dashboard profesor
+------------------------------
+
+GET /api/professor/analytics/overview
+- Auth: Bearer PROFESSOR
+- Respuesta: métricas generales de profesor
+- Prueba: dashboard del profesor.
+
+GET /api/professor/dashboard/overview
+- Auth: Bearer PROFESSOR
+- Mismo uso que analytics overview
+
+GET /api/professor/analytics/student/{studentId}
+- Auth: Bearer PROFESSOR
+- Respuesta: progreso de un alumno específico
+
+GET /api/professor/students
+- Auth: Bearer PROFESSOR
+
+GET /api/professor/cases
+- Auth: Bearer PROFESSOR
+
+POST /api/professor/cases
+- Auth: Bearer PROFESSOR
+- Payload ejemplo aproximado:
+  {
+    "title": "Caso clínico 1",
+    "description": "Evaluar diagnóstico de paciente..."
+  }
+- Prueba: creación de caso y rendimiento de escritura.
+
+GET /api/professor/analytics/class-performance
+- Auth: Bearer PROFESSOR
+- Respuesta: métricas de clase
+
+------------------------------
+6. Chat
+------------------------------
+
+GET /api/chat/contacts
+- Auth: Bearer STUDENT, PROFESSOR, ADMIN
+- Prueba: carga de contactos del chat.
+
+GET /api/chat/messages?contactId={id}
+- Auth: Bearer STUDENT, PROFESSOR, ADMIN
+- Requiere query param contactId
+
+POST /api/chat/send
+- Auth: Bearer STUDENT, PROFESSOR, ADMIN
+- Payload ejemplo:
+  {
+    "recipientId": "${contactId}",
+    "message": "Hola, ¿cómo puedo..."
+  }
+- Prueba: envío de mensajes.
+
+POST /api/chat/read
+- Auth: Bearer STUDENT, PROFESSOR, ADMIN
+- Payload ejemplo:
+  { "messageId": "${messageId}" }
+
+------------------------------
+7. Exportación y bibliografía
+------------------------------
+
+POST /api/export/bibliography
+- Auth: Bearer STUDENT o PROFESSOR
+- Payload típico:
+  {
+    "searchId": "${searchId}",
+    "format": "APA",
+    "includeAbstract": true
+  }
+- Prueba: generación de exportes.
+
+POST /api/export/report/progress
+- Auth: Bearer STUDENT o PROFESSOR
+- Payload: reporte sobre progreso
+
+GET /api/export/download/{id}
+- Auth: Bearer STUDENT o PROFESSOR
+
+GET /api/bibliography/history
+- Auth: Bearer STUDENT o PROFESSOR
+
+GET /api/bibliography/{id}/download
+- Auth: Bearer STUDENT o PROFESSOR
+
+------------------------------
+8. Casos y entregas
+------------------------------
+
+GET /api/cases/students
+- Auth: Bearer PROFESSOR
+
+GET /api/cases/{id}
+- Auth: Bearer PROFESSOR
+
+PUT /api/cases/{id}
+- Auth: Bearer PROFESSOR
+- Payload ejemplo:
+  { "title": "Caso modificado", "description": "..." }
+
+DELETE /api/cases/{id}
+- Auth: Bearer PROFESSOR
+
+POST /api/cases/{id}/assign
+- Auth: Bearer PROFESSOR
+- Payload ejemplo:
+  { "studentId": "${student_id}" }
+
+GET /api/cases/{caseId}/submissions
+- Auth: Bearer PROFESSOR
+
+GET /api/cases/assigned
+- Auth: Bearer STUDENT
+
+POST /api/cases/{caseId}/submit
+- Auth: Bearer STUDENT
+- Payload aproximado:
+  { "answers": [{"questionId":"q1","response":"..."}] }
+
+GET /api/cases/{caseId}/submission
+- Auth: Bearer STUDENT
+
+POST /api/submissions/{submissionId}/evaluate
+- Auth: Bearer PROFESSOR
+- Payload ejemplo:
+  { "score": 85, "comments": "Buen trabajo" }
+
+------------------------------
+9. Administración
+------------------------------
+
+GET /api/admin/health
+- Auth: Bearer ADMIN
+- Prueba: endpoint de estado
+
+GET /api/admin/dashboard
+- Auth: Bearer ADMIN
+- Prueba: carga principal del panel admin
+
+GET /api/admin/system/overview
+- Auth: Bearer ADMIN
+
+GET /api/admin/settings
+- Auth: Bearer ADMIN
+
+PUT /api/admin/settings
+- Auth: Bearer ADMIN
+- Payload ejemplo:
+  {
+    "passwordMinLength": 8,
+    "passwordRequireNumbers": true,
+    "sessionTimeoutMinutes": 30,
+    "maxLoginAttempts": 5,
+    "lockoutDurationMinutes": 15
+  }
+
+GET /api/admin/backups
+- Auth: Bearer ADMIN
+
+POST /api/admin/backup
+- Auth: Bearer ADMIN
+- Payload ejemplo:
+  { "includeLogs": true }
+
+POST /api/admin/backups/{backupId}/restore
+- Auth: Bearer ADMIN
+
+DELETE /api/admin/backups/{backupId}
+- Auth: Bearer ADMIN
+
+GET /api/admin/alerts
+- Auth: Bearer ADMIN
+
+POST /api/admin/alerts
+- Auth: Bearer ADMIN
+- Payload ejemplo:
+  {
+    "condition": "SYSTEM_ALERT",
+    "action": "NOTIFY",
+    "severity": "warning"
+  }
+
+PUT /api/admin/alerts/{alertId}
+- Auth: Bearer ADMIN
+
+DELETE /api/admin/alerts/{alertId}
+- Auth: Bearer ADMIN
+
+POST /api/admin/external-apis/check
+- Auth: Bearer ADMIN
+- Payload opcional: { "queryText": "cáncer" }
+
+POST /api/admin/test-pubmed
+- Auth: Bearer ADMIN
+
+POST /api/admin/cache/clear
+- Auth: Bearer ADMIN
+
+POST /api/admin/db/optimize
+- Auth: Bearer ADMIN
+
+POST /api/admin/logs/cleanup
+- Auth: Bearer ADMIN
+
+POST /api/admin/search/reindex
+- Auth: Bearer ADMIN
+
+------------------------------
+10. Sistema y métricas
+------------------------------
+
+GET /api/system/health
+- Auth: Bearer ADMIN
+
+GET /api/system/metrics/prometheus
+- Auth: Bearer ADMIN
+
+------------------------------
+Elementos importantes de seguridad para JMeter
+------------------------------
+- Use un sampler de login inicial para obtener token JWT.
+- Coloque el token en Authorization para las peticiones protegidas.
+- No olvide incluir Content-Type y Accept.
+- Si desea simular carga admin en local, asegúrese de ejecutar JMeter desde la máquina que el backend reconoce como localhost.
+- Para endpoints que usan roles, pruebe con:
+  - STUDENT: accesos student/search/verify
+  - PROFESSOR: accesos professor/cases/search
+  - ADMIN: accesos admin/dashboard, system, backups
+
+------------------------------
+Recomendación general de JMeter
+------------------------------
+Thread Group:
+- Usuarios virtuales: 20-100 según capacidad
+- Ramp-up: 30-60 segundos
+- Loop count: 10-20
+
+CSV Data Set Config:
+- user_email,user_password,role
+- search_query
+- verification_claim
+- case_id
+- student_id
+- professor_id
+
+JSON Extractor:
+- Extraer token de login
+- Extraer IDs de search/result/verification si es necesario
+
+Assertions:
+- Response Code = 200
+- Response contains "token" en login
+- Response contains "dashboard" en admin/dashboard
+- Response contains "status":"UP" en system/health
+
+Monitorización:
+- CPU, memoria y uso de DB del backend
+- Latencia y percentiles 90 / 95 / 99
+- Errores 4xx/5xx en resultados

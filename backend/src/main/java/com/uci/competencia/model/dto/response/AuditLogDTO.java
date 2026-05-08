@@ -21,6 +21,9 @@ public class AuditLogDTO {
     private LocalDateTime timestamp;
     private String level; // INFO, WARN, ERROR
     private String userId;
+    private String userIdentifier;
+    private String userDisplayName;
+    private String userEmail;
     private String userRole;
     private String ipAddress;
     private String userAgent;

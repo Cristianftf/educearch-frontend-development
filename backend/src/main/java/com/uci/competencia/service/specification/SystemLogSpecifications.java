@@ -34,6 +34,15 @@ public class SystemLogSpecifications {
             return cb.equal(root.get("userId"), userId);
         };
     }
+
+    public static Specification<SystemLog> matchesUserIdentifier(String userIdentifier) {
+        return (root, query, cb) -> {
+            if (userIdentifier == null || userIdentifier.isBlank()) return cb.conjunction();
+            String normalized = userIdentifier.trim().toLowerCase();
+            String like = "%" + normalized + "%";
+            return cb.like(cb.lower(root.get("userId")), like);
+        };
+    }
     
     /**
      * Especificación para filtrar por acción

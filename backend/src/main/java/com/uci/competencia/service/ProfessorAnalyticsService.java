@@ -9,7 +9,7 @@ import java.util.Map;
 
 public interface ProfessorAnalyticsService {
     ProfessorAnalyticsDTO getAnalyticsOverview(String professorId);
-    StudentProgressDTO getStudentAnalytics(String studentId);
+    StudentProgressDTO getStudentAnalytics(String professorId, String studentId);
     
     List<StudentProgressDTO> getProfessorStudents(String professorId);
     List<CaseStudyDTO> getProfessorCases(String professorId);

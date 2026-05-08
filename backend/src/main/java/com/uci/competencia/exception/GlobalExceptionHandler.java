@@ -1,5 +1,6 @@
 package com.uci.competencia.exception;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -16,52 +17,16 @@ import java.util.Map;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(ResourceNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleResourceNotFound(ResourceNotFoundException ex, WebRequest request) {
-        ErrorResponse errorResponse = new ErrorResponse(
-            "RESOURCE_NOT_FOUND",
-            ex.getMessage(),
-            HttpStatus.NOT_FOUND.value()
-        );
-        errorResponse.setPath(request.getDescription(false).replace("uri=", ""));
-        return new ResponseEntity<>(errorResponse, HttpStatus.NOT_FOUND);
-    }
-
-    @ExceptionHandler(AuthenticationException.class)
-    public ResponseEntity<ErrorResponse> handleAuthenticationException(AuthenticationException ex, WebRequest request) {
-        ErrorResponse errorResponse = new ErrorResponse(
-            "AUTHENTICATION_FAILED",
-            ex.getMessage(),
-            HttpStatus.UNAUTHORIZED.value()
-        );
-        errorResponse.setPath(request.getDescription(false).replace("uri=", ""));
-        return new ResponseEntity<>(errorResponse, HttpStatus.UNAUTHORIZED);
-    }
-
-    @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<ErrorResponse> handleAccessDeniedException(AccessDeniedException ex, WebRequest request) {
-        ErrorResponse errorResponse = new ErrorResponse(
-            "ACCESS_DENIED",
-            "You don't have permission to access this resource",
-            HttpStatus.FORBIDDEN.value()
-        );
-        errorResponse.setPath(request.getDescription(false).replace("uri=", ""));
-        return new ResponseEntity<>(errorResponse, HttpStatus.FORBIDDEN);
-    }
-
-    @ExceptionHandler(InvalidCredentialsException.class)
-    public ResponseEntity<ErrorResponse> handleInvalidCredentialsException(InvalidCredentialsException ex, WebRequest request) {
-        ErrorResponse errorResponse = new ErrorResponse(
-            "INVALID_CREDENTIALS",
-            ex.getMessage(),
-            HttpStatus.UNAUTHORIZED.value()
-        );
-        errorResponse.setPath(request.getDescription(false).replace("uri=", ""));
-        return new ResponseEntity<>(errorResponse, HttpStatus.UNAUTHORIZED);
-    }
+    private record ErrorDescriptor(String code, HttpStatus status, String message) {}
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ErrorResponse> handleValidationException(MethodArgumentNotValidException ex, WebRequest request) {
+    public ResponseEntity<ErrorResponse> handleValidationException(
+        MethodArgumentNotValidException ex,
+        WebRequest request,
+        HttpServletRequest httpServletRequest
+    ) {
+        markRequestError(httpServletRequest, ex);
+
         Map<String, Object> details = new HashMap<>();
         ex.getBindingResult().getFieldErrors().forEach(error ->
             details.put(error.getField(), error.getDefaultMessage())
@@ -72,38 +37,144 @@ public class GlobalExceptionHandler {
             "Request validation failed",
             HttpStatus.BAD_REQUEST.value()
         );
-        errorResponse.setPath(request.getDescription(false).replace("uri=", ""));
+        errorResponse.setPath(resolvePath(request));
         errorResponse.setDetails(details);
         return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
     }
 
-    @ExceptionHandler(HttpMessageNotReadableException.class)
-    public ResponseEntity<ErrorResponse> handleNotReadableException(HttpMessageNotReadableException ex, WebRequest request) {
-        String message = "Malformed request payload";
-        Throwable root = ex.getMostSpecificCause();
-        if (root != null && root.getMessage() != null && !root.getMessage().isBlank()) {
-            message = root.getMessage();
-        } else if (ex.getMessage() != null && !ex.getMessage().isBlank()) {
-            message = ex.getMessage();
-        }
-
+    @ExceptionHandler({
+        ResourceNotFoundException.class,
+        InvalidCredentialsException.class,
+        AuthenticationException.class,
+        AccessDeniedException.class,
+        IllegalArgumentException.class,
+        HttpMessageNotReadableException.class,
+        Exception.class
+    })
+    public ResponseEntity<ErrorResponse> handleException(
+        Exception ex,
+        WebRequest request,
+        HttpServletRequest httpServletRequest
+    ) {
+        markRequestError(httpServletRequest, ex);
+        ErrorDescriptor descriptor = resolveErrorDescriptor(ex);
         ErrorResponse errorResponse = new ErrorResponse(
-            "INVALID_REQUEST_BODY",
-            message,
-            HttpStatus.BAD_REQUEST.value()
+            descriptor.code(),
+            descriptor.message(),
+            descriptor.status().value()
         );
-        errorResponse.setPath(request.getDescription(false).replace("uri=", ""));
-        return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
+        errorResponse.setPath(resolvePath(request));
+        return new ResponseEntity<>(errorResponse, descriptor.status());
     }
 
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<ErrorResponse> handleGenericException(Exception ex, WebRequest request) {
-        ErrorResponse errorResponse = new ErrorResponse(
+    private ErrorDescriptor resolveErrorDescriptor(Exception ex) {
+        if (ex instanceof ResourceNotFoundException) {
+            return new ErrorDescriptor(
+                "RESOURCE_NOT_FOUND",
+                HttpStatus.NOT_FOUND,
+                firstNonBlank(ex.getMessage(), "Requested resource was not found")
+            );
+        }
+
+        if (ex instanceof InvalidCredentialsException) {
+            return new ErrorDescriptor(
+                "INVALID_CREDENTIALS",
+                HttpStatus.UNAUTHORIZED,
+                firstNonBlank(ex.getMessage(), "Invalid credentials")
+            );
+        }
+
+        if (ex instanceof AuthenticationException) {
+            return new ErrorDescriptor(
+                "AUTHENTICATION_FAILED",
+                HttpStatus.UNAUTHORIZED,
+                firstNonBlank(ex.getMessage(), "Authentication failed")
+            );
+        }
+
+        if (ex instanceof AccessDeniedException) {
+            return new ErrorDescriptor(
+                "ACCESS_DENIED",
+                HttpStatus.FORBIDDEN,
+                "You don't have permission to access this resource"
+            );
+        }
+
+        if (ex instanceof HttpMessageNotReadableException notReadableException) {
+            Throwable root = notReadableException.getMostSpecificCause();
+            return new ErrorDescriptor(
+                "INVALID_REQUEST_BODY",
+                HttpStatus.BAD_REQUEST,
+                firstNonBlank(
+                    root != null ? root.getMessage() : null,
+                    ex.getMessage(),
+                    "Malformed request payload"
+                )
+            );
+        }
+
+        if (ex instanceof IllegalArgumentException) {
+            return new ErrorDescriptor(
+                "INVALID_ARGUMENT",
+                HttpStatus.BAD_REQUEST,
+                firstNonBlank(ex.getMessage(), "Invalid request")
+            );
+        }
+
+        String message = firstNonBlank(ex.getMessage(), "An unexpected error occurred");
+        String normalized = message.toLowerCase();
+
+        if (normalized.contains("not found")) {
+            return new ErrorDescriptor("RESOURCE_NOT_FOUND", HttpStatus.NOT_FOUND, message);
+        }
+
+        if (
+            normalized.contains("forbidden")
+                || normalized.contains("permission")
+                || normalized.contains("does not belong")
+        ) {
+            return new ErrorDescriptor("ACCESS_DENIED", HttpStatus.FORBIDDEN, message);
+        }
+
+        if (
+            normalized.contains("invalid")
+                || normalized.contains("cannot")
+                || normalized.contains("required")
+                || normalized.contains("malformed")
+                || normalized.contains("not active")
+                || normalized.contains("not assigned")
+        ) {
+            return new ErrorDescriptor("BUSINESS_RULE_VIOLATION", HttpStatus.BAD_REQUEST, message);
+        }
+
+        return new ErrorDescriptor(
             "INTERNAL_SERVER_ERROR",
-            "An unexpected error occurred",
-            HttpStatus.INTERNAL_SERVER_ERROR.value()
+            HttpStatus.INTERNAL_SERVER_ERROR,
+            "An unexpected error occurred"
         );
-        errorResponse.setPath(request.getDescription(false).replace("uri=", ""));
-        return new ResponseEntity<>(errorResponse, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    private String resolvePath(WebRequest request) {
+        return request.getDescription(false).replace("uri=", "");
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private void markRequestError(HttpServletRequest request, Exception ex) {
+        if (request == null || ex == null) {
+            return;
+        }
+        String message = ex.getClass().getSimpleName();
+        if (ex.getMessage() != null && !ex.getMessage().isBlank()) {
+            message = message + ": " + ex.getMessage();
+        }
+        request.setAttribute("system.error.message", message);
     }
 }

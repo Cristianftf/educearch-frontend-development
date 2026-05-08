@@ -7,20 +7,17 @@ import com.uci.competencia.model.dto.response.UserDTO;
 import com.uci.competencia.model.entity.User;
 import com.uci.competencia.model.enums.Role;
 import com.uci.competencia.repository.UserRepository;
+import com.uci.competencia.security.UserIdentityResolver;
 import com.uci.competencia.service.AuthService;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/auth")
-@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:3001", "https://frontend.uci.cu"})
 @Slf4j
 public class AuthController {
 
@@ -32,6 +29,9 @@ public class AuthController {
 
     @Autowired
     private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private UserIdentityResolver userIdentityResolver;
 
     @PostMapping("/login")
     public ResponseEntity<LoginResponseDTO> login(@Valid @RequestBody LoginRequestDTO loginRequest) {
@@ -95,27 +95,16 @@ public class AuthController {
     }
 
     @GetMapping("/me")
-    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<UserDTO> getCurrentUser() {
-        String email = getCurrentUserEmail();
-        if (email == null) {
+        User user = resolveCurrentUser();
+        if (user == null) {
             return ResponseEntity.status(401).build();
         }
-
-        User user = userRepository.findByEmail(email).orElse(null);
-        if (user == null) {
-            return ResponseEntity.notFound().build();
-        }
-
         return ResponseEntity.ok(toUserDTO(user));
     }
 
-    private String getCurrentUserEmail() {
-        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        if (principal instanceof UserDetails) {
-            return ((UserDetails) principal).getUsername();
-        }
-        return principal != null ? principal.toString() : null;
+    private User resolveCurrentUser() {
+        return userIdentityResolver.resolveCurrentUser().orElse(null);
     }
 
     private UserDTO toUserDTO(User user) {

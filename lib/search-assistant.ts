@@ -1,12 +1,20 @@
 import { api } from './api-client'
 
 export type AssistantOperator = 'AND' | 'OR' | 'NOT'
+export type AssistantConversationRole = 'user' | 'assistant'
+
+export interface AssistantConversationMessage {
+  role: AssistantConversationRole
+  content: string
+}
 
 export interface SearchAssistantRequest {
   message: string
   selectedTerms?: string[]
   operators?: AssistantOperator[]
   recentTerms?: string[]
+  projectContext?: string
+  conversationHistory?: AssistantConversationMessage[]
   filters?: {
     yearFrom?: number
     yearTo?: number

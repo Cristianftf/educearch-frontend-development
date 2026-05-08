@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useCallback, useEffect, useMemo } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useCallback, useEffect, useMemo, useState, type ElementType } from 'react'
 import Link from 'next/link'
+import { useParams, useRouter } from 'next/navigation'
 import { evaluationApi, casesApi } from '@/lib/api'
-import type { CaseSubmission, CaseStudy, CompetencyType } from '@/types'
+import type { CaseSubmission, CaseStudy, CompetencyType, Evaluation } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -12,120 +12,156 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Slider } from '@/components/ui/slider'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  ArrowLeft,
-  CheckCircle2,
-  FileText,
-  MessageSquare,
-  Search,
-  ShieldCheck,
-  Calendar,
-  Clock,
-} from 'lucide-react'
+import { ArrowLeft, Calendar, CheckCircle2, Clock, FileText, MessageSquare, Search, ShieldCheck } from 'lucide-react'
 
-interface RubricScore {
+const COMPETENCIES: CompetencyType[] = ['access', 'process', 'communicate']
+
+const competencyConfig: Record<
+  CompetencyType,
+  { label: string; icon: ElementType; description: string }
+> = {
+  access: {
+    label: 'Acceso a la información',
+    icon: Search,
+    description: 'Construcción de consulta, uso de operadores booleanos y términos MeSH.',
+  },
+  process: {
+    label: 'Procesamiento',
+    icon: ShieldCheck,
+    description: 'Evaluación crítica de evidencia, sesgos y pertinencia clínica.',
+  },
+  communicate: {
+    label: 'Comunicación',
+    icon: FileText,
+    description: 'Redacción, bibliografía y trazabilidad de la respuesta entregada.',
+  },
+}
+
+const quickFeedbackTemplates: Record<CompetencyType, string[]> = {
+  access: [
+    'La estrategia de búsqueda está bien delimitada y usa términos clínicos pertinentes.',
+    'Conviene ampliar el uso de MeSH y operadores para reducir ruido en los resultados.',
+    'La selección de estudios es adecuada para el objetivo del caso.',
+  ],
+  process: [
+    'El análisis crítico distingue bien nivel de evidencia y calidad metodológica.',
+    'Faltó justificar mejor por qué una fuente es más sólida que otra.',
+    'Sería útil identificar sesgos y limitaciones de los estudios utilizados.',
+  ],
+  communicate: [
+    'La respuesta final comunica con claridad la decisión clínica sustentada.',
+    'La bibliografía requiere mayor consistencia en el formato.',
+    'La argumentación está ordenada y enlaza bien evidencia con conclusión.',
+  ],
+}
+
+type RubricScore = {
   criteriaId: string
   score: number
   feedback: string
 }
 
-interface CompetencyFeedback {
-  competency: CompetencyType
-  comment: string
+const formatDate = (value?: string) => {
+  if (!value) return 'Sin fecha'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime())
+    ? 'Sin fecha'
+    : date.toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-const competencyConfig: Record<CompetencyType, { label: string; icon: React.ElementType; description: string }> = {
-  access: {
-    label: 'Acceso a la información',
-    icon: Search,
-    description: 'Uso de operadores booleanos, Términos MeSH y estrategias de Búsqueda',
-  },
-  process: {
-    label: 'Procesamiento de información',
-    icon: ShieldCheck,
-    description: 'evaluación crítica de la evidencia, identificación de sesgos',
-  },
-  communicate: {
-    label: 'Comunicación de información',
-    icon: FileText,
-    description: 'Formato de bibliografía, citación correcta, presentación',
-  },
+const safeIdentifier = (value?: string) => {
+  if (typeof value !== 'string') return 'N/A'
+  const normalized = value.trim()
+  return normalized ? normalized : 'N/A'
 }
-
-const quickFeedbackTemplates = {
-  access: [
-    'Excelente uso de operadores booleanos',
-    'Considerar añadir más Términos MeSH específicos',
-    'Buena estrategia de Búsqueda, podría ampliarse',
-    'Falta uso de filtros por tipo de estudio',
-  ],
-  process: [
-    'Correcta identificación de niveles de evidencia',
-    'Revisar evaluación de conflictos de interés',
-    'Buen análisis crítico de metodología',
-    'Mejorar identificación de sesgos',
-  ],
-  communicate: [
-    'bibliografía correctamente formateada',
-    'Revisar formato de citas in-texto',
-    'Excelente presentación de resultados',
-    'Corregir errores en formato Vancouver',
-  ],
-}
-
-const COMPETENCIES: CompetencyType[] = ['access', 'process', 'communicate']
 
 export default function EvaluationDetailPage() {
   const params = useParams()
   const router = useRouter()
-  const submissionId = params.id as string
+  const submissionId = Array.isArray(params.id) ? params.id[0] : String(params.id ?? '')
 
   const [submission, setSubmission] = useState<CaseSubmission | null>(null)
   const [caseStudy, setCaseStudy] = useState<CaseStudy | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  // Evaluation state
   const [rubricScores, setRubricScores] = useState<RubricScore[]>([])
-  const [competencyFeedback, setCompetencyFeedback] = useState<CompetencyFeedback[]>([
-    { competency: 'access', comment: '' },
-    { competency: 'process', comment: '' },
-    { competency: 'communicate', comment: '' },
-  ])
+  const [competencyScores, setCompetencyScores] = useState<Record<CompetencyType, number>>({
+    access: 0,
+    process: 0,
+    communicate: 0,
+  })
+  const [comments, setComments] = useState<Record<CompetencyType, string>>({
+    access: '',
+    process: '',
+    communicate: '',
+  })
   const [generalFeedback, setGeneralFeedback] = useState('')
 
+  const applyEvaluationToForm = useCallback((evaluation?: Evaluation) => {
+    setCompetencyScores({
+      access: evaluation?.scores?.access ?? 0,
+      process: evaluation?.scores?.process ?? 0,
+      communicate: evaluation?.scores?.communicate ?? 0,
+    })
+    setComments({
+      access: evaluation?.comments?.access ?? '',
+      process: evaluation?.comments?.process ?? '',
+      communicate: evaluation?.comments?.communicate ?? '',
+    })
+    setGeneralFeedback(evaluation?.feedback ?? '')
+  }, [])
+
   useEffect(() => {
-    async function loadData() {
+    if (!submissionId) return
+
+    let mounted = true
+    setIsLoading(true)
+    setError(null)
+
+    const load = async () => {
       try {
-        const submissionData = await evaluationApi.getSubmission(submissionId)
-        setSubmission(submissionData)
+        const submissionResponse = await evaluationApi.getSubmission(submissionId)
+        if (!mounted) return
+        setSubmission(submissionResponse)
 
-        if (submissionData.caseId) {
-          const caseData = await casesApi.getById(submissionData.caseId)
-          setCaseStudy(caseData)
+        const caseResponse = submissionResponse.caseId ? await casesApi.getById(submissionResponse.caseId) : null
+        if (!mounted) return
+        setCaseStudy(caseResponse)
+        applyEvaluationToForm(submissionResponse.evaluation)
 
-          // Initialize rubric scores from case rubric
-          if (caseData.rubric) {
-            setRubricScores(
-              caseData.rubric.map((item) => ({
-                criteriaId: item.id,
-                score: 0,
-                feedback: '',
-              }))
-            )
-          }
-        }
-      } catch (err) {
-        console.error('[v0] Error loading submission:', err)
+        const existingEvaluation =
+          submissionResponse.status === 'reviewed'
+            ? await evaluationApi.getBySubmission(submissionId).catch(() => submissionResponse.evaluation)
+            : submissionResponse.evaluation
+
+        if (!mounted) return
+        applyEvaluationToForm(existingEvaluation)
+
+        const rubricFromCase = caseResponse?.rubric ?? []
+        setRubricScores(
+          rubricFromCase.map((item) => ({
+            criteriaId: item.id,
+            score: existingEvaluation?.scores?.[item.competency] ?? 0,
+            feedback: existingEvaluation?.comments?.[item.competency] ?? '',
+          }))
+        )
+      } catch (loadError) {
+        console.error('[professor evaluation detail] Error loading data:', loadError)
+        if (mounted) setError('No se pudo cargar la entrega seleccionada.')
       } finally {
-        setIsLoading(false)
+        if (mounted) setIsLoading(false)
       }
     }
-    loadData()
-  }, [submissionId])
+
+    void load()
+
+    return () => {
+      mounted = false
+    }
+  }, [applyEvaluationToForm, submissionId])
 
   const rubricById = useMemo(
     () => new Map((caseStudy?.rubric ?? []).map((item) => [item.id, item])),
@@ -137,106 +173,60 @@ export default function EvaluationDetailPage() {
     [caseStudy]
   )
 
-  const earnedPoints = useMemo(
+  const rubricEarnedPoints = useMemo(
     () =>
-      rubricScores.reduce((sum, rubricScore) => {
-        const rubricItem = rubricById.get(rubricScore.criteriaId)
+      rubricScores.reduce((sum, item) => {
+        const rubricItem = rubricById.get(item.criteriaId)
         if (!rubricItem) return sum
-        return sum + (rubricScore.score / 100) * rubricItem.maxPoints
+        return sum + (item.score / 100) * rubricItem.maxPoints
       }, 0),
-    [rubricScores, rubricById]
+    [rubricById, rubricScores]
   )
 
-  const competencyScores = useMemo(() => {
-    const totals: Record<CompetencyType, number> = { access: 0, process: 0, communicate: 0 }
-    const earned: Record<CompetencyType, number> = { access: 0, process: 0, communicate: 0 }
-
-    for (const rubricScore of rubricScores) {
-      const rubricItem = rubricById.get(rubricScore.criteriaId)
-      if (!rubricItem) continue
-      totals[rubricItem.competency] += rubricItem.maxPoints
-      earned[rubricItem.competency] += (rubricScore.score / 100) * rubricItem.maxPoints
+  const overallScore = useMemo(() => {
+    if (totalMaxPoints > 0) {
+      return Math.round((rubricEarnedPoints / totalMaxPoints) * 100)
     }
-
-    return {
-      access: totals.access > 0 ? Math.round((earned.access / totals.access) * 100) : 0,
-      process: totals.process > 0 ? Math.round((earned.process / totals.process) * 100) : 0,
-      communicate: totals.communicate > 0 ? Math.round((earned.communicate / totals.communicate) * 100) : 0,
-    } as Record<CompetencyType, number>
-  }, [rubricScores, rubricById])
-
-  const overallScorePercent = useMemo(() => {
-    if (totalMaxPoints <= 0) {
-      return Math.round(
-        (competencyScores.access + competencyScores.process + competencyScores.communicate) / 3
-      )
-    }
-    return Math.round((earnedPoints / totalMaxPoints) * 100)
-  }, [earnedPoints, totalMaxPoints, competencyScores])
+    return Math.round(
+      (competencyScores.access + competencyScores.process + competencyScores.communicate) / 3
+    )
+  }, [competencyScores, rubricEarnedPoints, totalMaxPoints])
 
   const updateRubricScore = useCallback((criteriaId: string, updates: Partial<RubricScore>) => {
     setRubricScores((prev) =>
-      prev.map((score) =>
-        score.criteriaId === criteriaId ? { ...score, ...updates } : score
-      )
+      prev.map((item) => (item.criteriaId === criteriaId ? { ...item, ...updates } : item))
     )
   }, [])
 
-  const updateCompetencyFeedback = useCallback(
-    (competency: CompetencyType, updates: Partial<CompetencyFeedback>) => {
-      setCompetencyFeedback((prev) =>
-        prev.map((fb) => (fb.competency === competency ? { ...fb, ...updates } : fb))
-      )
-    },
-    []
-  )
-
-  const addQuickFeedback = useCallback((competency: CompetencyType, template: string) => {
-    setCompetencyFeedback((prev) =>
-      prev.map((fb) =>
-        fb.competency === competency
-          ? { ...fb, comment: fb.comment ? `${fb.comment}\n${template}` : template }
-          : fb
-      )
-    )
+  const appendQuickComment = useCallback((competency: CompetencyType, template: string) => {
+    setComments((prev) => ({
+      ...prev,
+      [competency]: prev[competency] ? `${prev[competency]}\n${template}` : template,
+    }))
   }, [])
 
   const handleSave = useCallback(async () => {
     if (!submission) return
-
     setIsSaving(true)
-    try {
-      const comments = competencyFeedback.reduce(
-        (acc, item) => {
-          acc[item.competency] = item.comment
-          return acc
-        },
-        { access: '', process: '', communicate: '' } as Record<CompetencyType, string>
-      )
+    setError(null)
 
-      await evaluationApi.submit(submissionId, {
-        submissionId,
+    try {
+      await evaluationApi.submit(submission.id, {
+        submissionId: submission.id,
         professorId: '',
         scores: competencyScores,
         comments,
-        overallScore: overallScorePercent,
+        overallScore,
         feedback: generalFeedback,
       })
       router.push('/professor/evaluations')
-    } catch (err) {
-      console.error('[v0] Save error:', err)
+    } catch (saveError) {
+      console.error('[professor evaluation detail] Error saving evaluation:', saveError)
+      setError('No se pudo guardar la evaluación.')
     } finally {
       setIsSaving(false)
     }
-  }, [
-    submission,
-    submissionId,
-    competencyFeedback,
-    competencyScores,
-    overallScorePercent,
-    generalFeedback,
-    router,
-  ])
+  }, [comments, competencyScores, generalFeedback, overallScore, router, submission])
 
   if (isLoading) {
     return <EvaluationSkeleton />
@@ -244,8 +234,8 @@ export default function EvaluationDetailPage() {
 
   if (!submission || !caseStudy) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[400px]">
-        <p className="text-muted-foreground">Entrega no encontrada</p>
+      <div className="flex min-h-[320px] flex-col items-center justify-center text-center">
+        <p className="text-muted-foreground">{error || 'Entrega no encontrada.'}</p>
         <Button asChild className="mt-4">
           <Link href="/professor/evaluations">Volver a evaluaciones</Link>
         </Button>
@@ -255,8 +245,7 @@ export default function EvaluationDetailPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" asChild>
             <Link href="/professor/evaluations">
@@ -264,173 +253,138 @@ export default function EvaluationDetailPage() {
             </Link>
           </Button>
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-              Evaluar entrega
-            </h1>
-            <p className="text-muted-foreground mt-1">{caseStudy.title}</p>
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Evaluar entrega</h1>
+            <p className="mt-1 text-muted-foreground">{caseStudy.title}</p>
           </div>
         </div>
-        <div className="flex gap-2">
-          <Button onClick={handleSave} disabled={isSaving}>
-            <CheckCircle2 className="mr-2 h-4 w-4" />
-            Guardar evaluacion
-          </Button>
-        </div>
+        <Button onClick={handleSave} disabled={isSaving}>
+          <CheckCircle2 className="mr-2 h-4 w-4" />
+          {isSaving ? 'Guardando...' : 'Guardar evaluación'}
+        </Button>
       </div>
 
-      {/* Student info */}
+      {error && (
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardContent className="py-4 text-sm text-destructive">{error}</CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardContent className="pt-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Avatar className="h-12 w-12">
-                <AvatarFallback>ES</AvatarFallback>
-              </Avatar>
-              <div>
-                <p className="font-medium">Estudiante #{submission.studentId}</p>
-                <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1">
-                  <span className="flex items-center gap-1">
-                    <Calendar className="h-4 w-4" />
-                    Enviado: {new Date(submission.submittedAt).toLocaleDateString('es')}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Clock className="h-4 w-4" />
-                    {new Date(submission.submittedAt).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Estudiante #{safeIdentifier(submission.studentId)}</p>
+              <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <Calendar className="h-4 w-4" />
+                  Enviado: {formatDate(submission.submittedAt)}
+                </span>
+                <span className="flex items-center gap-1">
+                  <Clock className="h-4 w-4" />
+                  Estado: {submission.status === 'reviewed' ? 'Revisado' : 'Pendiente'}
+                </span>
               </div>
             </div>
+
             <div className="text-right">
-              <p className="text-sm text-muted-foreground">puntuación total</p>
-              <p className="text-3xl font-bold">{overallScorePercent}%</p>
+              <p className="text-sm text-muted-foreground">Puntuación global</p>
+              <p className="text-3xl font-bold">{overallScore}%</p>
               <p className="text-xs text-muted-foreground">
-                {Math.round(earnedPoints)} de {totalMaxPoints || 100} pts
+                {Math.round(rubricEarnedPoints)} de {totalMaxPoints || 100} pts
               </p>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Split View: Submission + Rubric */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Left: Student Submission */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Entrega del estudiante</CardTitle>
+            <CardTitle>Entrega del estudiante</CardTitle>
+            <CardDescription>Contenido, bibliografía y artículos declarados.</CardDescription>
           </CardHeader>
-          <CardContent>
-            <Tabs defaultValue="content">
-              <TabsList className="mb-4">
-                <TabsTrigger value="content">Contenido</TabsTrigger>
-                <TabsTrigger value="bibliography">bibliografía</TabsTrigger>
-                <TabsTrigger value="searches">Búsquedas</TabsTrigger>
-              </TabsList>
+          <CardContent className="space-y-6">
+            <div>
+              <Label className="text-sm font-medium">Respuesta</Label>
+              <ScrollArea className="mt-2 h-[260px] rounded-lg border p-4">
+                <div className="whitespace-pre-wrap text-sm">
+                  {submission.content || 'El estudiante no agregó contenido escrito.'}
+                </div>
+              </ScrollArea>
+            </div>
 
-              <TabsContent value="content">
-                <ScrollArea className="h-[500px] border rounded-lg p-4">
-                  <div className="prose prose-sm max-w-none">
-                    {submission.content || (
-                      <p className="text-muted-foreground italic">
-                        El estudiante no ha incluido contenido escrito en su entrega.
-                      </p>
-                    )}
-                  </div>
-                </ScrollArea>
-              </TabsContent>
+            <div>
+              <Label className="text-sm font-medium">Bibliografía</Label>
+              <ScrollArea className="mt-2 h-[140px] rounded-lg border p-4">
+                <div className="whitespace-pre-wrap text-sm">
+                  {submission.bibliography || 'No se incluyó bibliografía.'}
+                </div>
+              </ScrollArea>
+            </div>
 
-              <TabsContent value="bibliography">
-                <ScrollArea className="h-[500px] border rounded-lg p-4">
-                  {submission.bibliography ? (
-                    <pre className="text-sm font-mono whitespace-pre-wrap">
-                      {submission.bibliography}
-                    </pre>
-                  ) : (
-                    <p className="text-muted-foreground italic">
-                      No se incluyó bibliografía
-                    </p>
-                  )}
-                </ScrollArea>
-              </TabsContent>
-
-              <TabsContent value="searches">
-                <ScrollArea className="h-[500px] border rounded-lg p-4">
-                  {submission.selectedArticles && submission.selectedArticles.length > 0 ? (
-                    <div className="space-y-3">
-                      {submission.selectedArticles.map((articleId) => (
-                        <div key={articleId} className="p-3 rounded-lg bg-muted">
-                          <p className="font-mono text-sm">{articleId}</p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-muted-foreground italic">
-                      No se registraron Búsquedas
-                    </p>
-                  )}
-                </ScrollArea>
-              </TabsContent>
-            </Tabs>
+            <div>
+              <Label className="text-sm font-medium">Artículos seleccionados</Label>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {submission.selectedArticles.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No hay artículos asociados a la entrega.</p>
+                ) : (
+                  submission.selectedArticles.map((articleId) => (
+                    <Badge key={articleId} variant="outline">
+                      {articleId}
+                    </Badge>
+                  ))
+                )}
+              </div>
+            </div>
           </CardContent>
         </Card>
 
-        {/* Right: Evaluation Rubric */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">rúbrica de evaluación</CardTitle>
+            <CardTitle>Rúbrica del caso</CardTitle>
+            <CardDescription>Valora cada criterio y añade observaciones específicas.</CardDescription>
           </CardHeader>
           <CardContent>
-            <ScrollArea className="h-[540px] pr-4">
-              <div className="space-y-6">
-                {caseStudy.rubric?.map((rubricItem) => {
-                  const scoreData = rubricScores.find((s) => s.criteriaId === rubricItem.id)
+            <ScrollArea className="h-[560px] pr-4">
+              <div className="space-y-5">
+                {(caseStudy.rubric ?? []).map((rubricItem) => {
+                  const rubricScore = rubricScores.find((item) => item.criteriaId === rubricItem.id)
+                  const points = Math.round(((rubricScore?.score ?? 0) / 100) * rubricItem.maxPoints)
                   return (
-                    <div key={rubricItem.id} className="space-y-3 pb-4 border-b last:border-0">
-                      <div className="flex items-center justify-between">
+                    <div key={rubricItem.id} className="space-y-3 rounded-lg border p-4">
+                      <div className="flex items-start justify-between gap-4">
                         <div>
-                          <h4 className="font-medium">{rubricItem.criteria}</h4>
-                          <Badge variant="outline" className="mt-1">
-                            {competencyConfig[rubricItem.competency].label}
-                          </Badge>
+                          <p className="font-medium">{rubricItem.criteria}</p>
+                          <div className="mt-1 flex flex-wrap gap-2">
+                            <Badge variant="secondary">{rubricItem.competency}</Badge>
+                            <Badge variant="outline">{rubricItem.maxPoints} pts</Badge>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-2xl font-bold">
-                            {Math.round((scoreData?.score || 0) / 100 * rubricItem.maxPoints)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">/ {rubricItem.maxPoints} pts</p>
-                        </div>
+                        <span className="text-lg font-bold">{points}</span>
                       </div>
 
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground">puntuación</span>
-                          <span>{scoreData?.score || 0}%</span>
-                        </div>
-                        <Slider
-                          value={[scoreData?.score || 0]}
-                          onValueChange={([value]) =>
-                            updateRubricScore(rubricItem.id, { score: value })
-                          }
-                          max={100}
-                          step={5}
-                          className="py-2"
-                        />
-                        <div className="flex justify-between text-xs text-muted-foreground">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
                           <span>Necesita mejorar</span>
+                          <span>{rubricScore?.score ?? 0}%</span>
                           <span>Excelente</span>
                         </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label className="text-xs">Retroalimentación</Label>
-                        <Textarea
-                          placeholder="Añade comentarios específicos..."
-                          className="min-h-[60px] text-sm"
-                          value={scoreData?.feedback || ''}
-                          onChange={(e) =>
-                            updateRubricScore(rubricItem.id, { feedback: e.target.value })
-                          }
+                        <Slider
+                          value={[rubricScore?.score ?? 0]}
+                          onValueChange={([value]) => updateRubricScore(rubricItem.id, { score: value })}
+                          max={100}
+                          step={5}
                         />
                       </div>
+
+                      <Textarea
+                        placeholder="Retroalimentación puntual sobre este criterio..."
+                        value={rubricScore?.feedback ?? ''}
+                        onChange={(event) =>
+                          updateRubricScore(rubricItem.id, { feedback: event.target.value })
+                        }
+                        className="min-h-[84px]"
+                      />
                     </div>
                   )
                 })}
@@ -440,59 +394,48 @@ export default function EvaluationDetailPage() {
         </Card>
       </div>
 
-      {/* Competency Feedback */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Retroalimentación por competencia</CardTitle>
-          <CardDescription>
-            Proporciona comentarios específicos para cada área de competencia
-          </CardDescription>
+          <CardTitle>Retroalimentación por competencia</CardTitle>
+          <CardDescription>Comentarios consolidados por área de evaluación.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-6 lg:grid-cols-3">
-            {COMPETENCIES.map((comp) => {
-              const Icon = competencyConfig[comp].icon
-              const feedback = competencyFeedback.find((fb) => fb.competency === comp)
-
+            {COMPETENCIES.map((competency) => {
+              const Icon = competencyConfig[competency].icon
               return (
-                <Card key={comp}>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base flex items-center gap-2">
+                <Card key={competency}>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-base">
                       <Icon className="h-5 w-5" />
-                      {competencyConfig[comp].label}
+                      {competencyConfig[competency].label}
                     </CardTitle>
-                    <CardDescription className="text-xs">
-                      {competencyConfig[comp].description}
-                    </CardDescription>
-                    <Badge variant="outline" className="w-fit mt-2">
-                      {competencyScores[comp]}%
+                    <CardDescription>{competencyConfig[competency].description}</CardDescription>
+                    <Badge variant="outline" className="w-fit">
+                      {competencyScores[competency]}%
                     </Badge>
                   </CardHeader>
-                  <CardContent className="space-y-4">
+                  <CardContent className="space-y-3">
                     <Textarea
-                      placeholder="Escribe tu Retroalimentación..."
-                      className="min-h-[100px] text-sm"
-                      value={feedback?.comment || ''}
-                      onChange={(e) =>
-                        updateCompetencyFeedback(comp, { comment: e.target.value })
+                      placeholder="Escribe observaciones para esta competencia..."
+                      value={comments[competency]}
+                      onChange={(event) =>
+                        setComments((prev) => ({ ...prev, [competency]: event.target.value }))
                       }
+                      className="min-h-[120px]"
                     />
-
-                    <div className="space-y-2">
-                      <Label className="text-xs text-muted-foreground">Comentarios frecuentes</Label>
-                      <div className="flex flex-wrap gap-1">
-                        {quickFeedbackTemplates[comp].map((template, idx) => (
-                          <Button
-                            key={idx}
-                            variant="outline"
-                            size="sm"
-                            className="text-xs h-auto py-1 px-2 bg-transparent"
-                            onClick={() => addQuickFeedback(comp, template)}
-                          >
-                            {template}
-                          </Button>
-                        ))}
-                      </div>
+                    <div className="flex flex-wrap gap-2">
+                      {quickFeedbackTemplates[competency].map((template) => (
+                        <Button
+                          key={template}
+                          variant="outline"
+                          size="sm"
+                          className="h-auto whitespace-normal py-1.5 text-xs"
+                          onClick={() => appendQuickComment(competency, template)}
+                        >
+                          {template}
+                        </Button>
+                      ))}
                     </div>
                   </CardContent>
                 </Card>
@@ -502,20 +445,19 @@ export default function EvaluationDetailPage() {
         </CardContent>
       </Card>
 
-      {/* General Feedback */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
+          <CardTitle className="flex items-center gap-2">
             <MessageSquare className="h-5 w-5" />
             Retroalimentación general
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent>
           <Textarea
-            placeholder="Escribe comentarios generales sobre la entrega del estudiante..."
-            className="min-h-[120px]"
+            placeholder="Escribe una síntesis final para el estudiante..."
             value={generalFeedback}
-            onChange={(e) => setGeneralFeedback(e.target.value)}
+            onChange={(event) => setGeneralFeedback(event.target.value)}
+            className="min-h-[140px]"
           />
         </CardContent>
       </Card>
@@ -530,18 +472,16 @@ function EvaluationSkeleton() {
         <Skeleton className="h-10 w-10" />
         <div>
           <Skeleton className="h-8 w-64" />
-          <Skeleton className="h-4 w-48 mt-2" />
+          <Skeleton className="mt-2 h-4 w-48" />
         </div>
       </div>
 
-      <Skeleton className="h-24 w-full" />
+      <Skeleton className="h-28 w-full" />
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Skeleton className="h-[600px]" />
-        <Skeleton className="h-[600px]" />
+        <Skeleton className="h-[580px]" />
+        <Skeleton className="h-[580px]" />
       </div>
     </div>
   )
 }
-
-

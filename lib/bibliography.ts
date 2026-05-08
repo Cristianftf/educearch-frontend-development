@@ -1,5 +1,6 @@
 import type { Bibliography, BibliographyFormat, SearchResult } from '@/types'
-import { api } from './api-client'
+import { api, ApiHttpError } from './api-client'
+import { isConnectivityError } from './api-errors'
 import {
   STUDENT_FALLBACK_KEYS,
   createLocalId,
@@ -33,41 +34,118 @@ type BibliographyResponseDTO = {
   }>
 }
 
-const mapArticle = (article: NonNullable<BibliographyResponseDTO['articles']>[number]): SearchResult => ({
-  id: article.id,
-  pmid: article.pmid,
-  title: article.title,
-  authors: article.authors ?? [],
-  journal: article.journal ?? '',
-  year: article.year ?? new Date().getFullYear(),
-  abstract: article.abstractText ?? '',
-  studyType: article.studyType ?? 'unknown',
-  evidenceLevel: article.evidenceLevel ?? 0,
-  sampleSize: article.sampleSize,
-  hasConflictOfInterest: article.hasConflictOfInterest ?? false,
-  doi: article.doi,
-  source: article.source,
-  sourceUrl: article.sourceUrl,
-})
-
-const mapBibliography = (dto: BibliographyResponseDTO): Bibliography => ({
-  id: dto.id,
-  name: dto.name,
-  format: dto.format as BibliographyFormat,
-  content: dto.content,
-  createdAt: dto.createdAt ?? new Date().toISOString(),
-  articleCount: dto.articleCount ?? dto.articles?.length ?? 0,
-  articles: dto.articles ? dto.articles.map(mapArticle) : [],
-})
-
 const AVAILABLE_FORMATS: BibliographyFormat[] = ['apa', 'vancouver', 'bibtex', 'xml']
 
+function sanitizeString(value: unknown, fallback = ''): string {
+  if (typeof value !== 'string') return fallback
+  const normalized = value.trim()
+  return normalized || fallback
+}
+
+function normalizeBibliographyFormat(value: unknown): BibliographyFormat {
+  return AVAILABLE_FORMATS.includes(value as BibliographyFormat) ? (value as BibliographyFormat) : 'apa'
+}
+
+function normalizeSourceUrl(value: unknown): string | undefined {
+  const normalized = sanitizeString(value)
+  return /^https?:\/\//i.test(normalized) ? normalized : undefined
+}
+
+function mapArticle(article: NonNullable<BibliographyResponseDTO['articles']>[number], index: number): SearchResult {
+  const currentYear = new Date().getFullYear()
+  const rawYear =
+    typeof article.year === 'number' && Number.isFinite(article.year)
+      ? article.year
+      : Number.parseInt(String(article.year ?? ''), 10)
+  const year =
+    Number.isFinite(rawYear) && rawYear >= 1900 && rawYear <= currentYear + 1
+      ? rawYear
+      : currentYear
+
+  return {
+    id: sanitizeString(article.id, `article-${index + 1}`),
+    pmid: sanitizeString(article.pmid),
+    title: sanitizeString(article.title, '(Sin titulo)'),
+    authors: Array.isArray(article.authors)
+      ? article.authors
+          .map((author) => sanitizeString(author))
+          .filter((author) => author.length > 0)
+      : [],
+    journal: sanitizeString(article.journal),
+    year,
+    abstract: sanitizeString(article.abstractText),
+    studyType: sanitizeString(article.studyType, 'unknown'),
+    evidenceLevel:
+      typeof article.evidenceLevel === 'number' && Number.isFinite(article.evidenceLevel)
+        ? Math.max(0, Math.min(10, article.evidenceLevel))
+        : 0,
+    sampleSize:
+      typeof article.sampleSize === 'number' && Number.isFinite(article.sampleSize)
+        ? Math.max(0, article.sampleSize)
+        : undefined,
+    hasConflictOfInterest: article.hasConflictOfInterest === true,
+    doi: sanitizeString(article.doi) || undefined,
+    source: sanitizeString(article.source) || undefined,
+    sourceUrl: normalizeSourceUrl(article.sourceUrl),
+  }
+}
+
+function mapBibliography(dto: BibliographyResponseDTO): Bibliography {
+  const createdAt = sanitizeString(dto.createdAt) || new Date().toISOString()
+  const normalizedArticles = Array.isArray(dto.articles)
+    ? dto.articles.map(mapArticle)
+    : []
+
+  return {
+    id: sanitizeString(dto.id, createLocalId('bibliography')),
+    name: sanitizeString(dto.name, 'Bibliografia sin nombre'),
+    format: normalizeBibliographyFormat(dto.format),
+    content: sanitizeString(dto.content, 'No hay contenido disponible.'),
+    createdAt,
+    articleCount:
+      typeof dto.articleCount === 'number' && Number.isFinite(dto.articleCount)
+        ? Math.max(0, dto.articleCount)
+        : normalizedArticles.length,
+    articles: normalizedArticles,
+  }
+}
+
+function normalizeLocalBibliography(item: unknown, index: number): Bibliography | null {
+  if (!item || typeof item !== 'object') return null
+  const value = item as Record<string, unknown>
+  const articles = Array.isArray(value.articles)
+    ? value.articles.map((article, articleIndex) =>
+        mapArticle((article ?? {}) as NonNullable<BibliographyResponseDTO['articles']>[number], articleIndex)
+      )
+    : []
+
+  return {
+    id: sanitizeString(value.id, `local-bibliography-${index + 1}`),
+    name: sanitizeString(value.name, 'Bibliografia sin nombre'),
+    format: normalizeBibliographyFormat(value.format),
+    content: sanitizeString(value.content, 'No hay contenido disponible.'),
+    createdAt: sanitizeString(value.createdAt, new Date().toISOString()),
+    articleCount:
+      typeof value.articleCount === 'number' && Number.isFinite(value.articleCount)
+        ? Math.max(0, value.articleCount)
+        : articles.length,
+    articles,
+  }
+}
+
 function readBibliographyHistoryLocal(): Bibliography[] {
-  return readLocalStorage<Bibliography[]>(STUDENT_FALLBACK_KEYS.bibliographyHistory, [])
+  const stored = readLocalStorage<unknown[]>(STUDENT_FALLBACK_KEYS.bibliographyHistory, [])
+  if (!Array.isArray(stored)) return []
+  return stored
+    .map((item, index) => normalizeLocalBibliography(item, index))
+    .filter((item): item is Bibliography => Boolean(item))
 }
 
 function writeBibliographyHistoryLocal(items: Bibliography[]): void {
-  writeLocalStorage(STUDENT_FALLBACK_KEYS.bibliographyHistory, items)
+  const normalized = items
+    .map((item, index) => normalizeLocalBibliography(item, index))
+    .filter((item): item is Bibliography => Boolean(item))
+  writeLocalStorage(STUDENT_FALLBACK_KEYS.bibliographyHistory, normalized)
 }
 
 function upsertBibliographyLocal(item: Bibliography): void {
@@ -140,7 +218,11 @@ export const bibliographyApi = {
         upsertBibliographyLocal(bibliography)
         return bibliography
       })
-      .catch(async () => {
+      .catch(async (error) => {
+        const shouldFallback =
+          isConnectivityError(error) || (error instanceof ApiHttpError && error.status >= 500)
+        if (!shouldFallback) throw error
+
         const backendReachable = await isBackendReachable()
         const fallback: Bibliography = {
           id: createLocalId('bibliography'),

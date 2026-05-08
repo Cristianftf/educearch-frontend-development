@@ -28,6 +28,17 @@ public class SearchAssistantServiceImpl implements SearchAssistantService {
 
     private static final Pattern TOKEN_SPLIT = Pattern.compile("\\s+");
     private static final Set<String> VALID_OPERATORS = Set.of("AND", "OR", "NOT");
+    private static final Set<String> VALID_STUDY_TYPES = Set.of(
+        "systematic_review",
+        "meta_analysis",
+        "rct",
+        "cohort",
+        "case_control",
+        "case_report"
+    );
+    private static final int MAX_CONTEXT_CHARS = 1600;
+    private static final int MAX_HISTORY_MESSAGES = 5;
+    private static final int MAX_MESSAGE_CHARS = 480;
 
     private final OpenAIService openAIService;
     private final PubMedApiService pubMedApiService;
@@ -41,6 +52,9 @@ public class SearchAssistantServiceImpl implements SearchAssistantService {
         List<String> selectedTerms = sanitizeTerms(request != null ? request.getSelectedTerms() : null, 8);
         List<String> recentTerms = sanitizeTerms(request != null ? request.getRecentTerms() : null, 8);
         List<String> selectedOperators = sanitizeOperators(request != null ? request.getOperators() : null, 3);
+        String projectContext = sanitizeProjectContext(request != null ? request.getProjectContext() : null);
+        List<SearchAssistantRequestDTO.ConversationMessageDTO> conversationHistory =
+            sanitizeConversationHistory(request != null ? request.getConversationHistory() : null);
 
         FallbackBundle fallback = buildFallbackBundle(message, selectedTerms, recentTerms, selectedOperators, baseFilters);
         if (message.isBlank()) {
@@ -48,7 +62,17 @@ public class SearchAssistantServiceImpl implements SearchAssistantService {
         }
 
         String aiOutput = openAIService.generateText(
-            buildPrompt(message, selectedTerms, recentTerms, selectedOperators, baseFilters, fallback)
+            buildPrompt(
+                message,
+                selectedTerms,
+                recentTerms,
+                selectedOperators,
+                baseFilters,
+                fallback,
+                projectContext,
+                conversationHistory
+            ),
+            true
         );
         if (aiOutput == null || aiOutput.isBlank()) {
             return fallback.toResponse(false, true);
@@ -90,7 +114,8 @@ public class SearchAssistantServiceImpl implements SearchAssistantService {
                 .fallbackUsed(false)
                 .build();
         } catch (Exception ex) {
-            log.warn("Search assistant AI parse error, using fallback", ex);
+            log.warn("Search assistant AI parse error, using fallback: {}", ex.getMessage());
+            log.debug("Search assistant parse stack trace", ex);
             return fallback.toResponse(false, true);
         }
     }
@@ -165,9 +190,8 @@ public class SearchAssistantServiceImpl implements SearchAssistantService {
             "Prioriza revisiones sistematicas y metaanalisis cuando existan.",
             "Ajusta rango de anos para mantener evidencia clinica actual."
         );
-        String reply = "No hay conexion activa con un modelo IA externo o local. " +
-            "Configura GEMINI_API_KEY (o GOOGLE_AI_API_KEY) o GROQ_API_KEY/LLM_API_KEY y reinicia backend, " +
-            "o habilita Ollama en http://localhost:11434/v1.";
+        String reply = "No se pudo obtener respuesta de Gemini en este momento. " +
+            "Reintenta en unos segundos.";
         SearchAssistantResponseDTO.AutoPlanDTO autoPlan = buildAutoPlan(
             terms,
             operators,
@@ -184,11 +208,15 @@ public class SearchAssistantServiceImpl implements SearchAssistantService {
         List<String> recentTerms,
         List<String> selectedOperators,
         SearchRequestDTO.SearchFiltersDTO filters,
-        FallbackBundle fallback
+        FallbackBundle fallback,
+        String projectContext,
+        List<SearchAssistantRequestDTO.ConversationMessageDTO> conversationHistory
     ) {
         String currentTerms = selectedTerms.isEmpty() ? "[]" : selectedTerms.toString();
         String recent = recentTerms.isEmpty() ? "[]" : recentTerms.toString();
         String operators = selectedOperators.isEmpty() ? "[]" : selectedOperators.toString();
+        String studyTypes = extractStudyTypes(filters).toString();
+        String history = formatConversationHistory(conversationHistory);
         int currentYear = LocalDate.now().getYear();
 
         return """
@@ -201,8 +229,10 @@ public class SearchAssistantServiceImpl implements SearchAssistantService {
               "suggestedFilters": {
                 "yearFrom": number,
                 "yearTo": number,
+                "studyTypes": ["systematic_review|meta_analysis|rct|cohort|case_control|case_report"],
                 "language": "eng|spa|por",
                 "hasFullText": boolean,
+                "minSampleSize": number,
                 "maxResults": number
               },
               "autoPlan": {
@@ -211,8 +241,10 @@ public class SearchAssistantServiceImpl implements SearchAssistantService {
                 "filters": {
                   "yearFrom": number,
                   "yearTo": number,
+                  "studyTypes": ["systematic_review|meta_analysis|rct|cohort|case_control|case_report"],
                   "language": "eng|spa|por",
                   "hasFullText": boolean,
+                  "minSampleSize": number,
                   "maxResults": number
                 },
                 "rationale": "string"
@@ -224,38 +256,166 @@ public class SearchAssistantServiceImpl implements SearchAssistantService {
             - maximo 4 autoPlan.terms
             - maximo 3 tips
             - no markdown ni texto fuera del JSON
+            - devuelve JSON compacto y completo (no truncado)
             - respuesta en espanol clinico claro
             - yearTo no mayor a %d
+            - no inventes campos fuera del esquema
             Contexto:
+            Proyecto: %s
+            Historial conversacion reciente: %s
             Mensaje usuario: %s
             Terminos actuales: %s
             Operadores actuales: %s
             Terminos recientes: %s
-            Filtros actuales: yearFrom=%s, yearTo=%s, language=%s, hasFullText=%s, maxResults=%s
+            Filtros actuales: yearFrom=%s, yearTo=%s, studyTypes=%s, language=%s, hasFullText=%s, minSampleSize=%s, maxResults=%s
             Terminos fallback sugeridos: %s
             """.formatted(
             currentYear,
+            safe(projectContext),
+            safe(history),
             safe(message),
             safe(currentTerms),
             safe(operators),
             safe(recent),
             String.valueOf(filters.getYearFrom()),
             String.valueOf(filters.getYearTo()),
+            safe(studyTypes),
             String.valueOf(filters.getLanguage()),
             String.valueOf(filters.getHasFullText()),
+            String.valueOf(filters.getMinSampleSize()),
             String.valueOf(filters.getMaxResults()),
             safe(fallback.suggestedTerms.stream().map(SearchAssistantResponseDTO.SuggestedTermDTO::getTerm).toList().toString())
         );
     }
 
-    private JsonNode parseJsonNode(String raw) throws Exception {
-        String text = raw.trim();
-        int start = text.indexOf('{');
-        int end = text.lastIndexOf('}');
-        if (start >= 0 && end > start) {
-            text = text.substring(start, end + 1);
+    private JsonNode parseJsonNode(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
         }
-        return objectMapper.readTree(text);
+
+        String cleaned = stripCodeFences(raw).trim();
+        String candidate = extractJsonCandidate(cleaned);
+        if (candidate == null || candidate.isBlank()) {
+            return null;
+        }
+
+        JsonNode parsed = tryReadTree(candidate);
+        if (parsed != null) {
+            return parsed;
+        }
+
+        String repaired = autoCloseJsonObject(candidate);
+        if (!repaired.equals(candidate)) {
+            parsed = tryReadTree(repaired);
+            if (parsed != null) {
+                return parsed;
+            }
+        }
+
+        return null;
+    }
+
+    private JsonNode tryReadTree(String text) {
+        try {
+            return objectMapper.readTree(text);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String stripCodeFences(String text) {
+        String normalized = text.replace("```json", "").replace("```JSON", "");
+        return normalized.replace("```", "");
+    }
+
+    private String extractJsonCandidate(String text) {
+        int start = text.indexOf('{');
+        if (start < 0) {
+            return "";
+        }
+
+        boolean inString = false;
+        boolean escaped = false;
+        int depth = 0;
+
+        for (int i = start; i < text.length(); i += 1) {
+            char current = text.charAt(i);
+
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+
+            if (current == '\\') {
+                escaped = true;
+                continue;
+            }
+
+            if (current == '"') {
+                inString = !inString;
+                continue;
+            }
+
+            if (inString) {
+                continue;
+            }
+
+            if (current == '{') {
+                depth += 1;
+            } else if (current == '}') {
+                depth -= 1;
+                if (depth == 0) {
+                    return text.substring(start, i + 1);
+                }
+            }
+        }
+
+        return text.substring(start);
+    }
+
+    private String autoCloseJsonObject(String text) {
+        boolean inString = false;
+        boolean escaped = false;
+        int openBraces = 0;
+
+        for (int i = 0; i < text.length(); i += 1) {
+            char current = text.charAt(i);
+
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+
+            if (current == '\\') {
+                escaped = true;
+                continue;
+            }
+
+            if (current == '"') {
+                inString = !inString;
+                continue;
+            }
+
+            if (inString) {
+                continue;
+            }
+
+            if (current == '{') {
+                openBraces += 1;
+            } else if (current == '}') {
+                openBraces = Math.max(0, openBraces - 1);
+            }
+        }
+
+        if (openBraces == 0) {
+            return text;
+        }
+
+        StringBuilder repaired = new StringBuilder(text);
+        for (int i = 0; i < openBraces; i += 1) {
+            repaired.append('}');
+        }
+        return repaired.toString();
     }
 
     private List<SearchAssistantResponseDTO.SuggestedTermDTO> readSuggestedTerms(JsonNode node) {
@@ -288,11 +448,17 @@ public class SearchAssistantServiceImpl implements SearchAssistantService {
         if (node.hasNonNull("yearTo")) {
             filters.setYearTo(node.path("yearTo").asInt());
         }
+        if (node.has("studyTypes") && node.path("studyTypes").isArray()) {
+            filters.setStudyTypes(sanitizeStudyTypes(readStringArray(node.path("studyTypes"))));
+        }
         if (node.hasNonNull("language")) {
             filters.setLanguage(node.path("language").asText("").trim().toLowerCase(Locale.ROOT));
         }
         if (node.has("hasFullText")) {
             filters.setHasFullText(node.path("hasFullText").asBoolean(false));
+        }
+        if (node.hasNonNull("minSampleSize")) {
+            filters.setMinSampleSize(node.path("minSampleSize").asInt());
         }
         if (node.hasNonNull("maxResults")) {
             filters.setMaxResults(node.path("maxResults").asInt());
@@ -446,8 +612,12 @@ public class SearchAssistantServiceImpl implements SearchAssistantService {
         SearchRequestDTO.SearchFiltersDTO merged = sanitizeFilters(primary);
         if (merged.getYearFrom() == null) merged.setYearFrom(fallback.getYearFrom());
         if (merged.getYearTo() == null) merged.setYearTo(fallback.getYearTo());
+        if (merged.getStudyTypes() == null || merged.getStudyTypes().isEmpty()) {
+            merged.setStudyTypes(fallback.getStudyTypes());
+        }
         if (merged.getLanguage() == null || merged.getLanguage().isBlank()) merged.setLanguage(fallback.getLanguage());
         if (merged.getHasFullText() == null) merged.setHasFullText(fallback.getHasFullText());
+        if (merged.getMinSampleSize() == null) merged.setMinSampleSize(fallback.getMinSampleSize());
         if (merged.getMaxResults() == null) merged.setMaxResults(fallback.getMaxResults());
         return sanitizeFilters(merged);
     }
@@ -519,15 +689,18 @@ public class SearchAssistantServiceImpl implements SearchAssistantService {
         Integer maxResults = filters != null ? filters.getMaxResults() : null;
         int safeMaxResults = maxResults != null ? clamp(maxResults, 5, 100) : 30;
 
+        Integer minSampleSize = filters != null ? filters.getMinSampleSize() : null;
+        Integer safeMinSampleSize = minSampleSize != null ? clamp(minSampleSize, 0, 100_000) : null;
+
         Boolean fullText = filters != null ? filters.getHasFullText() : null;
 
         sanitized.setYearFrom(safeFrom);
         sanitized.setYearTo(safeTo);
         sanitized.setLanguage(safeLanguage);
         sanitized.setHasFullText(fullText != null ? fullText : Boolean.FALSE);
+        sanitized.setStudyTypes(sanitizeStudyTypes(filters != null ? filters.getStudyTypes() : null));
+        sanitized.setMinSampleSize(safeMinSampleSize);
         sanitized.setMaxResults(safeMaxResults);
-        sanitized.setStudyTypes(filters != null ? filters.getStudyTypes() : null);
-        sanitized.setMinSampleSize(filters != null ? filters.getMinSampleSize() : null);
         return sanitized;
     }
 
@@ -558,6 +731,106 @@ public class SearchAssistantServiceImpl implements SearchAssistantService {
 
     private String safe(String value) {
         return value == null ? "" : value.replace("\n", " ").trim();
+    }
+
+    private String sanitizeProjectContext(String projectContext) {
+        if (projectContext == null) {
+            return "";
+        }
+        String normalized = projectContext.replace('\r', ' ').replace('\n', ' ').trim();
+        if (normalized.length() <= MAX_CONTEXT_CHARS) {
+            return normalized;
+        }
+        return normalized.substring(0, MAX_CONTEXT_CHARS).trim();
+    }
+
+    private List<SearchAssistantRequestDTO.ConversationMessageDTO> sanitizeConversationHistory(
+        List<SearchAssistantRequestDTO.ConversationMessageDTO> source
+    ) {
+        if (source == null || source.isEmpty()) {
+            return List.of();
+        }
+        List<SearchAssistantRequestDTO.ConversationMessageDTO> result = new ArrayList<>();
+        int startIndex = Math.max(0, source.size() - MAX_HISTORY_MESSAGES);
+        for (int index = startIndex; index < source.size(); index += 1) {
+            SearchAssistantRequestDTO.ConversationMessageDTO entry = source.get(index);
+            if (entry == null) {
+                continue;
+            }
+            String role = entry.getRole() != null ? entry.getRole().trim().toLowerCase(Locale.ROOT) : "";
+            if (!role.equals("user") && !role.equals("assistant")) {
+                continue;
+            }
+            String content = entry.getContent() != null ? entry.getContent().replace('\n', ' ').trim() : "";
+            if (content.isBlank()) {
+                continue;
+            }
+            if (content.length() > MAX_MESSAGE_CHARS) {
+                content = content.substring(0, MAX_MESSAGE_CHARS).trim();
+            }
+            result.add(SearchAssistantRequestDTO.ConversationMessageDTO.builder()
+                .role(role)
+                .content(content)
+                .build());
+        }
+        return result;
+    }
+
+    private String formatConversationHistory(List<SearchAssistantRequestDTO.ConversationMessageDTO> history) {
+        if (history == null || history.isEmpty()) {
+            return "[]";
+        }
+        StringBuilder builder = new StringBuilder("[");
+        for (int i = 0; i < history.size(); i++) {
+            SearchAssistantRequestDTO.ConversationMessageDTO entry = history.get(i);
+            if (i > 0) {
+                builder.append(" | ");
+            }
+            builder.append(entry.getRole()).append(": ").append(entry.getContent());
+        }
+        builder.append("]");
+        return builder.toString();
+    }
+
+    private List<String> sanitizeStudyTypes(List<String> studyTypes) {
+        if (studyTypes == null || studyTypes.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> unique = new LinkedHashSet<>();
+        for (String item : studyTypes) {
+            if (item == null) {
+                continue;
+            }
+            String normalized = normalizeStudyType(item);
+            if (!VALID_STUDY_TYPES.contains(normalized)) {
+                continue;
+            }
+            unique.add(normalized);
+            if (unique.size() >= 4) {
+                break;
+            }
+        }
+        return new ArrayList<>(unique);
+    }
+
+    private String normalizeStudyType(String value) {
+        String normalized = value.trim().toLowerCase(Locale.ROOT).replaceAll("[\\s-]+", "_");
+        return switch (normalized) {
+            case "systematicreview" -> "systematic_review";
+            case "metaanalysis" -> "meta_analysis";
+            case "randomized_controlled_trial", "randomizedcontrolledtrial" -> "rct";
+            case "cohort_study", "cohortstudy" -> "cohort";
+            case "casecontrol" -> "case_control";
+            case "casereport" -> "case_report";
+            default -> normalized;
+        };
+    }
+
+    private List<String> extractStudyTypes(SearchRequestDTO.SearchFiltersDTO filters) {
+        if (filters == null) {
+            return List.of();
+        }
+        return sanitizeStudyTypes(filters.getStudyTypes());
     }
 
     private record FallbackBundle(

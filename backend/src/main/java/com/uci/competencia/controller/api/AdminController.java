@@ -9,6 +9,7 @@ import com.uci.competencia.model.entity.User;
 import com.uci.competencia.model.enums.LogLevel;
 import com.uci.competencia.model.enums.Role;
 import com.uci.competencia.repository.SystemLogRepository;
+import com.uci.competencia.repository.UserRepository;
 import com.uci.competencia.service.AdminService;
 import com.uci.competencia.service.parser.UserFileParser;
 import com.uci.competencia.service.specification.SystemLogSpecifications;
@@ -36,7 +37,6 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/admin")
-@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:3001", "https://frontend.uci.cu"})
 @PreAuthorize("hasRole('ADMIN')")
 @RequiredArgsConstructor
 @Slf4j
@@ -45,6 +45,7 @@ public class AdminController {
     private final AdminService adminService;
     private final List<UserFileParser> fileParsers;
     private final SystemLogRepository systemLogRepository;
+    private final UserRepository userRepository;
 
     @GetMapping("/users")
     public ResponseEntity<Map<String, Object>> getUsers(
@@ -126,32 +127,28 @@ public class AdminController {
     public ResponseEntity<UserDTO> createUser(@RequestBody UserDTO userDTO) {
         log.info("Creating new user: {}", userDTO.getEmail());
 
-        User user;
         try {
-            user = convertToUserEntity(userDTO);
+            User user = convertToUserEntity(userDTO);
+            User savedUser = adminService.createUser(user);
+            UserDTO responseDTO = convertToUserDTO(savedUser);
+            return ResponseEntity.status(201).body(responseDTO);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
         }
-        User savedUser = adminService.createUser(user);
-        UserDTO responseDTO = convertToUserDTO(savedUser);
-
-        return ResponseEntity.status(201).body(responseDTO);
     }
 
     @PutMapping("/users/{id}")
     public ResponseEntity<UserDTO> updateUser(@PathVariable String id, @RequestBody UserDTO userDTO) {
         log.info("Updating user: {}", id);
 
-        User user;
         try {
-            user = convertToUserEntity(userDTO);
+            User user = convertToUserEntity(userDTO);
+            User updatedUser = adminService.updateUser(id, user);
+            UserDTO responseDTO = convertToUserDTO(updatedUser);
+            return ResponseEntity.ok(responseDTO);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
         }
-        User updatedUser = adminService.updateUser(id, user);
-        UserDTO responseDTO = convertToUserDTO(updatedUser);
-
-        return ResponseEntity.ok(responseDTO);
     }
 
     @DeleteMapping("/users/{id}")
@@ -313,6 +310,7 @@ public class AdminController {
                     .lastName(lastName)
                     .role(Objects.toString(user.get("role"), "STUDENT").toUpperCase())
                     .faculty(Objects.toString(user.get("faculty"), null))
+                    .active(parseImportActive(user.get("status")))
                     .passwordHash(Objects.toString(user.get("password"), Objects.toString(user.get("passwordHash"), "")))
                     .build();
 
@@ -345,6 +343,7 @@ public class AdminController {
             @RequestParam(defaultValue = "100") int limit,
             @RequestParam(required = false) String level,
             @RequestParam(required = false) String userId,
+            @RequestParam(required = false) String userQuery,
             @RequestParam(required = false) String action,
             @RequestParam(required = false) String search,
             @RequestParam(required = false) String startDate,
@@ -352,8 +351,10 @@ public class AdminController {
             @RequestParam(defaultValue = "timestamp") String orderBy,
             @RequestParam(defaultValue = "DESC") String order) {
 
-        log.info("Getting audit logs - page: {}, limit: {}, level: {}, userId: {}, action: {}, search: {}, startDate: {}, endDate: {}", 
-            page, limit, level, userId, action, search, startDate, endDate);
+        String effectiveUserQuery = sanitizeOptionalText(userQuery != null ? userQuery : userId, 160);
+
+        log.info("Getting audit logs - page: {}, limit: {}, level: {}, userQuery: {}, action: {}, search: {}, startDate: {}, endDate: {}", 
+            page, limit, level, effectiveUserQuery, action, search, startDate, endDate);
 
         try {
             // Validar limites
@@ -364,8 +365,8 @@ public class AdminController {
             // Construir especificacion de busqueda dinamicamente
             Specification<SystemLog> baseSpec = (root, query, cb) -> cb.conjunction();
 
-            if (userId != null && !userId.isEmpty()) {
-                baseSpec = baseSpec.and(SystemLogSpecifications.hasUserId(userId));
+            if (effectiveUserQuery != null && !effectiveUserQuery.isEmpty()) {
+                baseSpec = baseSpec.and(SystemLogSpecifications.matchesUserIdentifier(effectiveUserQuery));
             }
 
             if (action != null && !action.isEmpty()) {
@@ -419,8 +420,9 @@ public class AdminController {
             Page<SystemLog> logPage = systemLogRepository.findAll(filteredSpec, pageable);
 
             // Convertir a DTOs
+            Map<String, AuditActorInfo> actorMap = buildAuditActorMap(logPage.getContent());
             List<AuditLogDTO> logDTOs = logPage.getContent().stream()
-                .map(this::convertToAuditLogDTO)
+                .map(log -> convertToAuditLogDTO(log, actorMap.get(log.getUserId())))
                 .collect(Collectors.toList());
 
             Map<String, Object> stats = new HashMap<>();
@@ -447,6 +449,82 @@ public class AdminController {
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("error", "Error al recuperar logs");
             errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+
+    @GetMapping("/monitoring/errors")
+    public ResponseEntity<Map<String, Object>> getErrorMonitoring(
+            @RequestParam(defaultValue = "120") int windowMinutes,
+            @RequestParam(defaultValue = "25") int limit,
+            @RequestParam(defaultValue = "false") boolean refreshAnalysis) {
+        log.info("Getting backend error monitoring - windowMinutes: {}, limit: {}, refreshAnalysis: {}",
+            windowMinutes, limit, refreshAnalysis);
+
+        Integer safeWindowObj = parseBoundedInt(windowMinutes, 5, 1440);
+        Integer safeLimitObj = parseBoundedInt(limit, 1, 200);
+        int safeWindow = safeWindowObj != null ? safeWindowObj : 120;
+        int safeLimit = safeLimitObj != null ? safeLimitObj : 25;
+
+        try {
+            if (refreshAnalysis) {
+                adminService.analyzeRecentErrors(safeWindow, safeLimit);
+            }
+            Map<String, Object> response = adminService.getErrorMonitoringOverview(safeWindow, safeLimit);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error retrieving backend monitoring insights: {}", e.getMessage(), e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Error al recuperar monitoreo de errores");
+            errorResponse.put("message", e.getMessage());
+            errorResponse.put("timestamp", LocalDateTime.now());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+
+    @PostMapping("/monitoring/errors/analyze")
+    public ResponseEntity<Map<String, Object>> analyzeErrorsNow(
+            @RequestBody(required = false) Map<String, Object> request) {
+        Integer safeWindowObj = parseBoundedInt(
+            request != null ? request.getOrDefault("windowMinutes", 120) : 120,
+            5,
+            1440
+        );
+        Integer safeLimitObj = parseBoundedInt(
+            request != null ? request.getOrDefault("limit", 40) : 40,
+            1,
+            200
+        );
+        int safeWindow = safeWindowObj != null ? safeWindowObj : 120;
+        int safeLimit = safeLimitObj != null ? safeLimitObj : 40;
+
+        log.info("Triggering backend error analysis manually - windowMinutes: {}, limit: {}", safeWindow, safeLimit);
+        try {
+            Map<String, Object> response = adminService.analyzeRecentErrors(safeWindow, safeLimit);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error running backend error analysis: {}", e.getMessage(), e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Error al ejecutar analisis de errores");
+            errorResponse.put("message", e.getMessage());
+            errorResponse.put("timestamp", LocalDateTime.now());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+
+    @PostMapping("/testing/analyze")
+    public ResponseEntity<Map<String, Object>> analyzeTestingLogs(
+            @RequestBody(required = false) Map<String, Object> payload) {
+        log.info("Analyzing testing logs with AI");
+        try {
+            Map<String, Object> response = adminService.analyzeTestingLogs(payload != null ? payload : Map.of());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error running AI testing analysis: {}", e.getMessage(), e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("error", "Error al ejecutar analisis de pruebas");
+            errorResponse.put("message", e.getMessage());
+            errorResponse.put("timestamp", LocalDateTime.now());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
         }
     }
@@ -499,7 +577,6 @@ public class AdminController {
 
         try {
             boolean includeLogs = Boolean.parseBoolean(backupOptions.getOrDefault("includeLogs", "false").toString());
-            boolean includeUsers = Boolean.parseBoolean(backupOptions.getOrDefault("includeUsers", "false").toString());
             
             String backupId = adminService.initiateBackup("FULL", includeLogs);
 
@@ -649,7 +726,7 @@ public class AdminController {
     @PostMapping("/external-apis/check")
     public ResponseEntity<Map<String, Object>> checkExternalApis(
             @RequestBody(required = false) Map<String, Object> request) {
-        String queryText = request != null ? Objects.toString(request.get("queryText"), null) : null;
+        String queryText = sanitizeQueryText(request != null ? request.get("queryText") : null, 180);
         log.info("Checking external APIs connectivity with query: {}", queryText);
 
         try {
@@ -698,7 +775,8 @@ public class AdminController {
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate,
             @RequestParam(required = false) String level,
-            @RequestParam(required = false) String userId) {
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) String userQuery) {
         
         log.info("Exporting audit logs - format: {}, startDate: {}, endDate: {}", format, startDate, endDate);
 
@@ -713,10 +791,11 @@ public class AdminController {
 
             // Preparar parametros de filtro
             Map<String, Object> filters = new HashMap<>();
+            String effectiveUserQuery = sanitizeOptionalText(userQuery != null ? userQuery : userId, 160);
             if (startDate != null && !startDate.isEmpty()) filters.put("startDate", startDate);
             if (endDate != null && !endDate.isEmpty()) filters.put("endDate", endDate);
             if (level != null && !level.isEmpty()) filters.put("level", level);
-            if (userId != null && !userId.isEmpty()) filters.put("userId", userId);
+            if (effectiveUserQuery != null && !effectiveUserQuery.isEmpty()) filters.put("userQuery", effectiveUserQuery);
 
             Map<String, Object> export = adminService.exportAuditLogs(format, filters);
             
@@ -745,6 +824,7 @@ public class AdminController {
         String endDate = Objects.toString(request.getOrDefault("endDate", null), null);
         String level = Objects.toString(request.getOrDefault("level", null), null);
         String userId = Objects.toString(request.getOrDefault("userId", request.getOrDefault("user", null)), null);
+        String userQuery = Objects.toString(request.getOrDefault("userQuery", userId), null);
 
         log.info("Exporting audit logs (POST) - format: {}, startDate: {}, endDate: {}", format, startDate, endDate);
 
@@ -757,10 +837,11 @@ public class AdminController {
             }
 
             Map<String, Object> filters = new HashMap<>();
+            String effectiveUserQuery = sanitizeOptionalText(userQuery, 160);
             if (startDate != null && !startDate.isEmpty()) filters.put("startDate", startDate);
             if (endDate != null && !endDate.isEmpty()) filters.put("endDate", endDate);
             if (level != null && !level.isEmpty()) filters.put("level", level);
-            if (userId != null && !userId.isEmpty()) filters.put("userId", userId);
+            if (effectiveUserQuery != null && !effectiveUserQuery.isEmpty()) filters.put("userQuery", effectiveUserQuery);
 
             Map<String, Object> export = adminService.exportAuditLogs(format, filters);
 
@@ -833,8 +914,18 @@ public class AdminController {
     public ResponseEntity<Map<String, Object>> cleanupLogs(@RequestBody Map<String, Object> request) {
         log.info("Cleaning logs with request: {}", request);
         try {
-            int olderThanDays = Integer.parseInt(request.getOrDefault("olderThanDays", 30).toString());
-            LocalDateTime cutoff = LocalDateTime.now().minusDays(Math.max(1, olderThanDays));
+            Integer olderThanDays = parseBoundedInt(
+                request != null ? request.getOrDefault("olderThanDays", 30) : 30,
+                1,
+                3650
+            );
+            if (olderThanDays == null) {
+                Map<String, Object> errorResponse = new HashMap<>();
+                errorResponse.put("error", "Parametro invalido");
+                errorResponse.put("message", "olderThanDays debe ser un entero entre 1 y 3650");
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
+            }
+            LocalDateTime cutoff = LocalDateTime.now().minusDays(olderThanDays);
             long deleted = adminService.cleanupLogs(cutoff);
             Map<String, Object> response = new HashMap<>();
             response.put("status", "OK");
@@ -884,6 +975,29 @@ public class AdminController {
         }
     }
 
+    private Integer parseBoundedInt(Object value, int min, int max) {
+        if (value == null) return null;
+        try {
+            int parsed = Integer.parseInt(value.toString().trim());
+            if (parsed < min) return min;
+            if (parsed > max) return max;
+            return parsed;
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private String sanitizeQueryText(Object value, int maxLength) {
+        if (value == null) return null;
+        String normalized = value.toString()
+            .replaceAll("[\\u0000-\\u001f]+", " ")
+            .replaceAll("\\s+", " ")
+            .trim();
+        if (normalized.isEmpty()) return null;
+        if (normalized.length() <= maxLength) return normalized;
+        return normalized.substring(0, maxLength);
+    }
+
     private LocalDateTime parseDateParam(String value, boolean endOfDay) {
         if (value == null || value.isBlank()) {
             return null;
@@ -903,10 +1017,7 @@ public class AdminController {
         UserDTO dto = new UserDTO();
         dto.setId(user.getId());
         dto.setEmail(user.getEmail());
-        String fullName = (String.format("%s %s",
-            Optional.ofNullable(user.getFirstName()).orElse(""),
-            Optional.ofNullable(user.getLastName()).orElse(""))).trim();
-        dto.setName(fullName.isBlank() ? user.getEmail() : fullName);
+        dto.setName(buildDisplayName(user));
         dto.setFirstName(user.getFirstName());
         dto.setLastName(user.getLastName());
         dto.setRole(user.getRole().name().toLowerCase().replace("role_", ""));
@@ -920,13 +1031,23 @@ public class AdminController {
 
     private User convertToUserEntity(UserDTO dto) {
         User user = new User();
-        user.setEmail(dto.getEmail());
-        user.setFirstName(dto.getFirstName());
-        user.setLastName(dto.getLastName());
+        String email = sanitizeEmail(dto.getEmail());
+        String firstName = sanitizeOptionalText(dto.getFirstName(), 100);
+        String lastName = sanitizeOptionalText(dto.getLastName(), 120);
+        String name = sanitizeOptionalText(dto.getName(), 160);
+        if ((firstName == null || firstName.isBlank()) && name != null) {
+            String[] parts = name.split("\\s+");
+            firstName = parts.length > 0 ? parts[0] : "";
+            lastName = parts.length > 1 ? String.join(" ", Arrays.copyOfRange(parts, 1, parts.length)) : "";
+        }
+
+        user.setEmail(email);
+        user.setFirstName(firstName);
+        user.setLastName(lastName);
         if (dto.getRole() != null) {
             user.setRole(parseRole(dto.getRole()));
         }
-        user.setFaculty(dto.getFaculty());
+        user.setFaculty(sanitizeOptionalText(dto.getFaculty(), 120));
         user.setActive(dto.isActive());
         return user;
     }
@@ -954,12 +1075,15 @@ public class AdminController {
     /**
      * Convierte SystemLog a AuditLogDTO
      */
-    private AuditLogDTO convertToAuditLogDTO(SystemLog log) {
+    private AuditLogDTO convertToAuditLogDTO(SystemLog log, AuditActorInfo actorInfo) {
         return AuditLogDTO.builder()
             .id(log.getId())
             .timestamp(log.getTimestamp())
             .level(log.getLevel() != null ? log.getLevel().name() : null)
-            .userId(log.getUserId())
+            .userId(actorInfo != null ? actorInfo.userId() : log.getUserId())
+            .userIdentifier(actorInfo != null ? actorInfo.userIdentifier() : log.getUserId())
+            .userDisplayName(actorInfo != null ? actorInfo.userDisplayName() : log.getUserId())
+            .userEmail(actorInfo != null ? actorInfo.userEmail() : null)
             .userRole(log.getUserRole())
             .ipAddress(log.getIpAddress())
             .userAgent(log.getUserAgent())
@@ -970,4 +1094,96 @@ public class AdminController {
             .errorMessage(log.getErrorMessage())
             .build();
     }
+
+    private Map<String, AuditActorInfo> buildAuditActorMap(List<SystemLog> logs) {
+        Set<String> identifiers = logs.stream()
+            .map(SystemLog::getUserId)
+            .filter(Objects::nonNull)
+            .map(String::trim)
+            .filter(value -> !value.isBlank())
+            .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (identifiers.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<String, AuditActorInfo> actorMap = new HashMap<>();
+        Set<String> uuidIdentifiers = identifiers.stream()
+            .filter(this::isUuid)
+            .collect(Collectors.toSet());
+
+        userRepository.findAllById(uuidIdentifiers).forEach(user -> {
+            actorMap.put(user.getId(), toAuditActorInfo(user, user.getId()));
+            if (user.getEmail() != null && !user.getEmail().isBlank()) {
+                actorMap.putIfAbsent(user.getEmail(), toAuditActorInfo(user, user.getEmail()));
+            }
+            if (user.getUsername() != null && !user.getUsername().isBlank()) {
+                actorMap.putIfAbsent(user.getUsername(), toAuditActorInfo(user, user.getUsername()));
+            }
+        });
+
+        identifiers.stream()
+            .filter(identifier -> !actorMap.containsKey(identifier))
+            .forEach(identifier -> userRepository.findByEmail(identifier)
+                .or(() -> userRepository.findByUsername(identifier))
+                .ifPresent(user -> actorMap.put(identifier, toAuditActorInfo(user, identifier))));
+
+        return actorMap;
+    }
+
+    private AuditActorInfo toAuditActorInfo(User user, String originalIdentifier) {
+        return new AuditActorInfo(
+            user.getId(),
+            originalIdentifier,
+            buildDisplayName(user),
+            user.getEmail()
+        );
+    }
+
+    private String buildDisplayName(User user) {
+        String fullName = (String.format("%s %s",
+            Optional.ofNullable(user.getFirstName()).orElse(""),
+            Optional.ofNullable(user.getLastName()).orElse(""))).trim();
+        return fullName.isBlank() ? user.getEmail() : fullName;
+    }
+
+    private boolean isUuid(String value) {
+        try {
+            UUID.fromString(value);
+            return true;
+        } catch (IllegalArgumentException ex) {
+            return false;
+        }
+    }
+
+    private String sanitizeEmail(String value) {
+        String normalized = sanitizeOptionalText(value, 200);
+        if (normalized == null || !normalized.contains("@")) {
+            throw new IllegalArgumentException("Email invalido");
+        }
+        return normalized.toLowerCase();
+    }
+
+    private String sanitizeOptionalText(String value, int maxLength) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value
+            .replaceAll("[\\u0000-\\u001f]+", " ")
+            .replaceAll("\\s+", " ")
+            .trim();
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength);
+    }
+
+    private Boolean parseImportActive(Object rawStatus) {
+        String normalized = sanitizeOptionalText(rawStatus != null ? rawStatus.toString() : null, 20);
+        if (normalized == null) {
+            return null;
+        }
+        return !"inactive".equalsIgnoreCase(normalized);
+    }
+
+    private record AuditActorInfo(String userId, String userIdentifier, String userDisplayName, String userEmail) {}
 }

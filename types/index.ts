@@ -153,6 +153,10 @@ export interface EvidenceItem {
   relevanceScore: number
   source?: string
   sourceUrl?: string
+  evidenceLevel?: number
+  similarityScore?: number
+  year?: number
+  studyType?: string
 }
 
 // ============ BIBLIOGRAFÍA ============
@@ -261,6 +265,7 @@ export interface SearchHedge {
 
 export interface SystemHealth {
   status?: string
+  lastCheck?: string
   cpu: number
   memory: number
   disk?: number
@@ -383,6 +388,52 @@ export interface AdminDashboardData {
   }
 }
 
+export interface AdminSystemErrorInsight {
+  id: string
+  fingerprint: string
+  endpoint?: string
+  httpStatus?: number
+  severity: 'critical' | 'high' | 'medium' | 'low'
+  errorType?: string
+  errorMessage?: string
+  occurrences: number
+  firstSeen?: string
+  lastSeen?: string
+  lastAnalyzedAt?: string
+  aiDiagnosis?: string
+  aiConfidence?: number
+  recommendations: string[]
+}
+
+export interface AdminSystemRecentError {
+  id: string
+  timestamp?: string
+  endpoint?: string
+  httpStatus?: number
+  responseTime?: number
+  userId?: string
+  errorMessage?: string
+  correlationId?: string
+}
+
+export interface AdminSystemErrorMonitoring {
+  generatedAt: string
+  summary: {
+    windowMinutes: number
+    totalErrors: number
+    totalWarnings: number
+    trackedInsights: number
+    criticalInsights: number
+  }
+  analysisStatus: {
+    lastRun?: string
+    lastProcessedErrors: number
+    lastUpdatedInsights: number
+  }
+  insights: AdminSystemErrorInsight[]
+  recentErrors: AdminSystemRecentError[]
+}
+
 export interface SystemOverview {
   timestamp: string
   server: {
@@ -420,6 +471,8 @@ export interface AuditLog {
   timestamp: string
   user: string
   userId?: string
+  userIdentifier?: string
+  userDisplayName?: string
   userEmail?: string
   action: string
   details: string

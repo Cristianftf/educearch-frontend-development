@@ -79,24 +79,26 @@ public class DataInitializer implements CommandLineRunner {
             user.setEmail(email);
         }
 
-        boolean passwordMatches =
-            user.getPasswordHash() != null && passwordEncoder.matches(rawPassword, user.getPasswordHash());
-        if (!passwordMatches) {
-            user.setPasswordHash(passwordEncoder.encode(rawPassword));
-        }
+        if (user != null) {
+            boolean passwordMatches =
+                user.getPasswordHash() != null && passwordEncoder.matches(rawPassword, user.getPasswordHash());
+            if (!passwordMatches) {
+                user.setPasswordHash(passwordEncoder.encode(rawPassword));
+            }
 
-        user.setFirstName(firstName);
-        user.setLastName(lastName);
-        user.setRole(role);
-        user.setFaculty(faculty);
-        user.setDepartment(department);
-        user.setActive(true);
+            user.setFirstName(firstName);
+            user.setLastName(lastName);
+            user.setRole(role);
+            user.setFaculty(faculty);
+            user.setDepartment(department);
+            user.setActive(true);
 
-        userRepository.save(user);
-        if (isNew) {
-            log.info("Created test user: {} / {}", email, rawPassword);
-        } else {
-            log.info("Updated test user: {} / {}", email, rawPassword);
+            userRepository.save(user);
+            if (isNew) {
+                log.info("Created test user: {} / {}", email, rawPassword);
+            } else {
+                log.info("Updated test user: {} / {}", email, rawPassword);
+            }
         }
     }
 }

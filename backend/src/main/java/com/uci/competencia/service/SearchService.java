@@ -5,4 +5,5 @@ import com.uci.competencia.model.dto.response.SearchResponseDTO;
 
 public interface SearchService {
     SearchResponseDTO executeSearch(SearchRequestDTO request);
+    SearchResponseDTO executeSearch(SearchRequestDTO request, boolean persistSession);
 }

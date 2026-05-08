@@ -135,6 +135,11 @@ const determineTrend = (
   return "stable"
 }
 
+const getStudentLabel = (studentId: string) => {
+  const normalized = studentId.trim()
+  return normalized ? `Estudiante ${normalized.slice(0, 8)}` : "Estudiante sin identificar"
+}
+
 const buildRow = (
   studentId: string,
   competency: StudentCompetency | undefined,
@@ -153,8 +158,8 @@ const buildRow = (
 
   return {
     id: studentId,
-    name: competency?.studentName ?? `Estudiante ${studentId.slice(0, 8)}`,
-    email: competency?.studentEmail ?? "sin-correo",
+    name: competency?.studentName ?? getStudentLabel(studentId),
+    email: competency?.studentEmail ?? "",
     avatar: competency?.avatar || "/placeholder.svg",
     accessScore,
     processingScore,
@@ -262,10 +267,10 @@ export default function ProfessorStudentsPage() {
       .map((student) => student.email)
       .filter((email) => typeof email === "string" && email.includes("@"))
     if (emails.length === 0) {
-      setError("No hay estudiantes en riesgo o inactivos con correo valido.")
+      setError("No hay estudiantes en riesgo o inactivos con correo válido.")
       return
     }
-    const subject = encodeURIComponent("Recordatorio de seguimiento academico")
+    const subject = encodeURIComponent("Recordatorio de seguimiento académico")
     const body = encodeURIComponent(
       "Hola,\n\nEste es un recordatorio para retomar tus actividades y mejorar tu progreso en las competencias informacionales.\n\nSaludos."
     )
@@ -317,7 +322,7 @@ export default function ProfessorStudentsPage() {
         "email",
         "acceso",
         "procesamiento",
-        "comunicacion",
+        "comunicación",
         "general",
         "estado",
         "casos_completados",

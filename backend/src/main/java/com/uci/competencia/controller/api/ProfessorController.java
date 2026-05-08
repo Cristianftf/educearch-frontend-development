@@ -16,7 +16,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/professor")
-@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:3001", "https://frontend.uci.cu"})
 @PreAuthorize("hasRole('PROFESSOR')")
 @RequiredArgsConstructor
 @Slf4j
@@ -35,7 +34,8 @@ public class ProfessorController {
     @GetMapping("/analytics/student/{studentId}")
     public ResponseEntity<StudentProgressDTO> getStudentAnalytics(@PathVariable String studentId) {
         log.info("Getting analytics for student: {}", studentId);
-        StudentProgressDTO progress = analyticsService.getStudentAnalytics(studentId);
+        String professorId = SecurityUtils.getCurrentUserId();
+        StudentProgressDTO progress = analyticsService.getStudentAnalytics(professorId, studentId);
         return ResponseEntity.ok(progress);
     }
 

@@ -1,5 +1,6 @@
 package com.uci.competencia.model.entity;
 
+import com.uci.competencia.model.converter.StringUuidConverter;
 import com.uci.competencia.model.enums.Verdict;
 import com.uci.competencia.model.enums.VerificationStatus;
 import jakarta.persistence.*;
@@ -23,7 +24,10 @@ public class VerificationResult {
     @JoinColumn(name = "user_id")
     private User user;
     
+    @Column(name = "claim_text", nullable = false, columnDefinition = "TEXT")
     private String claimText;
+
+    @Column(name = "source_url", columnDefinition = "TEXT")
     private String sourceUrl;
     private LocalDateTime submittedAt;
     private LocalDateTime completedAt;
@@ -39,22 +43,24 @@ public class VerificationResult {
     private Double confidence;
     private Integer evidenceCount;
     
-    @Lob
+    @Column(name = "supporting_evidence", columnDefinition = "TEXT")
     private String supportingEvidence;
     
-    @Lob
+    @Column(name = "conflicting_evidence", columnDefinition = "TEXT")
     private String conflictingEvidence;
     
-    @Lob
+    @Column(name = "gen_text", columnDefinition = "TEXT")
     private String genText;
     
-    @Lob
+    @Column(name = "explanations", columnDefinition = "TEXT")
     private String explanations;
     
-    @Lob
+    @Column(name = "recommendations", columnDefinition = "TEXT")
     private String recommendations;
     
     private Boolean isLearningExample;
+
+    @Convert(converter = StringUuidConverter.class)
     private String sessionContext;
     
     @PrePersist

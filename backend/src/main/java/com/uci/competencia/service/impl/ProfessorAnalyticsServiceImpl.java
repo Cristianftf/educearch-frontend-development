@@ -11,7 +11,7 @@ import com.uci.competencia.model.enums.CaseDifficulty;
 import com.uci.competencia.model.enums.CaseStatus;
 import com.uci.competencia.repository.CaseStudyRepository;
 import com.uci.competencia.repository.SearchSessionRepository;
-import com.uci.competencia.repository.UserRepository;
+import com.uci.competencia.security.UserIdentityResolver;
 import com.uci.competencia.service.ProgressService;
 import com.uci.competencia.service.ProfessorAnalyticsService;
 import lombok.RequiredArgsConstructor;
@@ -57,7 +57,7 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
     );
 
     private final CaseStudyRepository caseStudyRepository;
-    private final UserRepository userRepository;
+    private final UserIdentityResolver userIdentityResolver;
     private final SearchSessionRepository searchSessionRepository;
     private final ProgressService progressService;
 
@@ -81,8 +81,11 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
     }
 
     @Override
-    public StudentProgressDTO getStudentAnalytics(String studentId) {
-        log.info("Getting analytics for student: {}", studentId);
+    public StudentProgressDTO getStudentAnalytics(String professorId, String studentId) {
+        log.info("Getting analytics for student: {} and professor: {}", studentId, professorId);
+        if (!isStudentAssignedToProfessor(professorId, studentId)) {
+            throw new ResourceNotFoundException("Student not assigned to professor: " + studentId);
+        }
         return progressService.getStudentProgress(studentId);
     }
 
@@ -127,7 +130,7 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
         List<ProfessorAnalyticsDTO.StudentSummaryDTO> result = new ArrayList<>();
         for (String studentId : studentIds) {
             try {
-                User user = userRepository.findById(studentId).orElse(null);
+                User user = userIdentityResolver.findUserByIdentifier(studentId).orElse(null);
                 if (user == null) {
                     continue;
                 }
@@ -155,7 +158,7 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
         List<ProfessorAnalyticsDTO.StudentCompetencyDetailsDTO> result = new ArrayList<>();
         for (String studentId : studentIds) {
             try {
-                User user = userRepository.findById(studentId).orElse(null);
+                User user = userIdentityResolver.findUserByIdentifier(studentId).orElse(null);
                 if (user == null) {
                     continue;
                 }
@@ -196,7 +199,7 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
         Map<String, Integer> counts = new HashMap<>();
         for (SearchSession session : sessions) {
             for (String term : extractQueryTerms(session.getOriginalQuery())) {
-                counts.merge(term, 1, Integer::sum);
+                counts.merge(term, 1, (old, v) -> old + v);
             }
         }
 
@@ -229,9 +232,9 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
             Set<String> termsInSession = new HashSet<>(extractQueryTerms(session.getOriginalQuery()));
             boolean isFailure = session.getResultsCount() == null || session.getResultsCount() <= 0;
             for (String term : termsInSession) {
-                occurrences.merge(term, 1, Integer::sum);
+                occurrences.merge(term, 1, (old, v) -> old + v);
                 if (isFailure) {
-                    failures.merge(term, 1, Integer::sum);
+                    failures.merge(term, 1, (old, v) -> old + v);
                 }
             }
         }
@@ -392,7 +395,7 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
                 try {
                     StudentProgressDTO progress = progressService.getStudentProgress(studentId);
                     if (progress != null) {
-                        User user = userRepository.findById(studentId).orElse(null);
+                        User user = userIdentityResolver.findUserByIdentifier(studentId).orElse(null);
                         if (user != null) {
                             Map<String, Double> scores = extractCompetencyScores(progress);
                             double studentAvg = (scores.get("access") + scores.get("process") + scores.get("communicate")) / 3.0;
@@ -511,6 +514,15 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
         return resolveStudentIds(rawStudentRefs);
     }
 
+    private boolean isStudentAssignedToProfessor(String professorId, String studentId) {
+        if (professorId == null || professorId.isBlank() || studentId == null || studentId.isBlank()) {
+            return false;
+        }
+        List<CaseStudy> professorCases = getProfessorCasesForIdentifier(professorId);
+        Set<String> assignedStudentIds = collectAssignedStudentIds(professorCases);
+        return assignedStudentIds.contains(studentId.trim());
+    }
+
     private Set<String> resolveProfessorIdentifiers(String professorId) {
         if (professorId == null || professorId.isBlank()) {
             return Set.of();
@@ -519,46 +531,12 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
         Set<String> identifiers = new LinkedHashSet<>();
         identifiers.add(professorId.trim());
 
-        findUserByIdentifier(professorId).ifPresent(user -> addUserIdentifiers(identifiers, user));
+        findUserByIdentifier(professorId).ifPresent(user -> userIdentityResolver.addUserIdentifiers(identifiers, user));
         return identifiers;
     }
 
     private Optional<User> findUserByIdentifier(String identifier) {
-        if (identifier == null || identifier.isBlank()) {
-            return Optional.empty();
-        }
-
-        String normalized = identifier.trim();
-        try {
-            Optional<User> byId = userRepository.findById(normalized);
-            if (byId.isPresent()) {
-                return byId;
-            }
-        } catch (Exception e) {
-            log.debug("Identifier {} is not a direct user ID", normalized);
-        }
-
-        Optional<User> byEmail = userRepository.findByEmail(normalized);
-        if (byEmail.isPresent()) {
-            return byEmail;
-        }
-
-        return userRepository.findByUsername(normalized);
-    }
-
-    private void addUserIdentifiers(Set<String> target, User user) {
-        if (user == null) {
-            return;
-        }
-        if (user.getId() != null && !user.getId().isBlank()) {
-            target.add(user.getId());
-        }
-        if (user.getEmail() != null && !user.getEmail().isBlank()) {
-            target.add(user.getEmail());
-        }
-        if (user.getUsername() != null && !user.getUsername().isBlank()) {
-            target.add(user.getUsername());
-        }
+        return userIdentityResolver.findUserByIdentifier(identifier);
     }
 
     private Set<String> resolveStudentIds(Set<String> rawStudentReferences) {
@@ -579,23 +557,9 @@ public class ProfessorAnalyticsServiceImpl implements ProfessorAnalyticsService 
         }
         String normalized = reference.trim();
 
-        try {
-            Optional<User> byId = userRepository.findById(normalized);
-            if (byId.isPresent()) {
-                return Optional.of(byId.get().getId());
-            }
-        } catch (Exception e) {
-            log.debug("Student reference {} is not a direct user ID", normalized);
-        }
-
-        Optional<User> byEmail = userRepository.findByEmail(normalized);
-        if (byEmail.isPresent()) {
-            return Optional.of(byEmail.get().getId());
-        }
-
-        Optional<User> byUsername = userRepository.findByUsername(normalized);
-        if (byUsername.isPresent()) {
-            return Optional.of(byUsername.get().getId());
+        Optional<User> resolvedUser = userIdentityResolver.findUserByIdentifier(normalized);
+        if (resolvedUser.isPresent()) {
+            return Optional.of(resolvedUser.get().getId());
         }
 
         log.warn("Skipping unresolved student reference in professor analytics: {}", normalized);

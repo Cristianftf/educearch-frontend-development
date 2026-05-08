@@ -59,13 +59,13 @@ const STUDENT_MODULES: HelpModule[] = [
     objective:
       'Monitorear tu progreso por competencias y decidir en que funcionalidad debes practicar primero.',
     workflow: [
-      'Revisa indicadores globales de busquedas, verificaciones y bibliografias.',
-      'Analiza cada tarjeta de competencia (acceso, procesamiento y comunicacion).',
-      'Consulta actividad reciente para identificar habitos y brechas.',
-      'Usa los accesos directos de accion para entrar al modulo que debes reforzar.',
+      'Revisa indicadores globales de búsquedas, verificaciones y bibliografías.',
+      'Analiza cada tarjeta de competencia (acceso, procesamiento y comunicación).',
+      'Consulta actividad reciente para identificar hábitos y brechas.',
+      'Usa los accesos directos de acción para entrar al módulo que debes reforzar.',
     ],
     recommendations: [
-      'Empieza y termina tu sesion revisando este panel para medir avance real.',
+      'Empieza y termina tu sesión revisando este panel para medir avance real.',
       'Prioriza la competencia con menor puntaje semanal.',
       'Combina frecuencia de uso con calidad de evidencia.',
     ],
@@ -74,52 +74,52 @@ const STUDENT_MODULES: HelpModule[] = [
       'No relacionar la actividad reciente con objetivos de aprendizaje.',
     ],
     quickLinks: [
-      { label: 'Busqueda avanzada', href: '/student/search' },
-      { label: 'Verificacion', href: '/student/verify' },
+      { label: 'Búsqueda avanzada', href: '/student/search' },
+      { label: 'Verificación', href: '/student/verify' },
     ],
   },
   {
     key: 'student-search',
-    title: 'Busqueda avanzada',
-    badge: 'Estudiante · Busqueda',
+    title: 'Búsqueda avanzada',
+    badge: 'Estudiante · Búsqueda',
     matchers: ['/student/search'],
     objective:
-      'Construir consultas clinicas precisas usando MeSH, operadores booleanos y filtros metodologicos.',
+      'Construir consultas clínicas precisas usando MeSH, operadores booleanos y filtros metodológicos.',
     workflow: [
-      'Formula una pregunta concreta y extrae terminos clave.',
-      'Agrega terminos MeSH en constructor visual o modo avanzado.',
-      'Relaciona terminos con AND, OR y NOT segun la logica de la pregunta.',
-      'Aplica filtros (ano, tipo de estudio, tamano muestral).',
-      'Evalua resultados por nivel de evidencia, conflicto de interes y pertinencia.',
-      'Selecciona articulos y exporta a bibliografia.',
+      'Formula una pregunta concreta y extrae términos clave.',
+      'Agrega términos MeSH en constructor visual o modo avanzado.',
+      'Relaciona términos con AND, OR y NOT según la lógica de la pregunta.',
+      'Aplica filtros (año, tipo de estudio, tamaño muestral).',
+      'Evalúa resultados por nivel de evidencia, conflicto de interés y pertinencia.',
+      'Selecciona artículos y exporta a bibliografía.',
     ],
     recommendations: [
-      'Refina en iteraciones: consulta amplia, luego precision.',
+      'Refina en iteraciones: consulta amplia, luego precisión.',
       'Favorece estudios de alto nivel cuando respondan tu pregunta.',
-      'Guarda consultas utiles para reutilizarlas.',
+      'Guarda consultas útiles para reutilizarlas.',
     ],
     commonMistakes: [
-      'Consultar terminos muy generales sin filtros.',
-      'Elegir articulos por titulo sin validar resumen ni metadatos.',
+      'Consultar términos muy generales sin filtros.',
+      'Elegir artículos por título sin validar resumen ni metadatos.',
     ],
     quickLinks: [
-      { label: 'Piramide de evidencia', href: '/student/pyramid' },
-      { label: 'Crear bibliografia', href: '/student/bibliography' },
+      { label: 'Pirámide de evidencia', href: '/student/pyramid' },
+      { label: 'Crear bibliografía', href: '/student/bibliography' },
     ],
   },
   {
     key: 'student-verify',
-    title: 'Verificacion de claims',
-    badge: 'Estudiante · Verificacion',
+    title: 'Verificación de claims',
+    badge: 'Estudiante · Verificación',
     matchers: ['/student/verify'],
     objective:
-      'Contrastar afirmaciones de salud con evidencia cientifica y obtener una conclusion argumentada.',
+      'Contrastar afirmaciones de salud con evidencia científica y obtener una conclusión argumentada.',
     workflow: [
       'Ingresa un claim en texto o una URL verificable.',
-      'Ejecuta la verificacion y espera resultado con score.',
+      'Ejecuta la verificación y espera resultado con score.',
       'Compara evidencia a favor y en contra.',
-      'Interpreta explicacion y recomendaciones para profundizar.',
-      'Si hay conflicto, vuelve a busqueda avanzada para ampliar contraste.',
+      'Interpreta explicación y recomendaciones para profundizar.',
+      'Si hay conflicto, vuelve a búsqueda avanzada para ampliar contraste.',
     ],
     recommendations: [
       'Formula claims concretos y medibles.',
@@ -127,39 +127,39 @@ const STUDENT_MODULES: HelpModule[] = [
       'Documenta por que aceptas o rechazas la afirmacion.',
     ],
     commonMistakes: [
-      'Verificar afirmaciones ambiguas o con multiples ideas.',
-      'Tomar el resultado sin juicio critico.',
+      'Verificar afirmaciones ambiguas o con múltiples ideas.',
+      'Tomar el resultado sin juicio crítico.',
     ],
     quickLinks: [
-      { label: 'Busqueda avanzada', href: '/student/search' },
-      { label: 'Piramide de evidencia', href: '/student/pyramid' },
+      { label: 'Búsqueda avanzada', href: '/student/search' },
+      { label: 'Pirámide de evidencia', href: '/student/pyramid' },
     ],
   },
   {
     key: 'student-bibliography',
-    title: 'Generador de bibliografias',
-    badge: 'Estudiante · Bibliografias',
+    title: 'Generador de bibliografías',
+    badge: 'Estudiante · Bibliografías',
     matchers: ['/student/bibliography'],
     objective:
-      'Crear referencias academicas consistentes a partir de articulos seleccionados.',
+      'Crear referencias académicas consistentes a partir de artículos seleccionados.',
     workflow: [
-      'Carga articulos desde busqueda o piramide, o realiza busqueda interna.',
+      'Carga artículos desde búsqueda o pirámide, o realiza búsqueda interna.',
       'Selecciona solo estudios pertinentes a tu objetivo.',
       'Define formato (APA, Vancouver, BibTeX o XML).',
-      'Asigna nombre descriptivo y genera la bibliografia.',
+      'Asigna nombre descriptivo y genera la bibliografía.',
       'Revisa contenido final y descarga/copia para tu entrega.',
     ],
     recommendations: [
-      'Mantener bibliografias por tema mejora trazabilidad.',
-      'Valida autores, ano, revista y DOI antes de exportar.',
+      'Mantener bibliografías por tema mejora trazabilidad.',
+      'Valida autores, año, revista y DOI antes de exportar.',
       'Reutiliza el historial para ahorrar tiempo.',
     ],
     commonMistakes: [
-      'Mezclar articulos de temas distintos en una sola bibliografia.',
+      'Mezclar artículos de temas distintos en una sola bibliografía.',
       'No verificar formato solicitado por la asignatura.',
     ],
     quickLinks: [
-      { label: 'Buscar articulos', href: '/student/search' },
+      { label: 'Buscar artículos', href: '/student/search' },
       { label: 'Ver casos', href: '/student/cases' },
     ],
   },
@@ -169,17 +169,17 @@ const STUDENT_MODULES: HelpModule[] = [
     badge: 'Estudiante · Casos',
     matchers: ['/student/cases'],
     objective:
-      'Aplicar evidencia a escenarios clinicos y entregar analisis estructurado con criterio academico.',
+      'Aplicar evidencia a escenarios clínicos y entregar análisis estructurado con criterio académico.',
     workflow: [
-      'Abre el caso y revisa escenario, fecha, preguntas guia y rubrica.',
-      'Identifica articulos requeridos y complementarios.',
+      'Abre el caso y revisa escenario, fecha, preguntas guía y rúbrica.',
+      'Identifica artículos requeridos y complementarios.',
       'Elabora respuesta argumentada con evidencia relevante.',
-      'Redacta conclusion alineada con criterios de evaluacion.',
+      'Redacta conclusión alineada con criterios de evaluación.',
       'Envia entrega y da seguimiento al estado.',
     ],
     recommendations: [
       'Estructura respuesta: problema, evidencia, interpretacion, decision.',
-      'Relaciona cada argumento con la rubrica.',
+      'Relaciona cada argumento con la rúbrica.',
       'Explica incertidumbre si la evidencia es conflictiva.',
     ],
     commonMistakes: [
@@ -187,25 +187,25 @@ const STUDENT_MODULES: HelpModule[] = [
       'Entregar fuera de plazo por no gestionar tiempo.',
     ],
     quickLinks: [
-      { label: 'Busqueda avanzada', href: '/student/search' },
-      { label: 'Bibliografias', href: '/student/bibliography' },
+      { label: 'Búsqueda avanzada', href: '/student/search' },
+      { label: 'Bibliografías', href: '/student/bibliography' },
     ],
   },
   {
     key: 'student-pyramid',
-    title: 'Piramide de evidencia',
-    badge: 'Estudiante · Piramide',
+    title: 'Pirámide de evidencia',
+    badge: 'Estudiante · Pirámide',
     matchers: ['/student/pyramid'],
     objective:
-      'Priorizar estudios por calidad metodologica y seleccionar evidencia mas solida.',
+      'Priorizar estudios por calidad metodológica y seleccionar evidencia más sólida.',
     workflow: [
-      'Busca un tema clinico para cargar estudios.',
+      'Busca un tema clínico para cargar estudios.',
       'Filtra por nivel de evidencia y compara calidad.',
       'Selecciona estudios pertinentes.',
-      'Envia seleccion al modulo de bibliografias.',
+      'Envia seleccion al módulo de bibliografías.',
     ],
     recommendations: [
-      'Combina nivel de evidencia con pertinencia clinica.',
+      'Combina nivel de evidencia con pertinencia clínica.',
       'Justifica por que priorizas ciertos estudios.',
     ],
     commonMistakes: [
@@ -213,8 +213,8 @@ const STUDENT_MODULES: HelpModule[] = [
       'Asumir que un estudio reciente siempre es mejor.',
     ],
     quickLinks: [
-      { label: 'Bibliografias', href: '/student/bibliography' },
-      { label: 'Verificacion', href: '/student/verify' },
+      { label: 'Bibliografías', href: '/student/bibliography' },
+      { label: 'Verificación', href: '/student/verify' },
     ],
   },
 ]
@@ -230,19 +230,19 @@ const PROFESSOR_MODULES: HelpModule[] = [
     workflow: [
       'Revisa indicadores globales de progreso y actividad.',
       'Detecta estudiantes o competencias con riesgo.',
-      'Define acciones: crear caso, evaluar entregas o ajustar estrategias de busqueda.',
+      'Define acciones: crear caso, evaluar entregas o ajustar estrategias de búsqueda.',
     ],
     recommendations: [
       'Monitorea tendencias semanales, no solo valores puntuales.',
-      'Cruza metricas con calidad de entregas para intervenciones precisas.',
+      'Cruza métricas con calidad de entregas para intervenciones precisas.',
     ],
     commonMistakes: [
-      'Tomar decisiones con una sola metrica aislada.',
+      'Tomar decisiones con una sola métrica aislada.',
       'No transformar hallazgos del dashboard en acciones concretas.',
     ],
     quickLinks: [
       { label: 'Casos de estudio', href: '/professor/cases' },
-      { label: 'Analiticas', href: '/professor/analytics' },
+      { label: 'Analíticas', href: '/professor/analytics' },
     ],
   },
   {
@@ -251,21 +251,21 @@ const PROFESSOR_MODULES: HelpModule[] = [
     badge: 'Profesor · Casos',
     matchers: ['/professor/cases'],
     objective:
-      'Disenar, asignar y dar seguimiento a casos orientados al desarrollo de competencias informacionales.',
+      'Diseñar, asignar y dar seguimiento a casos orientados al desarrollo de competencias informacionales.',
     workflow: [
-      'Crea caso con escenario clinico, dificultad y rubrica.',
-      'Define preguntas guia y evidencia requerida.',
-      'Asigna estudiantes y establece fecha limite.',
+      'Crea caso con escenario clínico, dificultad y rúbrica.',
+      'Define preguntas guía y evidencia requerida.',
+      'Asigna estudiantes y establece fecha límite.',
       'Monitorea estado de entregas y calidad de respuestas.',
-      'Ajusta casos segun resultados observados.',
+      'Ajusta casos según resultados observados.',
     ],
     recommendations: [
       'Redacta escenarios realistas y evaluables.',
-      'Mantener coherencia entre preguntas guia y rubrica.',
+      'Mantener coherencia entre preguntas guía y rúbrica.',
       'Escalar dificultad progresivamente.',
     ],
     commonMistakes: [
-      'Crear rubricas ambiguas con criterios no medibles.',
+      'Crear rúbricas ambiguas con criterios no medibles.',
       'Asignar casos sin verificar carga total de estudiantes.',
     ],
     quickLinks: [
@@ -282,17 +282,17 @@ const PROFESSOR_MODULES: HelpModule[] = [
       'Calificar entregas de forma consistente, trazable y alineada con competencias.',
     workflow: [
       'Abre entregas pendientes y revisa contenido completo.',
-      'Asigna puntuaciones por competencia segun rubrica.',
-      'Registra comentarios accionables y retroalimentacion final.',
-      'Publica evaluacion y da seguimiento a mejoras.',
+      'Asigna puntuaciones por competencia según rúbrica.',
+      'Registra comentarios accionables y retroalimentación final.',
+      'Publica evaluación y da seguimiento a mejoras.',
     ],
     recommendations: [
-      'Usa criterios homogeneos para todo el grupo.',
-      'Ofrece retroalimentacion especifica, no generalista.',
-      'Identifica patrones para retroalimentacion colectiva.',
+      'Usa criterios homogéneos para todo el grupo.',
+      'Ofrece retroalimentación específica, no generalista.',
+      'Identifica patrones para retroalimentación colectiva.',
     ],
     commonMistakes: [
-      'Evaluar sin referencia explicita a rubrica.',
+      'Evaluar sin referencia explícita a rúbrica.',
       'Comentarios demasiado breves que no orientan mejora.',
     ],
     quickLinks: [
@@ -306,24 +306,24 @@ const PROFESSOR_MODULES: HelpModule[] = [
     badge: 'Profesor · Hedges',
     matchers: ['/professor/hedges'],
     objective:
-      'Gestionar estrategias de busqueda preconfiguradas para mejorar precision y cobertura tematica.',
+      'Gestionar estrategias de búsqueda preconfiguradas para mejorar precisión y cobertura temática.',
     workflow: [
-      'Crea o edita hedges por categoria o tipo de estudio.',
+      'Crea o edita hedges por categoría o tipo de estudio.',
       'Prueba hedge en escenarios de consulta reales.',
-      'Ajusta terminos/operadores segun precision obtenida.',
+      'Ajusta términos/operadores según precisión obtenida.',
       'Publica plantillas para uso recurrente de estudiantes.',
     ],
     recommendations: [
       'Documenta claramente cuando usar cada hedge.',
-      'Mide precision y recall antes de consolidar una plantilla.',
+      'Mide precisión y recall antes de consolidar una plantilla.',
     ],
     commonMistakes: [
       'Construir hedges demasiado complejos para usuarios novatos.',
-      'No versionar cambios en estrategias criticas.',
+      'No versionar cambios en estrategias críticas.',
     ],
     quickLinks: [
-      { label: 'Busqueda profesor', href: '/professor/search' },
-      { label: 'Analiticas', href: '/professor/analytics' },
+      { label: 'Búsqueda profesor', href: '/professor/search' },
+      { label: 'Analíticas', href: '/professor/analytics' },
     ],
   },
   {
@@ -332,46 +332,46 @@ const PROFESSOR_MODULES: HelpModule[] = [
     badge: 'Profesor · Estudiantes',
     matchers: ['/professor/students'],
     objective:
-      'Monitorear progreso individual y grupal para orientar intervenciones pedagogicas.',
+      'Monitorear progreso individual y grupal para orientar intervenciones pedagógicas.',
     workflow: [
       'Revisa listado de estudiantes y su avance por competencia.',
       'Detecta bajo rendimiento o estancamiento.',
-      'Asigna practicas o casos focalizados segun necesidad.',
-      'Verifica mejora tras cada ciclo de evaluacion.',
+      'Asigna prácticas o casos focalizados según necesidad.',
+      'Verifica mejora tras cada ciclo de evaluación.',
     ],
     recommendations: [
-      'Combina datos cuantitativos con observacion cualitativa.',
-      'Prioriza acompanamiento temprano en estudiantes con riesgo.',
+      'Combina datos cuantitativos con observación cualitativa.',
+      'Prioriza acompañamiento temprano en estudiantes con riesgo.',
     ],
     commonMistakes: [
       'Comparar estudiantes sin considerar nivel de partida.',
       'Tomar decisiones sin revisar evidencias de actividad.',
     ],
     quickLinks: [
-      { label: 'Analiticas', href: '/professor/analytics' },
+      { label: 'Analíticas', href: '/professor/analytics' },
       { label: 'Casos', href: '/professor/cases' },
     ],
   },
   {
     key: 'prof-analytics',
-    title: 'Analiticas docentes',
-    badge: 'Profesor · Analiticas',
+    title: 'Analíticas docentes',
+    badge: 'Profesor · Analíticas',
     matchers: ['/professor/analytics'],
     objective:
-      'Interpretar tendencias de aprendizaje y efectividad de estrategias didacticas.',
+      'Interpretar tendencias de aprendizaje y efectividad de estrategias didácticas.',
     workflow: [
       'Revisa indicadores por competencia y cohorte.',
       'Identifica brechas recurrentes y niveles de logro.',
       'Relaciona resultados con actividades aplicadas.',
-      'Define ajustes curriculares o de evaluacion.',
+      'Define ajustes curriculares o de evaluación.',
     ],
     recommendations: [
       'Analiza series temporales para evitar sesgos de corto plazo.',
       'Comparte hallazgos clave con tu equipo docente.',
     ],
     commonMistakes: [
-      'Sobregeneralizar con muestras pequenas.',
-      'No cerrar el ciclo entre analisis y mejora instruccional.',
+      'Sobregeneralizar con muestras pequeñas.',
+      'No cerrar el ciclo entre análisis y mejora instruccional.',
     ],
     quickLinks: [
       { label: 'Dashboard profesor', href: '/professor' },
@@ -380,23 +380,23 @@ const PROFESSOR_MODULES: HelpModule[] = [
   },
   {
     key: 'prof-search',
-    title: 'Busqueda academica del profesor',
-    badge: 'Profesor · Busqueda',
+    title: 'Búsqueda académica del profesor',
+    badge: 'Profesor · Búsqueda',
     matchers: ['/professor/search'],
     objective:
-      'Explorar evidencia para docencia, casos y actualizacion de contenidos academicos.',
+      'Explorar evidencia para docencia, casos y actualización de contenidos académicos.',
     workflow: [
-      'Define necesidad informacional (tema, intervencion, poblacion).',
-      'Construye consulta con terminos estructurados.',
-      'Filtra por calidad y actualidad metodologica.',
+      'Define necesidad informacional (tema, intervención, población).',
+      'Construye consulta con términos estructurados.',
+      'Filtra por calidad y actualidad metodológica.',
       'Selecciona estudios para clase o para casos.',
     ],
     recommendations: [
-      'Usa hedges para estandarizar calidad de consulta.',
+      'Usa hedges para estandarizar la calidad de la consulta.',
       'Conserva consultas base para reutilizacion por curso.',
     ],
     commonMistakes: [
-      'No separar busqueda docente de busqueda exploratoria.',
+      'No separar búsqueda docente de búsqueda exploratoria.',
       'Publicar material sin validar consistencia de fuentes.',
     ],
     quickLinks: [
@@ -416,20 +416,20 @@ const ADMIN_MODULES: HelpModule[] = [
       'Supervisar estado global de la plataforma, alertas y actividad operativa.',
     workflow: [
       'Revisa indicadores de usuarios, actividad y estado de servicios.',
-      'Detecta alertas prioritarias y deriva accion inmediata.',
-      'Valida estabilidad antes de cambios de configuracion.',
+      'Detecta alertas prioritarias y deriva acción inmediata.',
+      'Valida estabilidad antes de cambios de configuración.',
     ],
     recommendations: [
       'Revisar dashboard al inicio de cada jornada operativa.',
-      'Escalar rapidamente alertas criticas de disponibilidad.',
+      'Escalar rápidamente alertas críticas de disponibilidad.',
     ],
     commonMistakes: [
-      'Ignorar tendencias de degradacion progresiva.',
+      'Ignorar tendencias de degradación progresiva.',
       'Postergar tratamiento de alertas recurrentes.',
     ],
     quickLinks: [
       { label: 'Salud del sistema', href: '/admin/health' },
-      { label: 'Auditoria', href: '/admin/audit' },
+      { label: 'Auditoría', href: '/admin/audit' },
     ],
   },
   {
@@ -441,39 +441,39 @@ const ADMIN_MODULES: HelpModule[] = [
       'Administrar altas, bajas, roles y estado de cuentas con trazabilidad completa.',
     workflow: [
       'Consulta listado y filtra por rol/estado.',
-      'Crea, edita o desactiva cuentas segun politica institucional.',
+      'Crea, edita o desactiva cuentas según política institucional.',
       'Asigna roles correctos (student/professor/admin).',
       'Verifica historial de cambios y resultado de importaciones.',
     ],
     recommendations: [
-      'Aplicar principio de minimo privilegio en asignacion de roles.',
+      'Aplicar principio de mínimo privilegio en asignación de roles.',
       'Validar datos antes de importaciones masivas.',
     ],
     commonMistakes: [
       'Modificar roles sin revisar impacto operativo.',
-      'Desactivar cuentas sin registrar contexto de la accion.',
+      'Desactivar cuentas sin registrar contexto de la acción.',
     ],
     quickLinks: [
-      { label: 'Auditoria', href: '/admin/audit' },
-      { label: 'Configuracion', href: '/admin/settings' },
+      { label: 'Auditoría', href: '/admin/audit' },
+      { label: 'Configuración', href: '/admin/settings' },
     ],
   },
   {
     key: 'admin-audit',
-    title: 'Auditoria y trazabilidad',
-    badge: 'Admin · Auditoria',
+    title: 'Auditoría y trazabilidad',
+    badge: 'Admin · Auditoría',
     matchers: ['/admin/audit'],
     objective:
       'Investigar eventos del sistema y mantener cumplimiento mediante registro verificable.',
     workflow: [
-      'Filtra logs por usuario, accion, fecha y severidad.',
+      'Filtra logs por usuario, acción, fecha y severidad.',
       'Inspecciona eventos sensibles (roles, accesos, cambios de config).',
-      'Exporta evidencia para revision interna o cumplimiento.',
+      'Exporta evidencia para revisión interna o cumplimiento.',
       'Documenta hallazgos y medidas correctivas.',
     ],
     recommendations: [
-      'Mantener revisiones periodicas de logs criticos.',
-      'Cruzar auditoria con alertas de sistema para analisis causal.',
+      'Mantener revisiones periódicas de logs críticos.',
+      'Cruzar auditoría con alertas de sistema para análisis causal.',
     ],
     commonMistakes: [
       'Analizar eventos aislados sin contexto temporal.',
@@ -490,11 +490,11 @@ const ADMIN_MODULES: HelpModule[] = [
     badge: 'Admin · Sistema',
     matchers: ['/admin/system'],
     objective:
-      'Administrar mantenimiento tecnico, servicios internos y acciones operativas avanzadas.',
+      'Administrar mantenimiento técnico, servicios internos y acciones operativas avanzadas.',
     workflow: [
       'Revisa estado de servicios internos y recursos.',
       'Ejecuta acciones permitidas (reindex, limpieza, cache) con criterio.',
-      'Valida resultado despues de cada accion operacional.',
+      'Valida resultado después de cada acción operacional.',
       'Registra cambios para continuidad operativa.',
     ],
     recommendations: [
@@ -502,12 +502,12 @@ const ADMIN_MODULES: HelpModule[] = [
       'Aplicar cambios de forma incremental y validada.',
     ],
     commonMistakes: [
-      'Aplicar multiples acciones sin validar impacto intermedio.',
+      'Aplicar múltiples acciones sin validar impacto intermedio.',
       'No dejar trazabilidad de decisiones operativas.',
     ],
     quickLinks: [
       { label: 'Salud', href: '/admin/health' },
-      { label: 'Configuracion', href: '/admin/settings' },
+      { label: 'Configuración', href: '/admin/settings' },
     ],
   },
   {
@@ -518,10 +518,10 @@ const ADMIN_MODULES: HelpModule[] = [
     objective:
       'Monitorear disponibilidad, latencia y consumo de recursos para prevenir incidentes.',
     workflow: [
-      'Revisa estado general y metricas de CPU, memoria, conexiones y latencias.',
+      'Revisa estado general y métricas de CPU, memoria, conexiones y latencias.',
       'Identifica desviaciones respecto a umbrales esperados.',
-      'Escala incidencias y ejecuta plan de contencion.',
-      'Confirma recuperacion posterior al incidente.',
+      'Escala incidencias y ejecuta plan de contención.',
+      'Confirma recuperación posterior al incidente.',
     ],
     recommendations: [
       'Configura umbrales claros para warning/critical.',
@@ -533,29 +533,29 @@ const ADMIN_MODULES: HelpModule[] = [
     ],
     quickLinks: [
       { label: 'Dashboard admin', href: '/admin' },
-      { label: 'Auditoria', href: '/admin/audit' },
+      { label: 'Auditoría', href: '/admin/audit' },
     ],
   },
   {
     key: 'admin-settings',
-    title: 'Configuracion de plataforma',
-    badge: 'Admin · Configuracion',
+    title: 'Configuración de plataforma',
+    badge: 'Admin · Configuración',
     matchers: ['/admin/settings'],
     objective:
-      'Gestionar parametros funcionales, seguridad e integraciones externas de forma segura.',
+      'Gestionar parámetros funcionales, seguridad e integraciones externas de forma segura.',
     workflow: [
-      'Revisa configuraciones actuales y valida dependencias.',
-      'Aplica cambios puntuales en seguridad, IA, limites y parametros pedagogicos.',
-      'Guarda, verifica impacto y valida comportamiento post-cambio.',
-      'Registra ajustes para auditoria y rollback.',
+      'Revisa configuraciones actuales y válida dependencias.',
+      'Aplica cambios puntuales en seguridad, IA, límites y parámetros pedagógicos.',
+      'Guarda, verifica impacto y válida comportamiento post-cambio.',
+      'Registra ajustes para auditoría y rollback.',
     ],
     recommendations: [
       'Cambiar una variable a la vez cuando el entorno sea sensible.',
-      'Probar cambios en flujo real de usuarios despues de guardar.',
+      'Probar cambios en flujo real de usuarios después de guardar.',
     ],
     commonMistakes: [
       'Modificar configuraciones sin ventana de control.',
-      'No validar compatibilidad de nuevas politicas con procesos vigentes.',
+      'No validar compatibilidad de nuevas políticas con procesos vigentes.',
     ],
     quickLinks: [
       { label: 'Sistema', href: '/admin/system' },
@@ -613,7 +613,7 @@ function HelpSection({ module }: { module: HelpModule }) {
       <div className="space-y-3">
         <h4 className="text-sm font-semibold flex items-center gap-2">
           <Route className="h-4 w-4 text-primary" />
-          Como utilizar esta funcionalidad
+          Cómo utilizar esta funcionalidad
         </h4>
         <ol className="space-y-2">
           {module.workflow.map((step, index) => (
@@ -701,7 +701,7 @@ export function RoleHelpPanel({ role }: { role: PlatformRole }) {
             Centro de ayuda · {config.roleLabel}
           </SheetTitle>
           <SheetDescription>
-            Guia funcional completa para usar correctamente cada modulo de la plataforma.
+            Guía funcional completa para usar correctamente cada módulo de la plataforma.
           </SheetDescription>
         </SheetHeader>
 

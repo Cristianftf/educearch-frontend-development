@@ -39,6 +39,8 @@ public class VerificationResponseDTO {
         private String pmid;  // Mantener para compatibilidad
         private String title;
         private String snippet;
+        private String source;
+        private String sourceUrl;
         private Boolean supports;  // Renombrado de stance (true/false)
         private String stance;  // Mantener para compatibilidad
         private Double relevanceScore;  // Renombrado de similarity

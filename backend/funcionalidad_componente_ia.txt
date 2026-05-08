@@ -1,0 +1,102 @@
+FUNCIONALIDAD DEL COMPONENTE DE IA (ESTADO ACTUAL)
+
+1) QUE MODELO Y CLIENTE USA
+- El backend usa Gemini (Google AI) como proveedor principal.
+- Cliente principal en codigo: OpenAIServiceImpl (nombre historico, implementacion Gemini).
+- Flujo preferido actual: llamada REST a Gemini.
+- SDK de Gemini existe como fallback opcional, pero esta desactivado por defecto.
+
+2) CONFIGURACION ACTIVA RELEVANTE
+- app.ai.provider=gemini
+- app.google.ai.model=gemini-3-flash-preview
+- app.google.ai.sdk-enabled=false
+- app.google.ai.temperature=1.0
+- app.google.ai.max-tokens=2000
+- app.google.ai.timeout=20000
+- app.google.ai.max-retries=0
+- app.google.ai.retry-delay-ms=400
+
+3) ASISTENTE IA DE BUSQUEDA CLINICA
+Endpoint principal:
+- POST /api/search/assistant
+
+Entrada soportada:
+- message (obligatorio)
+- selectedTerms
+- operators (AND/OR/NOT)
+- recentTerms
+- projectContext
+- conversationHistory (user/assistant)
+- filters:
+  yearFrom, yearTo, studyTypes, language, hasFullText, minSampleSize, maxResults
+
+Proceso:
+- Sanitiza y normaliza la entrada.
+- Construye un prompt con esquema JSON estricto (reply, suggestedTerms, suggestedOperators,
+  suggestedFilters, autoPlan, tips).
+- Llama a Gemini via OpenAIServiceImpl.generateText().
+- Si la respuesta no llega o no parsea, activa fallback local.
+
+Salida:
+- reply
+- suggestedTerms (max 4)
+- suggestedOperators (max 3)
+- suggestedFilters
+- autoPlan (aplicable automaticamente en UI)
+- tips (max 3)
+- canAutoApply
+- usedAi (true/false)
+- fallbackUsed (true/false)
+
+Fallback del asistente:
+- Genera terminos heuristically desde terminos seleccionados, recientes y tokens del mensaje.
+- Enriquecimiento opcional con sugerencias MeSH desde PubMed.
+- Mantiene respuesta operativa aunque Gemini falle (timeout, cuota, 429/503, etc).
+
+4) VERIFICACION DE CLAIMS CON RAG
+Endpoints relacionados:
+- POST /api/verify/claim
+- GET /api/verify/result/{verificationId}
+- GET /api/verify/history?page=&limit=
+
+Flujo funcional:
+- Recibe claim o URL.
+- Si viene URL sin claim, extrae texto con Jsoup.
+- Guarda registro de verificacion en BD (PROCESSING -> COMPLETED/FAILED).
+- Ejecuta RAGService.verifyClaimAgainstEvidence():
+  - construye consulta PubMed
+  - recupera articulos
+  - calcula stance (support/contradict) con SimilarityCalculator
+  - pondera por nivel de evidencia y recencia
+  - calcula score, confidence, verdict y evidencia estructurada
+- Usa IA para generar explicacion/recomendaciones cuando disponible.
+- Si IA no responde, usa explicacion/recomendaciones de fallback.
+
+5) GENERACION DE TEXTO BASADO EN EVIDENCIA (RAG)
+Servicio disponible:
+- RAGService.generateEvidenceBasedText(GenTextRequest)
+
+Capacidades:
+- Busqueda semantica + reranking por evidencia.
+- Construccion de texto con citas PMID.
+- Validacion/atribucion de citas.
+- Metadatos de uso de IA (usedAi) y warning de fallback.
+
+Nota:
+- En el estado actual del codigo, no hay endpoint REST publico directo expuesto para este metodo.
+
+6) COMPORTAMIENTO EN FRONTEND
+- La vista /student/search consume /api/search/assistant.
+- Usa usedAi/fallbackUsed para mostrar estado del asistente.
+- Puede aplicar automaticamente terminos, operadores y filtros sugeridos (autoPlan).
+
+7) RESILIENCIA Y LIMITES ACTUALES
+- Si Gemini no responde dentro del timeout efectivo, el backend devuelve fallback (200 OK).
+- Si Gemini responde 429/503, tambien cae a fallback.
+- El sistema prioriza disponibilidad funcional sobre bloqueo de UI.
+
+8) LIMITACIONES PRACTICAS OBSERVADAS
+- Cuando hay rate limit o saturacion de Gemini, usedAi=false y fallbackUsed=true.
+- El fallback puede incluir algun termino de ruido del mensaje del usuario.
+- La calidad final depende de disponibilidad de Gemini y de las fuentes PubMed recuperadas.
+

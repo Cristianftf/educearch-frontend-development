@@ -2,13 +2,16 @@ package com.uci.competencia.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.uci.competencia.model.dto.request.GenTextRequest;
+import com.uci.competencia.model.dto.request.ExternalHealthSearchRequestDTO;
 import com.uci.competencia.model.dto.request.SearchRequestDTO;
 import com.uci.competencia.model.dto.request.VerificationRequest;
+import com.uci.competencia.model.dto.response.ExternalHealthSearchResponseDTO;
 import com.uci.competencia.model.dto.response.GenTextResult;
 import com.uci.competencia.model.dto.response.VerificationResponseDTO;
 import com.uci.competencia.model.enums.StudyType;
 import com.uci.competencia.model.enums.Verdict;
 import com.uci.competencia.service.RAGService;
+import com.uci.competencia.service.external.HealthSearchProxyService;
 import com.uci.competencia.service.external.OpenAIService;
 import com.uci.competencia.service.external.PubMedApiService;
 import com.uci.competencia.util.EvidenceLevelMapper;
@@ -43,6 +46,7 @@ public class RAGServiceImpl implements RAGService {
     private final PubMedQueryBuilder pubMedQueryBuilder;
     private final SimilarityCalculator similarityCalculator;
     private final OpenAIService openAIService;
+    private final HealthSearchProxyService healthSearchProxyService;
     private final ObjectMapper objectMapper;
     private final MeshMapper meshMapper;
 
@@ -77,7 +81,7 @@ public class RAGServiceImpl implements RAGService {
         String prompt = buildEvidencePrompt(query, context, selectedArticles);
         String aiText = openAIService.generateText(prompt);
         boolean usedAi = aiText != null && !aiText.isBlank();
-        String generatedText = usedAi
+        String generatedText = usedAi && aiText != null
             ? aiText.trim()
             : buildFallbackGeneratedText(query, selectedArticles);
         String attributed = validateAndAttributeCitations(generatedText, selectedArticles);
@@ -152,7 +156,7 @@ public class RAGServiceImpl implements RAGService {
         for (PubMedApiService.PubMedArticle article : articles) {
             String evidenceText = (article.title() != null ? article.title() : "") +
                 " " + (article.abstractText() != null ? article.abstractText() : "");
-            SimilarityCalculator.StanceDetection detection = similarityCalculator.detectStance(claim, evidenceText);
+            SimilarityCalculator.StanceDetection detection = detectEvidenceStance(claim, terms, evidenceText);
 
             StudyType studyType = EvidenceLevelMapper.mapStudyType(article.publicationTypes());
             int level = EvidenceLevelMapper.evidenceLevelForStudyType(studyType);
@@ -170,6 +174,8 @@ public class RAGServiceImpl implements RAGService {
             dto.setPmid(article.pmid());
             dto.setTitle(article.title());
             dto.setSnippet(extractSnippet(article.abstractText(), article.title()));
+            dto.setSource(safeText(article.journal()).isBlank() ? "PubMed" : safeText(article.journal()));
+            dto.setSourceUrl(buildSourceUrl(article.pmid(), article.doi()));
             if (detection.stance == SimilarityCalculator.Stance.SUPPORT) {
                 dto.setSupports(true);
                 dto.setStance("support");
@@ -200,31 +206,153 @@ public class RAGServiceImpl implements RAGService {
             .limit(6)
             .collect(Collectors.toList());
 
+        if (supporting.isEmpty() && contradicting.isEmpty()) {
+            List<VerificationResponseDTO.EvidenceDTO> externalEvidence =
+                loadExternalEvidenceForClaim(claim, maxArticles, yearFrom, yearTo);
+            if (!externalEvidence.isEmpty()) {
+                evidence = externalEvidence;
+                supporting = externalEvidence.stream()
+                    .filter(e -> Boolean.TRUE.equals(e.getSupports()))
+                    .sorted(Comparator.comparing(VerificationResponseDTO.EvidenceDTO::getRelevanceScore).reversed())
+                    .limit(6)
+                    .collect(Collectors.toList());
+                contradicting = externalEvidence.stream()
+                    .filter(e -> Boolean.FALSE.equals(e.getSupports()))
+                    .sorted(Comparator.comparing(VerificationResponseDTO.EvidenceDTO::getRelevanceScore).reversed())
+                    .limit(6)
+                    .collect(Collectors.toList());
+                supportScore = supporting.stream()
+                    .map(VerificationResponseDTO.EvidenceDTO::getRelevanceScore)
+                    .filter(score -> score != null)
+                    .mapToDouble(score -> score / 100.0)
+                    .sum();
+                contradictScore = contradicting.stream()
+                    .map(VerificationResponseDTO.EvidenceDTO::getRelevanceScore)
+                    .filter(score -> score != null)
+                    .mapToDouble(score -> score / 100.0)
+                    .sum();
+            }
+        }
+
         double total = supportScore + contradictScore;
         double supportRatio = total > 0 ? supportScore / total : 0.5;
-        double score = Math.round(supportRatio * 1000.0) / 10.0;
+        double heuristicScore = Math.round(supportRatio * 1000.0) / 10.0;
+        double heuristicConfidence = Math.abs(supportRatio - 0.5) * 2;
 
-        Verdict verdict = resolveVerdict(total, supportRatio, supporting.size() + contradicting.size());
-        String status = mapVerdictToStatus(verdict);
+        Verdict heuristicVerdict = resolveVerdict(total, supportRatio, supporting.size() + contradicting.size());
+        AIVerdictBundle aiBundle = buildVerdictWithAI(
+            claim,
+            supporting,
+            contradicting,
+            heuristicVerdict,
+            heuristicScore,
+            heuristicConfidence
+        );
 
-        ExplanationBundle bundle = buildExplanationWithAI(claim, supporting, contradicting, verdict);
-        String explanation = bundle.explanation;
-        List<String> recommendations = bundle.recommendations;
+        Verdict finalVerdict = aiBundle.verdict != null ? aiBundle.verdict : heuristicVerdict;
+        String status = mapVerdictToStatus(finalVerdict);
+        double finalScore = aiBundle.score != null ? clampScore(aiBundle.score) : heuristicScore;
+        double finalConfidence = aiBundle.confidence != null ? clampConfidence(aiBundle.confidence) : heuristicConfidence;
 
         VerificationResponseDTO response = new VerificationResponseDTO();
         response.setClaim(claim);
         response.setStatus(status);
-        response.setScore(score);
+        response.setScore(finalScore);
         response.setSupportingEvidence(supporting);
         response.setContradictingEvidence(contradicting);
         response.setConflictingEvidence(contradicting);
-        response.setExplanation(explanation);
-        response.setRecommendations(recommendations);
-        response.setVerdict(verdict != null ? verdict.name() : null);
-        response.setConfidence(Math.abs(supportRatio - 0.5) * 2);
+        response.setExplanation(aiBundle.explanation);
+        response.setRecommendations(aiBundle.recommendations);
+        response.setVerdict(finalVerdict != null ? finalVerdict.name() : null);
+        response.setConfidence(finalConfidence);
         response.setEvidenceCount(evidence.size());
         response.setVerifiedAt(LocalDateTime.now().toString());
         return response;
+    }
+
+    private List<VerificationResponseDTO.EvidenceDTO> loadExternalEvidenceForClaim(
+        String claim,
+        int maxArticles,
+        Integer yearFrom,
+        Integer yearTo
+    ) {
+        try {
+            ExternalHealthSearchRequestDTO request = new ExternalHealthSearchRequestDTO();
+            List<String> terms = extractQueryTerms(claim);
+            request.setQueryText(buildEvidenceSearchQuery(claim, terms));
+            request.setTerms(terms);
+            request.setYearFrom(yearFrom);
+            request.setYearTo(yearTo);
+            request.setMaxResults(Math.max(4, Math.min(maxArticles, 12)));
+            ExternalHealthSearchResponseDTO response = healthSearchProxyService.search(
+                request.getQueryText(),
+                request.getMaxResults(),
+                request
+            );
+            if (response == null || response.getResults() == null || response.getResults().isEmpty()) {
+                return List.of();
+            }
+
+            List<VerificationResponseDTO.EvidenceDTO> evidence = new ArrayList<>();
+            for (ExternalHealthSearchResponseDTO.ExternalHealthResultDTO article : response.getResults()) {
+                String evidenceText = safeText(article.getTitle()) + " " + safeText(article.getAbstractText());
+                SimilarityCalculator.StanceDetection detection = detectEvidenceStance(claim, terms, evidenceText);
+                if (detection.stance == SimilarityCalculator.Stance.NEUTRAL || detection.score < 0.18) {
+                    continue;
+                }
+
+                VerificationResponseDTO.EvidenceDTO dto = new VerificationResponseDTO.EvidenceDTO();
+                dto.setArticleId(article.getId());
+                dto.setPmid(article.getPmid());
+                dto.setTitle(article.getTitle());
+                dto.setSnippet(extractSnippet(article.getAbstractText(), article.getTitle()));
+                dto.setSource(article.getSource() != null && !article.getSource().isBlank()
+                    ? article.getSource()
+                    : article.getJournal());
+                dto.setSourceUrl(article.getSourceUrl());
+                dto.setSimilarity(detection.score);
+                dto.setRelevanceScore(Math.round(detection.score * 1000.0) / 10.0);
+                dto.setEvidenceLevel(article.getEvidenceLevel());
+                if (detection.stance == SimilarityCalculator.Stance.SUPPORT) {
+                    dto.setSupports(true);
+                    dto.setStance("support");
+                } else {
+                    dto.setSupports(false);
+                    dto.setStance("contradict");
+                }
+                evidence.add(dto);
+            }
+            if (evidence.isEmpty()) {
+                return response.getResults().stream()
+                    .limit(4)
+                    .map(article -> toFallbackEvidence(article))
+                    .collect(Collectors.toList());
+            }
+            return evidence;
+        } catch (Exception ex) {
+            log.warn("Unable to load external evidence fallback for verification", ex);
+            return List.of();
+        }
+    }
+
+    private VerificationResponseDTO.EvidenceDTO toFallbackEvidence(
+        ExternalHealthSearchResponseDTO.ExternalHealthResultDTO article
+    ) {
+        VerificationResponseDTO.EvidenceDTO dto = new VerificationResponseDTO.EvidenceDTO();
+        dto.setArticleId(article.getId());
+        dto.setPmid(article.getPmid());
+        dto.setTitle(article.getTitle());
+        dto.setSnippet(extractSnippet(article.getAbstractText(), article.getTitle()));
+        dto.setSource(article.getSource() != null && !article.getSource().isBlank()
+            ? article.getSource()
+            : article.getJournal());
+        dto.setSourceUrl(article.getSourceUrl());
+        dto.setSimilarity(0.24);
+        dto.setRelevanceScore(24.0);
+        dto.setEvidenceLevel(article.getEvidenceLevel());
+        dto.setSupports(true);
+        dto.setStance("support");
+        return dto;
     }
 
     @Override
@@ -400,6 +528,101 @@ public class RAGServiceImpl implements RAGService {
         return new ArrayList<>(terms);
     }
 
+    private String buildEvidenceSearchQuery(String claim, List<String> terms) {
+        if (terms != null && !terms.isEmpty()) {
+            List<String> prioritized = new ArrayList<>();
+            for (String term : terms) {
+                if (term == null || term.isBlank()) {
+                    continue;
+                }
+                if (isPreferredMedicalTerm(term) && !prioritized.contains(term)) {
+                    prioritized.add(term);
+                }
+            }
+            for (String term : terms) {
+                if (term == null || term.isBlank() || prioritized.contains(term)) {
+                    continue;
+                }
+                prioritized.add(term);
+            }
+
+            return prioritized.stream()
+                .filter(term -> term != null && !term.isBlank())
+                .limit(5)
+                .collect(Collectors.joining(" "));
+        }
+        return claim != null ? claim.trim() : "";
+    }
+
+    private boolean isPreferredMedicalTerm(String term) {
+        if (term == null || term.isBlank()) {
+            return false;
+        }
+        return !term.equals(term.toLowerCase(Locale.ROOT))
+            || term.contains(",")
+            || term.contains(" ")
+            || term.matches(".*\\d.*");
+    }
+
+    private SimilarityCalculator.StanceDetection detectEvidenceStance(
+        String claim,
+        List<String> terms,
+        String evidenceText
+    ) {
+        SimilarityCalculator.StanceDetection claimDetection = similarityCalculator.detectStance(claim, evidenceText);
+        String normalizedTerms = buildEvidenceSearchQuery(claim, terms);
+        SimilarityCalculator.StanceDetection termDetection = normalizedTerms.isBlank()
+            ? claimDetection
+            : similarityCalculator.detectStance(normalizedTerms, evidenceText);
+
+        SimilarityCalculator.StanceDetection best = termDetection.score > claimDetection.score
+            ? termDetection
+            : claimDetection;
+
+        if (best.stance != SimilarityCalculator.Stance.NEUTRAL) {
+            return best;
+        }
+
+        double overlap = similarityCalculator.combinedSimilarity(normalizedTerms, evidenceText, 0.65);
+        int keywordHits = countKeywordHits(normalizedTerms, evidenceText);
+        if (keywordHits >= 2 && overlap >= 0.12) {
+            return new SimilarityCalculator.StanceDetection(SimilarityCalculator.Stance.SUPPORT, Math.max(overlap, 0.24));
+        }
+        if (overlap >= 0.22) {
+            return new SimilarityCalculator.StanceDetection(SimilarityCalculator.Stance.SUPPORT, overlap);
+        }
+
+        return best;
+    }
+
+    private int countKeywordHits(String normalizedTerms, String evidenceText) {
+        if (normalizedTerms == null || normalizedTerms.isBlank() || evidenceText == null || evidenceText.isBlank()) {
+            return 0;
+        }
+
+        String normalizedEvidence = evidenceText.toLowerCase(Locale.ROOT);
+        Set<String> ignored = Set.of(
+            "type", "adult", "adults", "study", "effect", "effects", "control",
+            "mellitus", "patients", "patient", "therapy", "treatment"
+        );
+
+        LinkedHashSet<String> tokens = new LinkedHashSet<>();
+        for (String token : normalizedTerms.toLowerCase(Locale.ROOT).split("[^a-z0-9]+")) {
+            if (token.length() < 4 || ignored.contains(token)) {
+                continue;
+            }
+            tokens.add(token);
+        }
+
+        int hits = 0;
+        for (String token : tokens) {
+            if (normalizedEvidence.contains(token)) {
+                hits += 1;
+            }
+        }
+        return hits;
+    }
+
     private List<String> buildOperators(int termCount) {
         if (termCount <= 1) return List.of();
         List<String> ops = new ArrayList<>();
@@ -439,29 +662,44 @@ public class RAGServiceImpl implements RAGService {
         };
     }
 
-    private ExplanationBundle buildExplanationWithAI(
+    private AIVerdictBundle buildVerdictWithAI(
         String claim,
         List<VerificationResponseDTO.EvidenceDTO> supporting,
         List<VerificationResponseDTO.EvidenceDTO> contradicting,
-        Verdict verdict
+        Verdict heuristicVerdict,
+        double heuristicScore,
+        double heuristicConfidence
     ) {
         StringBuilder prompt = new StringBuilder();
-        prompt.append("Devuelve SOLO un JSON con las claves: explanation (string), recommendations (array). ");
-        prompt.append("Responde en espanol y se clinicamente preciso.\\n");
-        prompt.append("Claim: ").append(claim).append("\\n");
-        prompt.append("Verdict: ").append(verdict != null ? verdict.name() : "UNKNOWN").append("\\n");
-        prompt.append("Evidence supporting:\\n");
+        prompt.append("Devuelve UNICAMENTE un JSON valido con las claves exactas ");
+        prompt.append("verdict (SUPPORTED|REFUTED|CONFLICTING|INSUFFICIENT_EVIDENCE), ");
+        prompt.append("score (numero 0-100), confidence (numero 0-1), ");
+        prompt.append("explanation (string) y recommendations (array de strings). ");
+        prompt.append("No uses markdown ni texto fuera del JSON.\\n");
+        prompt.append("Actua como un verificador medico. Basate estrictamente en la evidencia adjunta ");
+        prompt.append("y no inventes datos externos.\\n");
+        prompt.append("Contexto (evidencia recuperada de PubMed y stance calculado):\\n");
+        prompt.append("Claim del usuario: ").append(claim).append("\\n");
+        prompt.append("Veredicto heuristico previo: ")
+            .append(heuristicVerdict != null ? heuristicVerdict.name() : "UNKNOWN")
+            .append("\\n");
+        prompt.append("Score heuristico previo (0-100): ").append(heuristicScore).append("\\n");
+        prompt.append("Confianza heuristica previa (0-1): ").append(heuristicConfidence).append("\\n");
+        prompt.append("Evidencia que soporta el claim:\\n");
         for (VerificationResponseDTO.EvidenceDTO e : supporting.stream().limit(4).toList()) {
             prompt.append("- ").append(e.getTitle()).append(": ").append(e.getSnippet()).append("\\n");
         }
-        prompt.append("Evidence contradicting:\\n");
+        prompt.append("Evidencia que contradice el claim:\\n");
         for (VerificationResponseDTO.EvidenceDTO e : contradicting.stream().limit(4).toList()) {
             prompt.append("- ").append(e.getTitle()).append(": ").append(e.getSnippet()).append("\\n");
         }
 
-        String aiResponse = openAIService.generateText(prompt.toString());
+        String aiResponse = openAIService.generateText(prompt.toString(), true);
         if (aiResponse == null || aiResponse.isBlank()) {
-            return new ExplanationBundle(
+            return new AIVerdictBundle(
+                null,
+                null,
+                null,
                 "An\u00e1lisis basado en evidencia recuperada de PubMed.",
                 defaultRecommendations()
             );
@@ -469,9 +707,18 @@ public class RAGServiceImpl implements RAGService {
         try {
             String json = extractJson(aiResponse);
             if (json == null) {
-                return new ExplanationBundle(aiResponse.trim(), defaultRecommendations());
+                return new AIVerdictBundle(
+                    null,
+                    null,
+                    null,
+                    aiResponse.trim(),
+                    defaultRecommendations()
+                );
             }
             var node = objectMapper.readTree(json);
+            Verdict aiVerdict = parseVerdict(node.path("verdict").asText(null));
+            Double aiScore = parseOptionalDouble(node.get("score"));
+            Double aiConfidence = parseOptionalDouble(node.get("confidence"));
             String explanation = node.path("explanation").asText(null);
             List<String> recs = new ArrayList<>();
             if (node.has("recommendations") && node.get("recommendations").isArray()) {
@@ -482,15 +729,33 @@ public class RAGServiceImpl implements RAGService {
                 }
             }
             if (explanation != null && !explanation.isBlank()) {
-                return new ExplanationBundle(
+                return new AIVerdictBundle(
+                    aiVerdict,
+                    aiScore,
+                    aiConfidence,
                     explanation.trim(),
+                    recs.isEmpty() ? defaultRecommendations() : recs
+                );
+            }
+            if (aiVerdict != null || aiScore != null || aiConfidence != null) {
+                return new AIVerdictBundle(
+                    aiVerdict,
+                    aiScore,
+                    aiConfidence,
+                    "Analisis completado con evidencia recuperada.",
                     recs.isEmpty() ? defaultRecommendations() : recs
                 );
             }
         } catch (Exception e) {
             log.warn("Error parsing AI explanation", e);
         }
-        return new ExplanationBundle(aiResponse.trim(), defaultRecommendations());
+        return new AIVerdictBundle(
+            null,
+            null,
+            null,
+            aiResponse.trim(),
+            defaultRecommendations()
+        );
     }
 
     private List<String> defaultRecommendations() {
@@ -506,6 +771,58 @@ public class RAGServiceImpl implements RAGService {
         int end = text.lastIndexOf('}');
         if (start >= 0 && end > start) {
             return text.substring(start, end + 1);
+        }
+        return null;
+    }
+
+    private Verdict parseVerdict(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.trim().toUpperCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
+        return switch (normalized) {
+            case "SUPPORTED", "SUPPORT", "VERIFIED", "TRUE" -> Verdict.SUPPORTED;
+            case "REFUTED", "MISINFORMATION", "FALSE" -> Verdict.REFUTED;
+            case "CONFLICTING", "MIXED" -> Verdict.CONFLICTING;
+            case "INSUFFICIENT_EVIDENCE", "INCONCLUSIVE", "UNKNOWN", "PENDING" -> Verdict.INSUFFICIENT_EVIDENCE;
+            default -> {
+                try {
+                    yield Verdict.valueOf(normalized);
+                } catch (IllegalArgumentException ex) {
+                    yield null;
+                }
+            }
+        };
+    }
+
+    private double clampScore(Double score) {
+        if (score == null) {
+            return 0.0;
+        }
+        return Math.max(0.0, Math.min(100.0, score));
+    }
+
+    private double clampConfidence(Double confidence) {
+        if (confidence == null) {
+            return 0.0;
+        }
+        double normalized = confidence > 1.0 ? confidence / 100.0 : confidence;
+        return Math.max(0.0, Math.min(1.0, normalized));
+    }
+
+    private Double parseOptionalDouble(com.fasterxml.jackson.databind.JsonNode node) {
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        if (node.isNumber()) {
+            return node.asDouble();
+        }
+        if (node.isTextual()) {
+            try {
+                return Double.parseDouble(node.asText().trim());
+            } catch (NumberFormatException ex) {
+                return null;
+            }
         }
         return null;
     }
@@ -677,5 +994,11 @@ public class RAGServiceImpl implements RAGService {
         return null;
     }
 
-    private record ExplanationBundle(String explanation, List<String> recommendations) {}
+    private record AIVerdictBundle(
+        Verdict verdict,
+        Double score,
+        Double confidence,
+        String explanation,
+        List<String> recommendations
+    ) {}
 }

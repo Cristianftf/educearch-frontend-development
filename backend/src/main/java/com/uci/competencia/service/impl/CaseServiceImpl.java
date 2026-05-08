@@ -16,6 +16,7 @@ import com.uci.competencia.repository.CaseStudyRepository;
 import com.uci.competencia.repository.EvaluationRepository;
 import com.uci.competencia.repository.CaseSubmissionRepository;
 import com.uci.competencia.repository.UserRepository;
+import com.uci.competencia.security.UserIdentityResolver;
 import com.uci.competencia.service.CaseService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +42,7 @@ public class CaseServiceImpl implements CaseService {
     private final CaseSubmissionRepository caseSubmissionRepository;
     private final EvaluationRepository evaluationRepository;
     private final UserRepository userRepository;
+    private final UserIdentityResolver userIdentityResolver;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -491,23 +493,7 @@ public class CaseServiceImpl implements CaseService {
     }
 
     private Optional<User> findUserByIdentifier(String identifier) {
-        if (identifier == null || identifier.isBlank()) {
-            return Optional.empty();
-        }
-        String normalized = identifier.trim();
-        try {
-            Optional<User> byId = userRepository.findById(normalized);
-            if (byId.isPresent()) {
-                return byId;
-            }
-        } catch (Exception e) {
-            log.debug("Identifier {} is not a direct user ID", normalized);
-        }
-        Optional<User> byEmail = userRepository.findByEmail(normalized);
-        if (byEmail.isPresent()) {
-            return byEmail;
-        }
-        return userRepository.findByUsername(normalized);
+        return userIdentityResolver.findUserByIdentifier(identifier);
     }
 
     private Set<String> resolveUserIdentifiers(String userIdentifier) {
@@ -519,15 +505,7 @@ public class CaseServiceImpl implements CaseService {
         identifiers.add(userIdentifier.trim());
 
         findUserByIdentifier(userIdentifier).ifPresent(user -> {
-            if (user.getId() != null && !user.getId().isBlank()) {
-                identifiers.add(user.getId());
-            }
-            if (user.getEmail() != null && !user.getEmail().isBlank()) {
-                identifiers.add(user.getEmail());
-            }
-            if (user.getUsername() != null && !user.getUsername().isBlank()) {
-                identifiers.add(user.getUsername());
-            }
+            userIdentityResolver.addUserIdentifiers(identifiers, user);
         });
 
         return identifiers;

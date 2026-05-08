@@ -1,19 +1,17 @@
-'use client'
+﻿'use client'
 
-import React, { useState, useCallback } from 'react'
+import React, { useMemo, useState, useCallback } from 'react'
+import { searchAssistantApi } from '@/lib/search-assistant'
+import type {
+  AssistantConversationMessage,
+  AssistantOperator,
+  SearchAssistantRequest,
+} from '@/lib/search-assistant'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Badge } from '@/components/ui/badge'
-import {
-  MessageSquare,
-  Lightbulb,
-  ChevronRight,
-  Send,
-  X,
-  Sparkles,
-} from 'lucide-react'
+import { Send, X, Sparkles } from 'lucide-react'
 
 interface SuggestionItem {
   id: string
@@ -29,6 +27,149 @@ interface SearchAssistantProps {
   onSuggestionClick: (suggestion: SuggestionItem) => void
   currentQuery?: string
   recentTerms?: string[]
+  selectedTerms?: string[]
+  selectedOperators?: AssistantOperator[]
+  currentFilters?: SearchAssistantRequest['filters']
+}
+
+const INITIAL_ASSISTANT_MESSAGE = 'Hola. Soy tu asistente IA de busqueda clinica en EDUSEARCH.'
+const ASSISTANT_PROJECT_CONTEXT =
+  'Proyecto EDUSEARCH: asistente de busqueda avanzada en salud para estudiantes y profesores. ' +
+  'Objetivo: mejorar estrategias con terminos MeSH, operadores booleanos y filtros clinicos aplicables. ' +
+  'Prioriza evidencia de alta calidad (revision sistematica, metaanalisis, ECA), evita inventar datos y entrega recomendaciones accionables listas para aplicar en la interfaz.'
+
+const MAX_HISTORY_MESSAGES = 8
+
+const FALLBACK_SUGGESTIONS: SuggestionItem[] = [
+  {
+    id: 'and-operator',
+    type: 'operator',
+    label: 'Usar AND',
+    description: 'Combina terminos para acotar resultados.',
+    action: () => {},
+  },
+  {
+    id: 'or-operator',
+    type: 'operator',
+    label: 'Usar OR',
+    description: 'Amplia resultados con sinonimos o conceptos relacionados.',
+    action: () => {},
+  },
+  {
+    id: 'not-operator',
+    type: 'operator',
+    label: 'Usar NOT',
+    description: 'Excluye terminos irrelevantes.',
+    action: () => {},
+  },
+  {
+    id: 'recent-studies',
+    type: 'filter',
+    label: 'Filtrar evidencia reciente',
+    description: 'Prioriza estudios de los ultimos anos.',
+    action: () => {},
+  },
+]
+
+const normalizeUniqueStrings = (values: string[] | undefined, limit: number): string[] => {
+  if (!Array.isArray(values)) return []
+  const unique = new Set<string>()
+  for (const value of values) {
+    const item = value.trim()
+    if (!item) continue
+    unique.add(item)
+    if (unique.size >= limit) break
+  }
+  return Array.from(unique)
+}
+
+const extractQueryTokens = (query: string): { terms: string[]; operators: AssistantOperator[] } => {
+  const safeQuery = query.trim()
+  if (!safeQuery) return { terms: [], operators: [] }
+
+  const termMatches = Array.from(safeQuery.matchAll(/\[([^\]]+)\]/g))
+    .map((entry) => entry[1].trim())
+    .filter((item) => {
+      const lower = item.toLowerCase()
+      if (!lower) return false
+      if (/^\d{4}:\d{4}$/.test(lower)) return false
+      if (lower === 'full-text') return false
+      if (lower.startsWith('lang:')) return false
+      if (lower.startsWith('max:')) return false
+      return true
+    })
+
+  const operatorMatches = (safeQuery.match(/\b(AND|OR|NOT)\b/gi) ?? [])
+    .map((entry) => entry.toUpperCase())
+    .filter((entry): entry is AssistantOperator => entry === 'AND' || entry === 'OR' || entry === 'NOT')
+
+  return {
+    terms: normalizeUniqueStrings(termMatches, 8),
+    operators: operatorMatches.slice(0, 3),
+  }
+}
+
+const buildHistory = (
+  messages: AssistantConversationMessage[],
+  nextUserMessage: AssistantConversationMessage
+): AssistantConversationMessage[] =>
+  [...messages, nextUserMessage]
+    .filter((entry) => entry.content.trim().length > 0)
+    .slice(-MAX_HISTORY_MESSAGES)
+
+const mapAiSuggestions = (
+  suggestedTerms: Array<{ id: string; term: string; description: string }>,
+  suggestedOperators: AssistantOperator[],
+  suggestedFilters?: SearchAssistantRequest['filters']
+): SuggestionItem[] => {
+  const items: SuggestionItem[] = []
+
+  for (const term of suggestedTerms.slice(0, 4)) {
+    items.push({
+      id: term.id || `term-${term.term.toUpperCase().replace(/\s+/g, '_')}`,
+      type: 'term',
+      label: term.term,
+      description: term.description || 'Termino sugerido por IA.',
+      action: () => {},
+    })
+  }
+
+  for (const operator of suggestedOperators.slice(0, 3)) {
+    items.push({
+      id: `operator-${operator.toLowerCase()}`,
+      type: 'operator',
+      label: `Usar ${operator}`,
+      description: 'Operador booleano sugerido por IA.',
+      action: () => {},
+    })
+  }
+
+  if (suggestedFilters) {
+    const parts: string[] = []
+    if (typeof suggestedFilters.yearFrom === 'number' && typeof suggestedFilters.yearTo === 'number') {
+      parts.push(`${suggestedFilters.yearFrom}-${suggestedFilters.yearTo}`)
+    }
+    if (Array.isArray(suggestedFilters.studyTypes) && suggestedFilters.studyTypes.length > 0) {
+      parts.push(`studyTypes:${suggestedFilters.studyTypes.slice(0, 2).join(',')}`)
+    }
+    if (suggestedFilters.hasFullText === true) {
+      parts.push('full-text')
+    }
+    if (typeof suggestedFilters.maxResults === 'number') {
+      parts.push(`max:${suggestedFilters.maxResults}`)
+    }
+    if (parts.length > 0) {
+      items.push({
+        id: 'ai-filters',
+        type: 'filter',
+        label: 'Aplicar filtros IA',
+        description: `Sugerencia: ${parts.join(' | ')}`,
+        action: () => {},
+      })
+    }
+  }
+
+  return items.slice(0, 8)
 }
 
 export function SearchAssistant({
@@ -37,121 +178,96 @@ export function SearchAssistant({
   onSuggestionClick,
   currentQuery = '',
   recentTerms = [],
+  selectedTerms = [],
+  selectedOperators = [],
+  currentFilters,
 }: SearchAssistantProps) {
-  const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([
+  const [messages, setMessages] = useState<AssistantConversationMessage[]>([
     {
       role: 'assistant',
-      content: '¡Hola! Soy tu asistente de búsqueda MeSH. ¿Qué tópico médico deseas investigar hoy?',
+      content: INITIAL_ASSISTANT_MESSAGE,
     },
   ])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [status, setStatus] = useState<string | null>(null)
+  const [aiSuggestions, setAiSuggestions] = useState<SuggestionItem[]>([])
 
-  const suggestions: SuggestionItem[] = [
-    {
-      id: 'diabetes',
+  const fallbackSuggestions = useMemo(() => {
+    const recentItems: SuggestionItem[] = normalizeUniqueStrings(recentTerms, 4).map((term, index) => ({
+      id: `recent-term-${index + 1}`,
       type: 'term',
-      label: 'Diabetes Mellitus Type 2',
-      description: 'Término ampliamente relevante para estudios metabólicos',
-      action: () => onSuggestionClick({
-        id: 'diabetes',
-        type: 'term',
-        label: 'Diabetes Mellitus Type 2',
-        description: 'Término ampliamente relevante para estudios metabólicos',
-        action: () => {},
-      }),
-    },
-    {
-      id: 'hypertension',
-      type: 'term',
-      label: 'Hypertension',
-      description: 'Condición cardiovascular común en investigación',
-      action: () => onSuggestionClick({
-        id: 'hypertension',
-        type: 'term',
-        label: 'Hypertension',
-        description: 'Condición cardiovascular común en investigación',
-        action: () => {},
-      }),
-    },
-    {
-      id: 'and-operator',
-      type: 'operator',
-      label: 'Usar AND',
-      description: 'Combina términos: ambos deben estar presentes',
-      action: () => onSuggestionClick({
-        id: 'and-operator',
-        type: 'operator',
-        label: 'Usar AND',
-        description: 'Combina términos: ambos deben estar presentes',
-        action: () => {},
-      }),
-    },
-    {
-      id: 'not-operator',
-      type: 'operator',
-      label: 'Usar NOT',
-      description: 'Excluye términos de la búsqueda',
-      action: () => onSuggestionClick({
-        id: 'not-operator',
-        type: 'operator',
-        label: 'Usar NOT',
-        description: 'Excluye términos de la búsqueda',
-        action: () => {},
-      }),
-    },
-    {
-      id: 'recent-studies',
-      type: 'filter',
-      label: 'Filtrar por año (2020-2024)',
-      description: 'Obtén solo investigaciones recientes',
-      action: () => onSuggestionClick({
-        id: 'recent-studies',
-        type: 'filter',
-        label: 'Filtrar por año (2020-2024)',
-        description: 'Obtén solo investigaciones recientes',
-        action: () => {},
-      }),
-    },
-    {
-      id: 'randomized-trials',
-      type: 'filter',
-      label: 'Solo Ensayos Clínicos Aleatorizados',
-      description: 'Evidencia de alto nivel metodológico',
-      action: () => onSuggestionClick({
-        id: 'randomized-trials',
-        type: 'filter',
-        label: 'Solo Ensayos Clínicos Aleatorizados',
-        description: 'Evidencia de alto nivel metodológico',
-        action: () => {},
-      }),
-    },
-  ]
+      label: term,
+      description: 'Termino reciente de tu historial.',
+      action: () => {},
+    }))
+    return [...recentItems, ...FALLBACK_SUGGESTIONS].slice(0, 8)
+  }, [recentTerms])
+
+  const suggestions = aiSuggestions.length > 0 ? aiSuggestions : fallbackSuggestions
 
   const handleSendMessage = useCallback(async () => {
-    if (!input.trim()) return
+    const trimmed = input.trim()
+    if (!trimmed) return
+
+    const userMessage: AssistantConversationMessage = { role: 'user', content: trimmed }
+    const history = buildHistory(messages, userMessage)
+    const extractedQuery = extractQueryTokens(currentQuery)
+    const request: SearchAssistantRequest = {
+      message: trimmed,
+      selectedTerms:
+        selectedTerms.length > 0
+          ? normalizeUniqueStrings(selectedTerms, 8)
+          : extractedQuery.terms,
+      operators:
+        selectedOperators.length > 0
+          ? selectedOperators.slice(0, 3)
+          : extractedQuery.operators,
+      recentTerms: normalizeUniqueStrings(recentTerms, 8),
+      projectContext: ASSISTANT_PROJECT_CONTEXT,
+      conversationHistory: history,
+      filters: currentFilters,
+    }
 
     setIsLoading(true)
-    setMessages((prev) => [...prev, { role: 'user', content: input }])
+    setStatus(null)
+    setMessages((prev) => [...prev, userMessage])
 
-    // Simular respuesta del asistente
-    setTimeout(() => {
-      let response = ''
-      const lowerInput = input.toLowerCase()
-
-      if (lowerInput.includes('qué') || lowerInput.includes('como')) {
-        response = 'Te recomiendo combinar términos MeSH específicos con operadores booleanos. Por ejemplo: "Diabetes Mellitus, Type 2" AND "Metformin" para resultados más precisos.'
-      } else if (lowerInput.includes('filtro') || lowerInput.includes('año')) {
-        response = 'Puedes usar los filtros de año para obtener estudios recientes (2020-2024) o seleccionar tipos específicos de estudios como ensayos clínicos aleatorizados.'
-      } else {
-        response = 'Esa es una buena pregunta. ¿Podrías ser más específico sobre qué aspecto de la búsqueda deseas mejorar?'
-      }
-
-      setMessages((prev) => [...prev, { role: 'assistant', content: response }])
-      setIsLoading(false)
+    try {
+      const response = await searchAssistantApi.ask(request)
+      setMessages((prev) => [...prev, { role: 'assistant', content: response.reply }])
+      setAiSuggestions(
+        mapAiSuggestions(
+          response.suggestedTerms,
+          response.suggestedOperators,
+          response.suggestedFilters
+        )
+      )
+      setStatus(
+        response.usedAi
+          ? 'Respuesta generada por IA en tiempo real.'
+          : 'Asistente en modo fallback. Revisa configuracion de GEMINI_API_KEY.'
+      )
       setInput('')
-    }, 800)
-  }, [input])
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? `No pude consultar la IA externa: ${err.message}`
+          : 'No pude consultar la IA externa en este momento.'
+      setMessages((prev) => [...prev, { role: 'assistant', content: message }])
+      setStatus('Fallo temporal del asistente.')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [
+    input,
+    messages,
+    currentQuery,
+    recentTerms,
+    selectedTerms,
+    selectedOperators,
+    currentFilters,
+  ])
 
   if (!isOpen) return null
 
@@ -161,7 +277,7 @@ export function SearchAssistant({
         <div className="flex items-center gap-2">
           <Sparkles className="h-5 w-5 text-blue-500" />
           <div>
-            <CardTitle className="text-sm">Asistente de Búsqueda</CardTitle>
+            <CardTitle className="text-sm">Asistente de Busqueda</CardTitle>
             <CardDescription className="text-xs">Sugerencias inteligentes para MeSH</CardDescription>
           </div>
         </div>
@@ -174,7 +290,7 @@ export function SearchAssistant({
         <div className="space-y-3">
           {messages.map((msg, idx) => (
             <div
-              key={idx}
+              key={`${msg.role}-${idx}`}
               className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
@@ -203,8 +319,10 @@ export function SearchAssistant({
       </ScrollArea>
 
       <div className="space-y-3 border-t p-4">
+        {status && <p className="text-xs text-muted-foreground">{status}</p>}
+
         <div>
-          <p className="text-xs font-medium text-muted-foreground mb-2">Sugerencias rápidas:</p>
+          <p className="text-xs font-medium text-muted-foreground mb-2">Sugerencias rapidas:</p>
           <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto">
             {suggestions.map((sug) => (
               <Button
@@ -213,7 +331,10 @@ export function SearchAssistant({
                 size="sm"
                 className="h-auto py-2 px-2 text-xs justify-start whitespace-normal hover:bg-primary/10"
                 onClick={() => {
-                  sug.action()
+                  onSuggestionClick({
+                    ...sug,
+                    action: () => {},
+                  })
                   setMessages((prev) => [...prev, { role: 'user', content: sug.label }])
                 }}
               >
@@ -231,13 +352,18 @@ export function SearchAssistant({
             placeholder="Pregunta al asistente..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                void handleSendMessage()
+              }
+            }}
             className="h-8 text-sm"
             disabled={isLoading}
           />
           <Button
             size="sm"
-            onClick={handleSendMessage}
+            onClick={() => void handleSendMessage()}
             disabled={!input.trim() || isLoading}
             className="h-8 w-8 p-0"
           >

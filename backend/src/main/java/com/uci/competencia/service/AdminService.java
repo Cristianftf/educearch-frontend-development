@@ -208,6 +208,21 @@ public interface AdminService {
     Map<String, Object> exportAuditLogs(String format, Map<String, Object> filters);
 
     /**
+     * Obtener vista consolidada de errores de backend para monitoreo administrativo.
+     */
+    Map<String, Object> getErrorMonitoringOverview(int windowMinutes, int limit);
+
+    /**
+     * Ejecutar analisis de errores recientes asistido por IA.
+     */
+    Map<String, Object> analyzeRecentErrors(int windowMinutes, int limit);
+
+    /**
+     * Ejecutar analisis de resultados de pruebas asistido por IA.
+     */
+    Map<String, Object> analyzeTestingLogs(Map<String, Object> payload);
+
+    /**
      * Optimizar base de datos
      */
     void optimizeDatabase();

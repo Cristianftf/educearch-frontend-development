@@ -101,18 +101,6 @@ class ApiClient {
         details = undefined
       }
 
-      if (response.status === 401) {
-        const isAuthEndpoint =
-          endpoint.startsWith('/auth/login') ||
-          endpoint.startsWith('/auth/register') ||
-          endpoint.startsWith('/auth/forgot-password') ||
-          endpoint.startsWith('/auth/reset-password')
-
-        if (!isAuthEndpoint) {
-          // Handle unauthorized - redirect to login
-          window.location.href = '/login'
-        }
-      }
       throw new ApiHttpError(endpoint, response.status, response.statusText, details, payload)
     }
 
@@ -185,6 +173,30 @@ class ApiClient {
   }
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
+function normalizeApiBaseUrl(baseUrl?: string): string {
+  const fallbackBaseUrl = '/api'
+  const raw = baseUrl?.trim()
+  if (!raw) return fallbackBaseUrl
+
+  const normalizePath = (value: string): string => {
+    const trimmed = value.replace(/\/+$/, '')
+    if (!trimmed || trimmed === '/') return '/api'
+    return trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+  }
+
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const parsed = new URL(raw)
+      const normalizedPath = normalizePath(parsed.pathname || '/')
+      return `${parsed.origin}${normalizedPath}`
+    } catch {
+      return fallbackBaseUrl
+    }
+  }
+
+  return normalizePath(raw)
+}
+
+const API_BASE_URL = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_URL)
 
 export const api = new ApiClient(API_BASE_URL)

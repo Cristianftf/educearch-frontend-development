@@ -1,0 +1,99 @@
+Necesito que trabajes sobre este proyecto frontend Next.js/React y dejes el rol de profesor completamente funcional, replicando el mismo nivel de cierre que ya se aplicó en el rol de estudiante.
+
+Objetivo general:
+1. Mapear con lujo de detalle todos los endpoints relacionados con el rol de profesor.
+2. Verificar qué páginas, componentes, hooks, contextos y utilidades consumen cada endpoint.
+3. Corregir integraciones rotas, incompletas o inconsistentes.
+4. Dejar completamente funcionales los flujos principales del profesor, especialmente:
+   - dashboard del profesor,
+   - búsqueda académica del profesor,
+   - search hedges / estrategias de búsqueda,
+   - gestión de casos,
+   - creación y edición de casos,
+   - evaluaciones,
+   - seguimiento de estudiantes,
+   - analíticas,
+   - componente de IA si existe en este rol,
+   - navegación contextual entre módulos,
+   - historial, persistencia y recuperación de estado.
+5. Limpiar textos corruptos o con problemas de codificación visibles en la UI del profesor y en componentes compartidos que impacten este rol.
+6. Validar que el proyecto compile correctamente al final.
+
+Contexto de referencia:
+En el rol de estudiante ya se hizo un trabajo de este nivel:
+- se documentaron endpoints en un archivo markdown dentro de `docs/`,
+- se conectaron correctamente vistas y endpoints backend reales,
+- se corrigieron flujos entre búsqueda, verificación, pirámide y bibliografía,
+- se estabilizó la build,
+- se limpiaron textos visibles dañados por codificación rota en layout, páginas principales y componentes compartidos.
+
+Quiero exactamente ese mismo estándar, pero aplicado ahora al rol de profesor.
+
+Alcance mínimo esperado para profesor:
+- `/professor`
+- `/professor/search`
+- `/professor/hedges`
+- `/professor/cases`
+- `/professor/cases/new`
+- `/professor/cases/[id]`
+- `/professor/cases/[id]/edit`
+- `/professor/evaluations`
+- `/professor/evaluations/[id]`
+- `/professor/students`
+- `/professor/analytics`
+- cualquier componente compartido, helper, contexto o cliente API que afecte estas rutas
+
+Lo que debes hacer:
+- Inspecciona la implementación actual del rol profesor.
+- Encuentra todos los endpoints que realmente debería usar.
+- Identifica integraciones faltantes, mocks, adaptadores incompletos, flujos rotos o datos mal conectados.
+- Corrige el código, no te quedes en análisis.
+- Si una pantalla usa datos equivocados, arréglalo.
+- Si una vista debería consumir un endpoint específico y no lo hace, conéctala.
+- Si existen acciones de CRUD de casos, evaluación, analíticas o hedges mal resueltas, déjalas operativas.
+- Si el rol profesor tiene componentes IA parcialmente conectados, déjalos funcionales o con fallback claro.
+- Si la navegación no conserva contexto suficiente entre páginas, corrígelo.
+- Si hay texto visible con mojibake o codificación dañada, límpialo.
+- Si hay inconsistencias entre tipos, normalizadores y respuestas del backend, unifícalas con criterio.
+
+Entregables obligatorios:
+1. Un archivo markdown en `docs/` con el mapa detallado de endpoints del rol profesor.
+   Debe incluir:
+   - endpoint,
+   - método HTTP,
+   - propósito funcional,
+   - páginas/componentes que lo consumen,
+   - estado actual,
+   - corrección aplicada si fue necesario.
+2. Código actualizado dejando funcionales los componentes clave del profesor.
+3. Limpieza de textos dañados en las pantallas del profesor y componentes compartidos relacionados.
+4. Verificación final con:
+   - build del proyecto,
+   - chequeo de tipos si aplica.
+5. Resumen final con:
+   - qué se corrigió,
+   - qué endpoints quedaron conectados,
+   - qué pantallas quedaron funcionales,
+   - qué pendiente real queda si depende del backend.
+
+Criterios técnicos:
+- Prioriza integraciones reales sobre soluciones superficiales.
+- Conserva la arquitectura actual del proyecto.
+- No rompas funcionalidad existente del estudiante, admin o componentes compartidos.
+- Si ya existe un endpoint backend correcto, úsalo en lugar de dejar lógica provisional.
+- Revisa `app/`, `components/`, `lib/`, `contexts/`, hooks y utilidades vinculadas al profesor.
+- Si un archivo tiene texto muy dañado y no admite patch fino, reescribe solo los bloques necesarios de forma segura.
+- No hagas refactors cosméticos sin impacto funcional.
+- Al final confirma explícitamente que la build quedó OK.
+
+Secuencia de trabajo esperada:
+1. Auditar el rol profesor completo.
+2. Mapear endpoints y dependencias reales.
+3. Implementar correcciones.
+4. Documentar endpoints en `docs/`.
+5. Limpiar textos visibles dañados.
+6. Ejecutar validación final.
+7. Entregar resumen concreto de resultados.
+
+Importante:
+No quiero solo recomendaciones ni diagnóstico. Quiero ejecución completa dentro del proyecto, igual que se hizo en el rol de estudiante.

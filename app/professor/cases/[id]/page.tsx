@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { casesApi } from '@/lib/api'
-import type { CaseAssignableStudent, CaseStudy, CaseDifficulty, CaseStatus } from '@/types'
+import type { CaseAssignableStudent, CaseDifficulty, CaseStatus, CaseStudy, CaseSubmission } from '@/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -27,6 +27,7 @@ const statusConfig: Record<CaseStatus, { label: string; color: string }> = {
   active: { label: 'Activo', color: 'bg-success/10 text-success border-success/30' },
   archived: { label: 'Archivado', color: 'bg-secondary text-secondary-foreground' },
 }
+
 const difficultyConfig: Record<CaseDifficulty, { label: string; color: string }> = {
   novice: { label: 'Novato', color: 'bg-success/10 text-success border-success/30' },
   intermediate: { label: 'Intermedio', color: 'bg-warning/10 text-warning border-warning/30' },
@@ -42,6 +43,14 @@ function parseCalendarDateUtc(value: string): Date {
   return new Date(value)
 }
 
+const formatSubmissionDate = (value?: string) => {
+  if (!value) return 'Sin fecha'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime())
+    ? 'Sin fecha'
+    : date.toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
 export default function ProfessorCaseDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -52,6 +61,7 @@ export default function ProfessorCaseDetailPage() {
   }, [params])
 
   const [caseStudy, setCaseStudy] = useState<CaseStudy | null>(null)
+  const [submissions, setSubmissions] = useState<CaseSubmission[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isUpdating, setIsUpdating] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -61,43 +71,42 @@ export default function ProfessorCaseDetailPage() {
   const [isLoadingStudents, setIsLoadingStudents] = useState(false)
   const [isAssigning, setIsAssigning] = useState(false)
 
-  useEffect(() => {
+  const loadCase = useCallback(async () => {
     if (!caseId) return
-    let mounted = true
     setIsLoading(true)
-    casesApi
-      .getById(caseId)
-      .then((data) => {
-        if (mounted) {
-          setCaseStudy(data)
-          setError(null)
-        }
-      })
-      .catch((err) => {
-        console.error('[v0] Error loading case:', err)
-        if (mounted) {
-          setError('No se pudo cargar el caso de estudio.')
-        }
-      })
-      .finally(() => {
-        if (mounted) setIsLoading(false)
-      })
-    return () => {
-      mounted = false
+    setError(null)
+    try {
+      const [caseResponse, submissionsResponse] = await Promise.all([
+        casesApi.getById(caseId),
+        casesApi.getSubmissions(caseId).catch(() => []),
+      ])
+      setCaseStudy(caseResponse)
+      setSubmissions(submissionsResponse)
+      setSelectedStudentIds(caseResponse.assignedStudents ?? [])
+    } catch (loadError) {
+      console.error('[professor case detail] Error loading case:', loadError)
+      setError('No se pudo cargar el caso de estudio.')
+    } finally {
+      setIsLoading(false)
     }
   }, [caseId])
 
   useEffect(() => {
+    void loadCase()
+  }, [loadCase])
+
+  useEffect(() => {
     let mounted = true
     setIsLoadingStudents(true)
+
     casesApi
       .getAssignableStudents()
       .then((students) => {
         if (!mounted) return
         setAssignableStudents(students.filter((student) => student.active))
       })
-      .catch((err) => {
-        console.error('[v0] Error loading assignable students:', err)
+      .catch((loadError) => {
+        console.error('[professor case detail] Error loading assignable students:', loadError)
       })
       .finally(() => {
         if (!mounted) return
@@ -109,19 +118,12 @@ export default function ProfessorCaseDetailPage() {
     }
   }, [])
 
-  useEffect(() => {
-    if (!caseStudy) return
-    setSelectedStudentIds(caseStudy.assignedStudents ?? [])
-  }, [caseStudy])
-
   const filteredStudents = useMemo(() => {
     const query = studentSearch.trim().toLowerCase()
     if (!query) return assignableStudents
     return assignableStudents.filter((student) => {
-      const fullName = student.fullName.toLowerCase()
-      const email = student.email.toLowerCase()
-      const username = student.username.toLowerCase()
-      return fullName.includes(query) || email.includes(query) || username.includes(query)
+      const haystack = `${student.fullName} ${student.email} ${student.username}`.toLowerCase()
+      return haystack.includes(query)
     })
   }, [assignableStudents, studentSearch])
 
@@ -141,48 +143,53 @@ export default function ProfessorCaseDetailPage() {
     try {
       const updated = await casesApi.assign(caseStudy.id, selectedStudentIds)
       setCaseStudy(updated)
-    } catch (err) {
-      console.error('[v0] Error assigning students:', err)
-      setError('No se pudo actualizar la asignacion de estudiantes.')
+    } catch (assignError) {
+      console.error('[professor case detail] Error assigning students:', assignError)
+      setError('No se pudo actualizar la asignación de estudiantes.')
     } finally {
       setIsAssigning(false)
     }
   }, [caseStudy, selectedStudentIds])
 
-  const handleStatusChange = async (status: CaseStatus) => {
-    if (!caseStudy) return
-    if (status === 'active' && caseStudy.assignedStudents.length === 0) {
-      setError('No puedes activar un caso sin estudiantes asignados.')
-      return
-    }
-    setIsUpdating(true)
-    try {
-      const updated = await casesApi.update(caseStudy.id, { status })
-      setCaseStudy(updated)
-      setError(null)
-    } catch (err) {
-      console.error('[v0] Error updating case status:', err)
-      setError('No se pudo actualizar el estado del caso.')
-    } finally {
-      setIsUpdating(false)
-    }
-  }
+  const handleStatusChange = useCallback(
+    async (status: CaseStatus) => {
+      if (!caseStudy) return
+      if (status === 'active' && selectedStudentIds.length === 0) {
+        setError('No puedes activar un caso sin estudiantes asignados.')
+        return
+      }
 
-  const handleDelete = async () => {
+      setIsUpdating(true)
+      setError(null)
+      try {
+        const updated = await casesApi.update(caseStudy.id, { status })
+        setCaseStudy(updated)
+      } catch (updateError) {
+        console.error('[professor case detail] Error updating case status:', updateError)
+        setError('No se pudo actualizar el estado del caso.')
+      } finally {
+        setIsUpdating(false)
+      }
+    },
+    [caseStudy, selectedStudentIds.length]
+  )
+
+  const handleDelete = useCallback(async () => {
     if (!caseStudy) return
-    const confirmed = window.confirm(`Eliminar el caso "${caseStudy.title}"?`)
+    const confirmed = window.confirm(`¿Eliminar el caso "${caseStudy.title}"?`)
     if (!confirmed) return
+
     setIsUpdating(true)
     try {
       await casesApi.delete(caseStudy.id)
       router.push('/professor/cases')
-    } catch (err) {
-      console.error('[v0] Error deleting case:', err)
+    } catch (deleteError) {
+      console.error('[professor case detail] Error deleting case:', deleteError)
       setError('No se pudo eliminar el caso.')
     } finally {
       setIsUpdating(false)
     }
-  }
+  }, [caseStudy, router])
 
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Cargando caso...</p>
@@ -213,7 +220,7 @@ export default function ProfessorCaseDetailPage() {
           </Button>
           <div>
             <h1 className="text-2xl font-bold">{caseStudy.title}</h1>
-            <div className="flex flex-wrap items-center gap-2 mt-2">
+            <div className="mt-2 flex flex-wrap items-center gap-2">
               <Badge variant="outline" className={difficultyConfig[caseStudy.difficulty].color}>
                 {difficultyConfig[caseStudy.difficulty].label}
               </Badge>
@@ -223,7 +230,7 @@ export default function ProfessorCaseDetailPage() {
               {caseStudy.dueDate && (
                 <span className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Calendar className="h-3 w-3" />
-                  {parseCalendarDateUtc(caseStudy.dueDate).toLocaleDateString('es', {
+                  {parseCalendarDateUtc(caseStudy.dueDate).toLocaleDateString('es-ES', {
                     day: 'numeric',
                     month: 'short',
                     year: 'numeric',
@@ -234,6 +241,7 @@ export default function ProfessorCaseDetailPage() {
             </div>
           </div>
         </div>
+
         <div className="flex flex-wrap gap-2">
           <Button asChild variant="outline" disabled={isUpdating}>
             <Link href={`/professor/cases/${caseStudy.id}/edit`}>
@@ -242,17 +250,17 @@ export default function ProfessorCaseDetailPage() {
             </Link>
           </Button>
           {caseStudy.status !== 'active' && (
-            <Button onClick={() => handleStatusChange('active')} disabled={isUpdating}>
+            <Button onClick={() => void handleStatusChange('active')} disabled={isUpdating}>
               Activar
             </Button>
           )}
           {caseStudy.status !== 'archived' && (
-            <Button variant="secondary" onClick={() => handleStatusChange('archived')} disabled={isUpdating}>
+            <Button variant="secondary" onClick={() => void handleStatusChange('archived')} disabled={isUpdating}>
               <Archive className="mr-2 h-4 w-4" />
               Archivar
             </Button>
           )}
-          <Button variant="destructive" onClick={handleDelete} disabled={isUpdating}>
+          <Button variant="destructive" onClick={() => void handleDelete()} disabled={isUpdating}>
             Eliminar
           </Button>
         </div>
@@ -262,13 +270,13 @@ export default function ProfessorCaseDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
+          <CardTitle className="flex items-center gap-2 text-lg">
             <FileText className="h-5 w-5" />
             Escenario
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground whitespace-pre-wrap">{caseStudy.scenario}</p>
+          <p className="whitespace-pre-wrap text-sm text-muted-foreground">{caseStudy.scenario}</p>
         </CardContent>
       </Card>
 
@@ -279,7 +287,7 @@ export default function ProfessorCaseDetailPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             {caseStudy.requiredArticles.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Sin articulos obligatorios.</p>
+              <p className="text-sm text-muted-foreground">Sin artículos obligatorios.</p>
             ) : (
               caseStudy.requiredArticles.map((article, index) => (
                 <Badge key={`${article}-${index}`} variant="secondary">
@@ -296,7 +304,7 @@ export default function ProfessorCaseDetailPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             {caseStudy.optionalArticles.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Sin articulos opcionales.</p>
+              <p className="text-sm text-muted-foreground">Sin artículos opcionales.</p>
             ) : (
               caseStudy.optionalArticles.map((article, index) => (
                 <Badge key={`${article}-${index}`} variant="outline">
@@ -308,62 +316,98 @@ export default function ProfessorCaseDetailPage() {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Users className="h-5 w-5" />
-            Estudiantes asignados
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            {selectedStudentIds.length} estudiante(s) asignado(s).
-          </p>
-          <Input
-            placeholder="Buscar estudiante..."
-            value={studentSearch}
-            onChange={(e) => setStudentSearch(e.target.value)}
-          />
-          <ScrollArea className="h-52 rounded-md border px-3 py-2">
-            {isLoadingStudents ? (
-              <p className="text-sm text-muted-foreground">Cargando estudiantes...</p>
-            ) : filteredStudents.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No hay estudiantes disponibles.</p>
-            ) : (
-              <div className="space-y-2">
-                {filteredStudents.map((student) => {
-                  const isChecked = selectedStudentIds.includes(student.id)
-                  return (
-                    <label
-                      key={student.id}
-                      className="flex cursor-pointer items-start gap-2 rounded-md p-2 hover:bg-muted/50"
-                    >
-                      <Checkbox
-                        checked={isChecked}
-                        onCheckedChange={(checked) => toggleStudent(student.id, Boolean(checked))}
-                      />
-                      <span className="text-sm leading-tight">
-                        <span className="block font-medium">{student.fullName}</span>
-                        <span className="block text-xs text-muted-foreground">
-                          {student.email || student.username}
+      <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Users className="h-5 w-5" />
+              Estudiantes asignados
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {selectedStudentIds.length} estudiante(s) asignado(s).
+            </p>
+            <Input
+              placeholder="Buscar estudiante..."
+              value={studentSearch}
+              onChange={(event) => setStudentSearch(event.target.value)}
+            />
+            <ScrollArea className="h-52 rounded-md border px-3 py-2">
+              {isLoadingStudents ? (
+                <p className="text-sm text-muted-foreground">Cargando estudiantes...</p>
+              ) : filteredStudents.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No hay estudiantes disponibles.</p>
+              ) : (
+                <div className="space-y-2">
+                  {filteredStudents.map((student) => {
+                    const isChecked = selectedStudentIds.includes(student.id)
+                    return (
+                      <label
+                        key={student.id}
+                        className="flex cursor-pointer items-start gap-2 rounded-md p-2 hover:bg-muted/50"
+                      >
+                        <Checkbox
+                          checked={isChecked}
+                          onCheckedChange={(checked) => toggleStudent(student.id, Boolean(checked))}
+                        />
+                        <span className="text-sm leading-tight">
+                          <span className="block font-medium">{student.fullName}</span>
+                          <span className="block text-xs text-muted-foreground">
+                            {student.email || student.username}
+                          </span>
                         </span>
-                      </span>
-                    </label>
-                  )
-                })}
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+            </ScrollArea>
+            <Button onClick={() => void handleSaveAssignments()} disabled={isAssigning}>
+              {isAssigning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Guardar asignación
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Entregas del caso</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {submissions.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Aún no hay entregas asociadas a este caso.</p>
+            ) : (
+              <div className="space-y-3">
+                {submissions.map((submission) => (
+                  <div key={submission.id} className="rounded-lg border p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-sm font-medium">Estudiante #{submission.studentId}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Enviado: {formatSubmissionDate(submission.submittedAt)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={submission.status === 'reviewed' ? 'secondary' : 'outline'}>
+                          {submission.status === 'reviewed' ? 'Revisado' : 'Pendiente'}
+                        </Badge>
+                        <Button asChild size="sm" variant="outline">
+                          <Link href={`/professor/evaluations/${submission.id}`}>Abrir evaluación</Link>
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
-          </ScrollArea>
-          <Button onClick={handleSaveAssignments} disabled={isAssigning}>
-            {isAssigning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Guardar asignacion
-          </Button>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Preguntas guia</CardTitle>
+          <CardTitle className="text-lg">Preguntas guía</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {caseStudy.guidingQuestions.length === 0 ? (
@@ -372,8 +416,8 @@ export default function ProfessorCaseDetailPage() {
             caseStudy.guidingQuestions.map((question) => (
               <div key={question.id} className="rounded-lg border p-3">
                 <p className="text-sm font-medium">{question.question}</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Competencia: {question.competency} - {question.points} pts
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Competencia: {question.competency} · {question.points} pts
                 </p>
               </div>
             ))
@@ -383,21 +427,21 @@ export default function ProfessorCaseDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Rubrica</CardTitle>
+          <CardTitle className="text-lg">Rúbrica</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {caseStudy.rubric.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Sin rubrica definida.</p>
+            <p className="text-sm text-muted-foreground">Sin rúbrica definida.</p>
           ) : (
             caseStudy.rubric.map((item) => (
-              <div key={item.id} className="rounded-lg border p-4 space-y-2">
+              <div key={item.id} className="space-y-2 rounded-lg border p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="secondary">{item.criteria}</Badge>
                   <Badge variant="outline">{item.competency}</Badge>
                   <span className="text-xs text-muted-foreground">{item.maxPoints} pts</span>
                 </div>
                 <Separator />
-                <div className="grid gap-2 sm:grid-cols-3 text-xs text-muted-foreground">
+                <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
                   <div>
                     <p className="font-medium text-success">Excelente</p>
                     <p>{item.levels.excellent || '-'}</p>
@@ -419,4 +463,3 @@ export default function ProfessorCaseDetailPage() {
     </div>
   )
 }
-

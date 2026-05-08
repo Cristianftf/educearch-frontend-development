@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useMemo, useRef } from 'react'
 import {
   DndContext,
   DragEndEvent,
@@ -53,6 +53,51 @@ const BOOLEAN_OPERATORS: QueryElement[] = [
   { id: 'not', type: 'operator', value: 'NOT', label: 'NO', color: 'bg-red-100 text-red-800' },
 ]
 type BooleanOperator = 'AND' | 'OR' | 'NOT'
+const MAX_QUERY_ELEMENTS = 40
+
+function extractQueryParts(queryElements: QueryElement[]): { terms: MeshTerm[]; operators: BooleanOperator[] } {
+  const terms: MeshTerm[] = []
+  const operators: BooleanOperator[] = []
+  let pendingOperator: BooleanOperator | null = null
+
+  for (const element of queryElements) {
+    if (element.type === 'operator') {
+      if (terms.length === 0) continue
+      if (element.value === 'AND' || element.value === 'OR' || element.value === 'NOT') {
+        pendingOperator = element.value
+      }
+      continue
+    }
+    if (element.type === 'term') {
+      const value = element.value.trim()
+      if (!value) continue
+      if (terms.length > 0) {
+        operators.push(pendingOperator ?? 'AND')
+      }
+      terms.push({
+        id: element.termId || element.id,
+        term: value,
+      })
+      pendingOperator = null
+    }
+  }
+
+  while (operators.length > Math.max(0, terms.length - 1)) {
+    operators.pop()
+  }
+
+  return { terms, operators }
+}
+
+function buildQueryStringFromParts(terms: MeshTerm[], operators: BooleanOperator[]): string {
+  if (terms.length === 0) return ''
+  let query = `[${terms[0].term}]`
+  for (let i = 1; i < terms.length; i += 1) {
+    const op = operators[i - 1] || 'AND'
+    query += ` ${op} [${terms[i].term}]`
+  }
+  return query
+}
 
 function DraggableChip({ element, isDragging }: { element: QueryElement; isDragging?: boolean }) {
   const {
@@ -143,6 +188,7 @@ function DroppableZone({
 export default function QueryBuilder({ availableTerms, onQueryChange }: QueryBuilderProps) {
   const [queryElements, setQueryElements] = useState<QueryElement[]>([])
   const [draggedElement, setDraggedElement] = useState<QueryElement | null>(null)
+  const elementInstanceCounterRef = useRef(0)
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -152,21 +198,40 @@ export default function QueryBuilder({ availableTerms, onQueryChange }: QueryBui
     })
   )
 
+  const availableTermElements = useMemo<QueryElement[]>(
+    () =>
+      availableTerms.slice(0, 16).map((term, index) => ({
+        id: `term:${term.id || index}:${index}`,
+        type: 'term',
+        value: term.term,
+        label: term.term,
+        color: 'bg-purple-100 text-purple-800',
+        termId: term.id || `term-${index + 1}`,
+      })),
+    [availableTerms]
+  )
+
+  const availableElementsById = useMemo(() => {
+    const map = new Map<string, QueryElement>()
+    for (const element of [...availableTermElements, ...BOOLEAN_OPERATORS]) {
+      map.set(element.id, element)
+    }
+    return map
+  }, [availableTermElements])
+
+  const createElementInstanceId = useCallback((baseId: string) => {
+    elementInstanceCounterRef.current += 1
+    return `${baseId}-${Date.now()}-${elementInstanceCounterRef.current}`
+  }, [])
+
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const { active } = event
-    const element = [...availableTerms.map(t => ({
-      id: t.id,
-      type: 'term' as const,
-      value: t.term,
-      label: t.term,
-      color: 'bg-purple-100 text-purple-800',
-      termId: t.id
-    })), ...BOOLEAN_OPERATORS].find(e => e.id === active.id)
+    const element = availableElementsById.get(String(active.id))
 
     if (element) {
       setDraggedElement(element)
     }
-  }, [availableTerms])
+  }, [availableElementsById])
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event
@@ -174,78 +239,56 @@ export default function QueryBuilder({ availableTerms, onQueryChange }: QueryBui
 
     if (!over) return
 
-    const element = [...availableTerms.map(t => ({
-      id: t.id,
-      type: 'term' as const,
-      value: t.term,
-      label: t.term,
-      color: 'bg-purple-100 text-purple-800',
-      termId: t.id
-    })), ...BOOLEAN_OPERATORS].find(e => e.id === active.id)
+    const element = availableElementsById.get(String(active.id))
 
     if (!element) return
 
     // Add to query elements if dropped in query zone
     if (over.id === 'query-zone') {
-      setQueryElements(prev => [...prev, { ...element, id: `${element.id}-${Date.now()}` }])
+      setQueryElements((prev) => {
+        if (prev.length >= MAX_QUERY_ELEMENTS) return prev
+        const next = [...prev]
+        const lastElement = next[next.length - 1]
+        if (element.type === 'operator') {
+          if (!lastElement || lastElement.type === 'operator') {
+            if (!lastElement) return prev
+            next[next.length - 1] = { ...element, id: createElementInstanceId(element.id) }
+            return next
+          }
+          next.push({ ...element, id: createElementInstanceId(element.id) })
+          return next
+        }
+
+        if (lastElement?.type === 'term') {
+          next.push({
+            ...BOOLEAN_OPERATORS[0],
+            id: createElementInstanceId('and-auto'),
+          })
+        }
+        next.push({ ...element, id: createElementInstanceId(element.id) })
+        return next.slice(0, MAX_QUERY_ELEMENTS)
+      })
     }
-  }, [availableTerms])
+  }, [availableElementsById, createElementInstanceId])
 
   const removeElement = useCallback((elementId: string) => {
     setQueryElements(prev => prev.filter(e => e.id !== elementId))
   }, [])
 
   const buildQueryString = useCallback((): string => {
-    if (queryElements.length === 0) return ''
-
-    const orderedTerms: QueryElement[] = []
-    const orderedOperators: QueryElement[] = []
-
-    for (const element of queryElements) {
-      if (element.type === 'term') {
-        orderedTerms.push(element)
-        continue
-      }
-      if (element.type === 'operator' && orderedTerms.length > 0) {
-        orderedOperators.push(element)
-      }
-    }
-
-    if (orderedTerms.length === 0) return ''
-
-    let query = `[${orderedTerms[0].value}]`
-    for (let i = 1; i < orderedTerms.length; i++) {
-      const op = orderedOperators[i - 1]?.value || 'AND'
-      query += ` ${op} [${orderedTerms[i].value}]`
-    }
-
-    return query
+    const parts = extractQueryParts(queryElements)
+    return buildQueryStringFromParts(parts.terms, parts.operators)
   }, [queryElements])
 
   // Update query string whenever elements change
   React.useEffect(() => {
-    const query = buildQueryString()
-    const orderedTerms: QueryElement[] = []
-    const orderedOperators: QueryElement[] = []
-
-    for (const element of queryElements) {
-      if (element.type === 'term') {
-        orderedTerms.push(element)
-        continue
-      }
-      if (element.type === 'operator' && orderedTerms.length > 0) {
-        orderedOperators.push(element)
-      }
-    }
-
-    const terms = orderedTerms.map((e) => ({
-      id: e.termId || e.id,
-      term: e.value,
-    }))
-    const operators = orderedOperators.map((e) => e.value as BooleanOperator)
-
-    onQueryChange({ rawQuery: query, terms, operators })
-  }, [buildQueryString, onQueryChange, queryElements])
+    const parts = extractQueryParts(queryElements)
+    onQueryChange({
+      rawQuery: buildQueryStringFromParts(parts.terms, parts.operators),
+      terms: parts.terms,
+      operators: parts.operators,
+    })
+  }, [onQueryChange, queryElements])
 
   return (
     <DndContext
@@ -269,16 +312,10 @@ export default function QueryBuilder({ availableTerms, onQueryChange }: QueryBui
               <div>
                 <h4 className="font-medium mb-2 text-sm">Términos MeSH</h4>
                 <div className="flex flex-wrap gap-2">
-                  {availableTerms.slice(0, 8).map((term) => (
+                  {availableTermElements.slice(0, 8).map((termElement) => (
                     <DraggableChip
-                      key={term.id}
-                      element={{
-                        id: term.id,
-                        type: 'term',
-                        value: term.term,
-                        label: term.term,
-                        color: 'bg-purple-100 text-purple-800'
-                      }}
+                      key={termElement.id}
+                      element={termElement}
                     />
                   ))}
                 </div>
@@ -300,7 +337,7 @@ export default function QueryBuilder({ availableTerms, onQueryChange }: QueryBui
         {/* Query Construction Zone */}
         <DroppableZone
           id="query-zone"
-          title="Zona de Construcción de Query"
+          title="Zona de construcción de query"
           elements={queryElements}
           onRemove={removeElement}
           className="border-2 border-dashed border-muted-foreground/25"
@@ -309,7 +346,7 @@ export default function QueryBuilder({ availableTerms, onQueryChange }: QueryBui
         {/* Query Preview */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">Preview de Query</CardTitle>
+            <CardTitle className="text-sm">Vista previa de la query</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="bg-muted p-4 rounded-lg font-mono text-sm overflow-x-auto">

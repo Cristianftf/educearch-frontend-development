@@ -1,52 +1,31 @@
 'use client'
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
-import type {
-  User,
-  SystemHealth,
-  AuditLog,
-  SystemSettings,
-  Alert,
-} from '@/types'
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import type { Alert, AuditLog, SystemHealth, SystemSettings, User } from '@/types'
 
 interface AdminContextType {
-  // Usuarios
   users: User[]
   setUsers: (users: User[]) => void
   updateUser: (id: string, updates: Partial<User>) => void
   removeUser: (id: string) => void
   addUser: (user: User) => void
-
-  // Salud del sistema
   systemHealth: SystemHealth | null
   setSystemHealth: (health: SystemHealth) => void
-
-  // Logs de auditoría
   auditLogs: AuditLog[]
   setAuditLogs: (logs: AuditLog[]) => void
   addAuditLog: (log: AuditLog) => void
-
-  // Configuración
   settings: SystemSettings | null
   setSettings: (settings: SystemSettings) => void
-
-  // Alertas
   alerts: Alert[]
   setAlerts: (alerts: Alert[]) => void
   addAlert: (alert: Alert) => void
   updateAlert: (id: string, updates: Partial<Alert>) => void
   deleteAlert: (id: string) => void
-
-  // Backups
   backups: Array<{ id: string; createdAt: string; size: number }>
   setBackups: (backups: Array<{ id: string; createdAt: string; size: number }>) => void
-
-  // Estado de monitoreo en vivo
   isMonitoring: boolean
   startMonitoring: () => void
   stopMonitoring: () => void
-
-  // Filtros de UI
   selectedLogLevel: 'all' | 'INFO' | 'WARN' | 'ERROR'
   setSelectedLogLevel: (level: 'all' | 'INFO' | 'WARN' | 'ERROR') => void
   logSearchQuery: string
@@ -54,6 +33,7 @@ interface AdminContextType {
 }
 
 const AdminContext = createContext<AdminContextType | undefined>(undefined)
+const ADMIN_UI_STATE_KEY = 'admin_ui_state_v1'
 
 export function AdminProvider({ children }: { children: ReactNode }) {
   const [users, setUsersState] = useState<User[]>([])
@@ -66,18 +46,55 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const [selectedLogLevel, setSelectedLogLevel] = useState<'all' | 'INFO' | 'WARN' | 'ERROR'>('all')
   const [logSearchQuery, setLogSearchQuery] = useState('')
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const raw = window.localStorage.getItem(ADMIN_UI_STATE_KEY)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as Partial<{
+        isMonitoring: boolean
+        selectedLogLevel: 'all' | 'INFO' | 'WARN' | 'ERROR'
+        logSearchQuery: string
+      }>
+      if (typeof parsed.isMonitoring === 'boolean') setIsMonitoring(parsed.isMonitoring)
+      if (
+        parsed.selectedLogLevel === 'all' ||
+        parsed.selectedLogLevel === 'INFO' ||
+        parsed.selectedLogLevel === 'WARN' ||
+        parsed.selectedLogLevel === 'ERROR'
+      ) {
+        setSelectedLogLevel(parsed.selectedLogLevel)
+      }
+      if (typeof parsed.logSearchQuery === 'string') {
+        setLogSearchQuery(parsed.logSearchQuery)
+      }
+    } catch {
+      // Ignore invalid persisted state.
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(
+      ADMIN_UI_STATE_KEY,
+      JSON.stringify({
+        isMonitoring,
+        selectedLogLevel,
+        logSearchQuery,
+      })
+    )
+  }, [isMonitoring, selectedLogLevel, logSearchQuery])
+
   const setUsers = useCallback((newUsers: User[]) => {
     setUsersState(newUsers)
   }, [])
 
   const updateUser = useCallback((id: string, updates: Partial<User>) => {
-    setUsersState((prev) =>
-      prev.map((u) => (u.id === id ? { ...u, ...updates } : u))
-    )
+    setUsersState((prev) => prev.map((user) => (user.id === id ? { ...user, ...updates } : user)))
   }, [])
 
   const removeUser = useCallback((id: string) => {
-    setUsersState((prev) => prev.filter((u) => u.id !== id))
+    setUsersState((prev) => prev.filter((user) => user.id !== id))
   }, [])
 
   const addUser = useCallback((user: User) => {
@@ -93,7 +110,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const addAuditLog = useCallback((log: AuditLog) => {
-    setAuditLogsState((prev) => [log, ...prev].slice(0, 1000)) // Mantener últimos 1000
+    setAuditLogsState((prev) => [log, ...prev].slice(0, 1000))
   }, [])
 
   const setSettings = useCallback((newSettings: SystemSettings) => {
@@ -109,13 +126,11 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const updateAlert = useCallback((id: string, updates: Partial<Alert>) => {
-    setAlertsState((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, ...updates } : a))
-    )
+    setAlertsState((prev) => prev.map((alert) => (alert.id === id ? { ...alert, ...updates } : alert)))
   }, [])
 
   const deleteAlert = useCallback((id: string) => {
-    setAlertsState((prev) => prev.filter((a) => a.id !== id))
+    setAlertsState((prev) => prev.filter((alert) => alert.id !== id))
   }, [])
 
   const setBackups = useCallback((newBackups: Array<{ id: string; createdAt: string; size: number }>) => {

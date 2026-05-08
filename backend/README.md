@@ -80,21 +80,10 @@ JWT_REFRESH_EXPIRATION=604800000
 # PubMed API
 PUBMED_API_KEY=<your-api-key>
 
-# LLM API (OpenAI-compatible)
-# Opcion gratuita recomendada: Groq
-LLM_BASE_URL=https://api.groq.com/openai/v1
-GROQ_API_KEY=<your-groq-api-key>
-GROQ_MODEL=llama-3.3-70b-versatile
-
 # Google AI Studio (Gemini)
-AI_PROVIDER=auto
+AI_PROVIDER=gemini
 GOOGLE_AI_API_KEY=<your-google-ai-studio-key>
 GOOGLE_AI_MODEL=gemini-2.5-flash
-
-# Fallback local sin costo (Ollama)
-LOCAL_LLM_FALLBACK_ENABLED=true
-LOCAL_LLM_BASE_URL=http://localhost:11434/v1
-LOCAL_LLM_MODEL=llama3.2:3b
 
 # Servidor
 SERVER_PORT=8080
@@ -125,25 +114,7 @@ java -jar target/backend-1.0.0.jar
 
 ### IA en tiempo real (obligatorio para asistente conectado)
 
-Opcion A (API externa gratuita - Groq):
-
-```bash
-set GROQ_API_KEY=tu_key_aqui
-set LLM_BASE_URL=https://api.groq.com/openai/v1
-set GROQ_MODEL=llama-3.3-70b-versatile
-```
-
-Opcion B (modelo local sin key - Ollama):
-
-```bash
-ollama pull llama3.2:3b
-ollama serve
-set LOCAL_LLM_FALLBACK_ENABLED=true
-set LOCAL_LLM_BASE_URL=http://localhost:11434/v1
-set LOCAL_LLM_MODEL=llama3.2:3b
-```
-
-Opcion C (Google AI Studio - Gemini):
+Opcion unica (Google AI Studio - Gemini):
 
 ```bash
 set AI_PROVIDER=gemini
@@ -151,7 +122,7 @@ set GOOGLE_AI_API_KEY=tu_key_aqui
 set GOOGLE_AI_MODEL=gemini-2.5-flash
 ```
 
-Si no hay key externa y Ollama no estÃ¡ corriendo, el asistente entra en modo respaldo.
+Si no hay key de Gemini configurada, el asistente entra en modo respaldo.
 
 ## ðŸ—„ï¸ Base de Datos
 

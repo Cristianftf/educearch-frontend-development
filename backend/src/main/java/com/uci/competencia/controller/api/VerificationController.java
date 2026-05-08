@@ -2,14 +2,13 @@ package com.uci.competencia.controller.api;
 
 import com.uci.competencia.model.dto.request.VerificationRequestDTO;
 import com.uci.competencia.model.dto.response.VerificationResponseDTO;
+import com.uci.competencia.security.UserIdentityResolver;
 import com.uci.competencia.service.VerificationService;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -18,12 +17,14 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/verify")
-@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:3001", "https://frontend.uci.cu"})
 @Slf4j
 public class VerificationController {
 
     @Autowired
     private VerificationService verificationService;
+
+    @Autowired
+    private UserIdentityResolver userIdentityResolver;
 
     @PostMapping("/claim")
     @PreAuthorize("hasAnyRole('STUDENT', 'PROFESSOR')")
@@ -31,7 +32,7 @@ public class VerificationController {
         String claim = request.getClaimText();
         String sourceUrl = request.getSourceUrl();
         if ((claim == null || claim.isBlank()) && (sourceUrl == null || sourceUrl.isBlank())) {
-            return ResponseEntity.badRequest().build();
+            throw new IllegalArgumentException("Debes enviar un claim o una URL valida para verificar.");
         }
         log.info("Verifying claim: {}", claim != null ? claim : sourceUrl);
         VerificationResponseDTO response = verificationService.verifyClaim(request);
@@ -39,6 +40,7 @@ public class VerificationController {
     }
 
     @GetMapping("/result/{verificationId}")
+    @PreAuthorize("hasAnyRole('STUDENT', 'PROFESSOR')")
     public ResponseEntity<VerificationResponseDTO> getVerificationResult(@PathVariable String verificationId) {
         log.info("Getting verification result: {}", verificationId);
         VerificationResponseDTO response = verificationService.getVerificationResult(verificationId);
@@ -49,11 +51,9 @@ public class VerificationController {
      * Obtener ID del usuario autenticado
      */
     private String getCurrentUserId() {
-        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        if (principal instanceof UserDetails) {
-            return ((UserDetails) principal).getUsername();
-        }
-        return principal.toString();
+        return userIdentityResolver.getCurrentPrincipalIdentifier()
+            .map(userIdentityResolver::resolveCanonicalUserId)
+            .orElse(null);
     }
 
     @GetMapping("/history")

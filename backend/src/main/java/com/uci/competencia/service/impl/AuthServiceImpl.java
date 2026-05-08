@@ -31,34 +31,35 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public LoginResponseDTO login(LoginRequestDTO loginRequest) {
         log.info("Processing login for email: {}", loginRequest.getEmail());
-        User user = userRepository.findByEmail(loginRequest.getEmail())
+        String normalizedIdentifier = loginRequest.getEmail() != null ? loginRequest.getEmail().trim() : "";
+        User user = resolveLoginUser(normalizedIdentifier)
             .orElseThrow(() -> {
-                log.warn("Login attempt with non-existent email: {}", loginRequest.getEmail());
+                log.warn("Login attempt with non-existent identifier: {}", normalizedIdentifier);
                 return new InvalidCredentialsException("Invalid email or password");
             });
 
         if (!user.isActive()) {
-            log.warn("Inactive user login attempt: {}", loginRequest.getEmail());
+            log.warn("Inactive user login attempt: {}", normalizedIdentifier);
             throw new InvalidCredentialsException("Invalid email or password");
         }
 
         if (!passwordEncoder.matches(loginRequest.getPassword(), user.getPasswordHash())) {
-            log.warn("Invalid password attempt for user: {}", loginRequest.getEmail());
+            log.warn("Invalid password attempt for user: {}", normalizedIdentifier);
             throw new InvalidCredentialsException("Invalid email or password");
         }
 
         user.setLastLogin(LocalDateTime.now());
         userRepository.save(user);
 
-        log.info("Successful login for user: {}", loginRequest.getEmail());
+        log.info("Successful login for user: {}", user.getEmail());
         String token = tokenProvider.generateTokenFromUsername(
             user.getEmail(),
-            user.getRole().toString()
+            buildAuthorityClaim(user)
         );
 
         String refreshToken = tokenProvider.generateRefreshTokenFromUsername(
             user.getEmail(),
-            user.getRole().toString()
+            buildAuthorityClaim(user)
         );
 
         LoginResponseDTO response = new LoginResponseDTO();
@@ -83,12 +84,12 @@ public class AuthServiceImpl implements AuthService {
 
             String token = tokenProvider.generateTokenFromUsername(
                 user.getEmail(),
-                user.getRole().toString()
+                buildAuthorityClaim(user)
             );
 
             String newRefreshToken = tokenProvider.generateRefreshTokenFromUsername(
                 user.getEmail(),
-                user.getRole().toString()
+                buildAuthorityClaim(user)
             );
 
             LoginResponseDTO response = new LoginResponseDTO();
@@ -108,5 +109,26 @@ public class AuthServiceImpl implements AuthService {
     public void logout(String token) {
         // Implement token invalidation in Redis
         log.info("User logged out");
+    }
+
+    private java.util.Optional<User> resolveLoginUser(String identifier) {
+        if (identifier == null || identifier.isBlank()) {
+            return java.util.Optional.empty();
+        }
+
+        String normalized = identifier.trim();
+        java.util.Optional<User> byEmail = userRepository.findByEmail(normalized);
+        if (byEmail.isPresent()) {
+            return byEmail;
+        }
+
+        return userRepository.findByUsername(normalized);
+    }
+
+    private String buildAuthorityClaim(User user) {
+        if (user == null || user.getRole() == null) {
+            return "ROLE_STUDENT";
+        }
+        return user.getRole().name();
     }
 }

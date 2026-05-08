@@ -1,15 +1,26 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useStudent } from '@/contexts/student-context'
 import { verifyApi } from '@/lib/api'
+import {
+  type RequestLoadProfile,
+  normalizeRequestLoadProfile,
+  VERIFICATION_TIMEOUT_MS_BY_PROFILE,
+} from '@/lib/request-load-profile'
 import type { VerificationResult } from '@/types'
+
+const MIN_VERIFY_INTERVAL_MS = 1000
 
 interface UseStudentVerifyReturn {
   isVerifying: boolean
   error: string | null
   lastResult: VerificationResult | null
   verificationHistory: VerificationResult[]
-  verifyClaim: (claim: string, sourceUrl?: string) => Promise<VerificationResult | null>
+  verifyClaim: (
+    claim: string,
+    sourceUrl?: string,
+    options?: { activityRunId?: string; loadProfile?: RequestLoadProfile }
+  ) => Promise<VerificationResult | null>
   loadHistory: (page?: number, limit?: number) => Promise<void>
   clearHistory: () => void
   clearError: () => void
@@ -28,25 +39,56 @@ export function useStudentVerify(): UseStudentVerifyReturn {
   const [isVerifying, setIsVerifying] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastResult, setLastResult] = useState<VerificationResult | null>(null)
+  const activeVerifyControllerRef = useRef<AbortController | null>(null)
+  const activeVerifyRunRef = useRef<number>(0)
+  const lastVerifyStartAtRef = useRef<number>(0)
 
   const verifyClaim = useCallback(
-    async (claim: string, sourceUrl?: string) => {
+    async (
+      claim: string,
+      sourceUrl?: string,
+      options?: { activityRunId?: string; loadProfile?: RequestLoadProfile }
+    ) => {
+      const loadProfile = normalizeRequestLoadProfile(options?.loadProfile)
+      const now = Date.now()
+      const elapsed = now - lastVerifyStartAtRef.current
+      if (elapsed < MIN_VERIFY_INTERVAL_MS) {
+        setError('Espera 1 segundo antes de lanzar otra verificacion.')
+        return null
+      }
+
+      activeVerifyControllerRef.current?.abort()
+      const controller = new AbortController()
+      activeVerifyControllerRef.current = controller
+      const timeoutMs = VERIFICATION_TIMEOUT_MS_BY_PROFILE[loadProfile]
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+      const runToken = activeVerifyRunRef.current + 1
+      activeVerifyRunRef.current = runToken
+      lastVerifyStartAtRef.current = now
+
       setIsVerifying(true)
       setError(null)
 
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 45000)
-
       try {
         const result = await verifyApi.verifyClaim(claim, sourceUrl, {
+          activityRunId: options?.activityRunId,
+          loadProfile,
           signal: controller.signal,
           headers: {
             'X-Student-Level': 'intermediate',
+            'X-Load-Profile': loadProfile,
           },
         })
+        if (!result) {
+          if (activeVerifyRunRef.current === runToken) {
+            setError('No se pudo completar la verificacion en este intento.')
+          }
+          return null
+        }
 
-        clearTimeout(timeoutId)
-        setLastResult(result)
+        if (activeVerifyRunRef.current === runToken) {
+          setLastResult(result)
+        }
 
         addVerification(result)
         queryClient.invalidateQueries({ queryKey: ['student', 'verifyHistory'] })
@@ -66,21 +108,33 @@ export function useStudentVerify(): UseStudentVerifyReturn {
 
         return result
       } catch (err) {
-        clearTimeout(timeoutId)
-
         if (err instanceof Error && err.name === 'AbortError') {
-          const errorMessage = 'La verificacion excedio el tiempo limite. Intenta nuevamente.'
-          setError(errorMessage)
-          console.error('[useStudentVerify timeout]:', err)
+          if (activeVerifyControllerRef.current !== controller) {
+            return null
+          }
+          const timeoutSeconds = Math.max(1, Math.round(timeoutMs / 1000))
+          const errorMessage =
+            `La verificacion excedio ${timeoutSeconds}s. Prueba el perfil de carga Ligera o simplifica el claim.`
+          if (activeVerifyRunRef.current === runToken) {
+            setError(errorMessage)
+          }
           return null
         }
 
         const errorMessage = err instanceof Error ? err.message : 'Error al verificar claim'
-        setError(errorMessage)
+        if (activeVerifyRunRef.current === runToken) {
+          setError(errorMessage)
+        }
         console.error('[useStudentVerify]:', err)
         return null
       } finally {
-        setIsVerifying(false)
+        clearTimeout(timeoutId)
+        if (activeVerifyControllerRef.current === controller) {
+          activeVerifyControllerRef.current = null
+        }
+        if (activeVerifyRunRef.current === runToken) {
+          setIsVerifying(false)
+        }
       }
     },
     [addActivity, addVerification, queryClient]

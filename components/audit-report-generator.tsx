@@ -2,41 +2,17 @@
 
 import { useState } from "react"
 import { format as formatDate } from "date-fns"
-import { Download, Loader2, AlertCircle, CheckCircle } from "lucide-react"
+import { AlertCircle, CheckCircle, Download, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { exportAuditLogsClient } from "@/lib/admin-audit-export"
 
 type ReportFormat = "pdf" | "excel" | "json"
 type ReportType = "daily" | "weekly" | "monthly" | "custom"
-
-interface ReportConfig {
-  type: ReportType
-  format: ReportFormat
-  startDate?: string
-  endDate?: string
-  level?: "all" | "INFO" | "WARN" | "ERROR"
-  user?: string
-}
 
 interface ReportResult {
   id: string
@@ -44,6 +20,7 @@ interface ReportResult {
   downloadUrl: string
   size: number
   generatedAt: string
+  source: "backend" | "client-fallback"
 }
 
 const REPORT_TYPES = [
@@ -54,8 +31,8 @@ const REPORT_TYPES = [
 ]
 
 const EXPORT_FORMATS = [
-  { value: "pdf", label: "PDF", description: "Reporte formateado con gráficos" },
-  { value: "excel", label: "Excel", description: "Tabla con filtros y análisis" },
+  { value: "pdf", label: "PDF", description: "Documento formateado" },
+  { value: "excel", label: "Excel", description: "Tabla descargable" },
   { value: "json", label: "JSON", description: "Datos sin procesar" },
 ]
 
@@ -71,25 +48,15 @@ export function AuditReportGenerator() {
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ReportResult | null>(null)
 
-  // Get date range based on report type
   const getDateRange = () => {
     const today = new Date()
-    let start = new Date()
-
-    switch (reportType) {
-      case "daily":
-        start.setDate(today.getDate() - 1)
-        break
-      case "weekly":
-        start.setDate(today.getDate() - 7)
-        break
-      case "monthly":
-        start.setDate(today.getDate() - 30)
-        break
-      case "custom":
-        return { start: startDate, end: endDate }
+    const start = new Date()
+    if (reportType === "daily") start.setDate(today.getDate() - 1)
+    if (reportType === "weekly") start.setDate(today.getDate() - 7)
+    if (reportType === "monthly") start.setDate(today.getDate() - 30)
+    if (reportType === "custom") {
+      return { start: startDate, end: endDate }
     }
-
     return {
       start: formatDate(start, "yyyy-MM-dd"),
       end: formatDate(today, "yyyy-MM-dd"),
@@ -100,51 +67,34 @@ export function AuditReportGenerator() {
     setError(null)
     setResult(null)
     setIsLoading(true)
-
     try {
       const dateRange = getDateRange()
-
-      // Validate custom dates
       if (reportType === "custom") {
-        if (!startDate || !endDate) {
-          throw new Error("Debes seleccionar fecha de inicio y fin")
-        }
+        if (!startDate || !endDate) throw new Error("Debes seleccionar fecha inicial y final.")
         if (new Date(startDate) >= new Date(endDate)) {
-          throw new Error("La fecha de inicio debe ser antes de la fecha de fin")
+          throw new Error("La fecha inicial debe ser anterior a la fecha final.")
         }
       }
 
-      const config: ReportConfig = {
-        type: reportType,
+      const response = await exportAuditLogsClient({
         format,
         startDate: dateRange.start || undefined,
         endDate: dateRange.end || undefined,
         level: logLevel !== "all" ? logLevel : undefined,
-        user: userFilter || undefined,
-      }
-
-      const response = await exportAuditLogsClient({
-        format: config.format,
-        startDate: config.startDate,
-        endDate: config.endDate,
-        level: config.level,
-        userId: config.user,
-        fileNamePrefix: `audit-${config.type}`,
+        userQuery: userFilter || undefined,
+        fileNamePrefix: `audit-${reportType}`,
       })
 
-      const reportResult: ReportResult = {
-        id: response.id || `report-${Date.now()}`,
-        fileName: response.fileName || `audit-report.${format}`,
-        downloadUrl: response.downloadUrl || "#",
-        size: response.size || 0,
-        generatedAt: new Date().toISOString(),
-      }
-
-      setResult(reportResult)
+      setResult({
+        id: response.id,
+        fileName: response.fileName,
+        downloadUrl: response.downloadUrl,
+        size: response.size,
+        generatedAt: response.createdAt,
+        source: response.source,
+      })
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Error al generar reporte"
-      )
+      setError(err instanceof Error ? err.message : "No se pudo generar el reporte.")
     } finally {
       setIsLoading(false)
     }
@@ -152,41 +102,36 @@ export function AuditReportGenerator() {
 
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return "0 B"
-    const k = 1024
-    const sizes = ["B", "KB", "MB", "GB"]
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i]
+    const units = ["B", "KB", "MB", "GB"]
+    const exponent = Math.floor(Math.log(bytes) / Math.log(1024))
+    return `${Math.round((bytes / Math.pow(1024, exponent)) * 100) / 100} ${units[exponent]}`
   }
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
         <Button variant="outline" className="gap-2">
-          <Download className="w-4 h-4" />
-          Generar Reporte
+          <Download className="h-4 w-4" />
+          Generar reporte
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Generar Reporte de Auditoría</DialogTitle>
-          <DialogDescription>
-            Exporta logs de auditoría en el formato que necesites
-          </DialogDescription>
+          <DialogTitle>Generar reporte de auditoría</DialogTitle>
+          <DialogDescription>Usa el export del backend y, si no responde, genera un fallback local para no cortar el flujo.</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6">
-          {/* Report Type Selection */}
           <div className="space-y-3">
-            <Label className="text-base font-semibold">Tipo de Reporte</Label>
+            <Label className="text-base font-semibold">Período</Label>
             <div className="grid grid-cols-2 gap-3">
               {REPORT_TYPES.map((option) => (
                 <button
                   key={option.value}
+                  type="button"
                   onClick={() => setReportType(option.value as ReportType)}
-                  className={`p-3 rounded-lg border-2 text-left transition-all ${
-                    reportType === option.value
-                      ? "border-blue-500 bg-blue-50"
-                      : "border-gray-200 hover:border-gray-300"
+                  className={`rounded-lg border-2 p-3 text-left transition-all ${
+                    reportType === option.value ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-gray-300"
                   }`}
                 >
                   <div className="font-medium">{option.label}</div>
@@ -196,45 +141,29 @@ export function AuditReportGenerator() {
             </div>
           </div>
 
-          {/* Custom Date Range */}
           {reportType === "custom" && (
-            <div className="space-y-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
-              <Label className="text-sm font-semibold">Rango de Fechas</Label>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label htmlFor="start-date" className="text-xs">Desde</Label>
-                  <Input
-                    id="start-date"
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="end-date" className="text-xs">Hasta</Label>
-                  <Input
-                    id="end-date"
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                  />
-                </div>
+            <div className="grid grid-cols-2 gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3">
+              <div>
+                <Label htmlFor="start-date" className="text-xs">Desde</Label>
+                <Input id="start-date" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+              </div>
+              <div>
+                <Label htmlFor="end-date" className="text-xs">Hasta</Label>
+                <Input id="end-date" type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
               </div>
             </div>
           )}
 
-          {/* Export Format Selection */}
           <div className="space-y-3">
-            <Label className="text-base font-semibold">Formato de Exportación</Label>
+            <Label className="text-base font-semibold">Formato</Label>
             <div className="grid grid-cols-3 gap-3">
               {EXPORT_FORMATS.map((option) => (
                 <button
                   key={option.value}
+                  type="button"
                   onClick={() => setFormat(option.value as ReportFormat)}
-                  className={`p-3 rounded-lg border-2 text-center transition-all ${
-                    format === option.value
-                      ? "border-green-500 bg-green-50"
-                      : "border-gray-200 hover:border-gray-300"
+                  className={`rounded-lg border-2 p-3 text-center transition-all ${
+                    format === option.value ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-gray-300"
                   }`}
                 >
                   <div className="font-medium">{option.label}</div>
@@ -244,80 +173,59 @@ export function AuditReportGenerator() {
             </div>
           </div>
 
-          {/* Filters */}
-          <div className="space-y-3 bg-gray-50 p-3 rounded-lg">
-            <Label className="text-sm font-semibold">Filtros Opcionales</Label>
+          <div className="space-y-3 rounded-lg bg-gray-50 p-3">
+            <Label className="text-sm font-semibold">Filtros opcionales</Label>
             <div className="space-y-3">
               <div>
-                <Label htmlFor="level" className="text-xs">Nivel de Log</Label>
-                <Select value={logLevel} onValueChange={(v: any) => setLogLevel(v)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Todos los niveles" />
-                  </SelectTrigger>
+                <Label htmlFor="level" className="text-xs">Nivel</Label>
+                <Select value={logLevel} onValueChange={(value) => setLogLevel(value as typeof logLevel)}>
+                  <SelectTrigger><SelectValue placeholder="Todos los niveles" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Todos los niveles</SelectItem>
-                    <SelectItem value="INFO">Info</SelectItem>
-                    <SelectItem value="WARN">Advertencia</SelectItem>
-                    <SelectItem value="ERROR">Error</SelectItem>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="INFO">INFO</SelectItem>
+                    <SelectItem value="WARN">WARN</SelectItem>
+                    <SelectItem value="ERROR">ERROR</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div>
-                <Label htmlFor="user" className="text-xs">Usuario (opcional)</Label>
-                <Input
-                  id="user"
-                  placeholder="Filtrar por usuario"
-                  value={userFilter}
-                  onChange={(e) => setUserFilter(e.target.value)}
-                />
+                <Label htmlFor="user" className="text-xs">Usuario</Label>
+                <Input id="user" placeholder="Correo, nombre o identificador" value={userFilter} onChange={(event) => setUserFilter(event.target.value)} />
               </div>
             </div>
           </div>
 
-          {/* Error Alert */}
           {error && (
             <Alert variant="destructive">
-              <AlertCircle className="w-4 h-4" />
+              <AlertCircle className="h-4 w-4" />
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
 
-          {/* Success Result */}
           {result && (
             <Alert className="border-green-200 bg-green-50">
-              <CheckCircle className="w-4 h-4 text-green-700" />
+              <CheckCircle className="h-4 w-4 text-green-700" />
               <AlertDescription className="text-green-800">
                 <div className="space-y-2">
-                  <div className="font-medium">Reporte generado exitosamente</div>
+                  <div className="font-medium">Reporte generado correctamente</div>
                   <div className="text-sm">
                     <div><strong>Archivo:</strong> {result.fileName}</div>
                     <div><strong>Tamaño:</strong> {formatFileSize(result.size)}</div>
                     <div><strong>Generado:</strong> {formatDate(new Date(result.generatedAt), "PPpp")}</div>
+                    <div><strong>Origen:</strong> {result.source === "backend" ? "Backend real" : "Fallback local"}</div>
                   </div>
                 </div>
               </AlertDescription>
             </Alert>
           )}
 
-          {/* Action Buttons */}
-          <div className="flex gap-3 justify-end">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setIsOpen(false)
-                setResult(null)
-                setError(null)
-              }}
-            >
+          <div className="flex justify-end gap-3">
+            <Button variant="outline" onClick={() => { setIsOpen(false); setResult(null); setError(null) }}>
               Cerrar
             </Button>
-            <Button
-              onClick={handleGenerateReport}
-              disabled={isLoading || (reportType === "custom" && (!startDate || !endDate))}
-              className="gap-2"
-            >
-              {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-              {result ? "Generar Otro" : "Generar Reporte"}
+            <Button onClick={handleGenerateReport} disabled={isLoading || (reportType === "custom" && (!startDate || !endDate))}>
+              {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {result ? "Generar otro" : "Generar reporte"}
             </Button>
           </div>
         </div>
@@ -325,4 +233,3 @@ export function AuditReportGenerator() {
     </Dialog>
   )
 }
-

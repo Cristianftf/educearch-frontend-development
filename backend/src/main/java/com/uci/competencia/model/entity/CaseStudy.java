@@ -8,7 +8,11 @@ import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.ColumnTransformer;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JavaType;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -21,6 +25,9 @@ import java.util.List;
 public class CaseStudy {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
+    @ColumnTransformer(read = "CAST(id AS text)", write = "?::uuid")
+    @JavaType(com.uci.competencia.model.type.UuidStringJavaType.class)
+    @JdbcTypeCode(SqlTypes.UUID)
     private String id;
 
     @Column(nullable = false)

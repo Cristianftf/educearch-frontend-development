@@ -33,11 +33,9 @@ public class Bibliography {
     @Column(nullable = false, length = 50)
     private String format; // 'apa', 'vancouver', 'bibtex', 'xml'
     
-    @Lob
     @Column(columnDefinition = "TEXT")
     private String content; // Contenido de la bibliografía generada
 
-    @Lob
     @Column(columnDefinition = "TEXT")
     private String articleIds; // JSON array of article IDs
     

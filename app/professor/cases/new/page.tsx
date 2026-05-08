@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { casesApi, searchApi } from '@/lib/api'
 import type {
@@ -70,6 +70,7 @@ const difficultyConfig: Record<CaseDifficulty, { label: string; description: str
 
 export default function NewCasePage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [isSaving, setIsSaving] = useState(false)
   const [currentTab, setCurrentTab] = useState('scenario')
 
@@ -138,6 +139,38 @@ export default function NewCasePage() {
     },
   ])
 
+  useEffect(() => {
+    const articlesParam = searchParams.get('articles')
+    if (!articlesParam) return
+    const articleIds = articlesParam
+      .split(',')
+      .map((entry) => decodeURIComponent(entry).trim())
+      .filter(Boolean)
+    if (articleIds.length === 0) return
+
+    setRequiredArticles((prev) => {
+      const seen = new Set(prev.map((article) => article.id))
+      const next = [...prev]
+      for (const articleId of articleIds) {
+        if (seen.has(articleId)) continue
+        seen.add(articleId)
+        next.push({
+          id: articleId,
+          pmid: articleId,
+          title: articleId,
+          authors: [],
+          journal: '',
+          year: new Date().getFullYear(),
+          abstract: '',
+          studyType: 'Unknown',
+          evidenceLevel: 0,
+          hasConflictOfInterest: false,
+        })
+      }
+      return next
+    })
+  }, [searchParams])
+
   const searchArticles = useCallback(async () => {
     if (searchTerm.trim().length < 2) {
       setResourceSearchError('Escribe al menos 2 caracteres para buscar recursos.')
@@ -170,7 +203,7 @@ export default function NewCasePage() {
     } catch (err) {
       console.error('[v0] Search error:', err)
       setSearchResults([])
-      setResourceSearchError('No se pudo completar la busqueda de recursos.')
+      setResourceSearchError('No se pudo completar la búsqueda de recursos.')
     } finally {
       setIsSearching(false)
     }
@@ -272,7 +305,7 @@ export default function NewCasePage() {
     const trimmedScenario = scenario.trim()
 
     if (!trimmedTitle || trimmedTitle.length < 3) {
-      setFormError('El titulo debe tener al menos 3 caracteres.')
+      setFormError('El título debe tener al menos 3 caracteres.')
       return
     }
     if (!trimmedScenario || trimmedScenario.length < 20) {
@@ -307,7 +340,7 @@ export default function NewCasePage() {
       router.push('/professor/cases')
     } catch (err) {
       console.error('[v0] Save error:', err)
-      setFormError('No se pudo guardar el caso. Intentalo nuevamente.')
+      setFormError('No se pudo guardar el caso. Inténtalo nuevamente.')
     } finally {
       setIsSaving(false)
     }
@@ -381,7 +414,7 @@ export default function NewCasePage() {
           </TabsTrigger>
           <TabsTrigger value="rubric" className="gap-2">
             <ClipboardList className="h-4 w-4" />
-            <span className="hidden sm:inline">rúbrica</span>
+            <span className="hidden sm:inline">Rúbrica</span>
           </TabsTrigger>
         </TabsList>
 
@@ -391,7 +424,7 @@ export default function NewCasePage() {
             <div className="lg:col-span-2 space-y-6">
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-lg">información del caso</CardTitle>
+                  <CardTitle className="text-lg">Información del caso</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
@@ -585,7 +618,7 @@ export default function NewCasePage() {
 
                 {hasSearchedResources && !isSearching && searchResults.length === 0 && !resourceSearchError && (
                   <p className="text-sm text-muted-foreground">
-                    Sin resultados. Intenta con otro termino clinico o una consulta mas especifica.
+                    Sin resultados. Intenta con otro término clínico o una consulta más específica.
                   </p>
                 )}
 
@@ -617,7 +650,7 @@ export default function NewCasePage() {
                                   }
                                 }}
                               >
-                                {isRequired ? 'Obligatorio' : 'añadir obligatorio'}
+                                {isRequired ? 'Obligatorio' : 'Añadir obligatorio'}
                               </Button>
                               <Button
                                 variant={isOptional ? 'secondary' : 'outline'}
@@ -631,7 +664,7 @@ export default function NewCasePage() {
                                   }
                                 }}
                               >
-                                {isOptional ? 'Opcional' : 'añadir opcional'}
+                                {isOptional ? 'Opcional' : 'Añadir opcional'}
                               </Button>
                             </div>
                           </div>
@@ -649,7 +682,7 @@ export default function NewCasePage() {
                 <CardHeader>
                   <CardTitle className="text-lg text-success flex items-center gap-2">
                     <BookOpen className="h-5 w-5" />
-                    artículos obligatorios ({requiredArticles.length})
+                    Artículos obligatorios ({requiredArticles.length})
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -688,7 +721,7 @@ export default function NewCasePage() {
                 <CardHeader>
                   <CardTitle className="text-lg text-muted-foreground flex items-center gap-2">
                     <BookOpen className="h-5 w-5" />
-                    artículos opcionales ({optionalArticles.length})
+                    Artículos opcionales ({optionalArticles.length})
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -739,7 +772,7 @@ export default function NewCasePage() {
                 </div>
                 <Button onClick={addQuestion}>
                   <Plus className="mr-2 h-4 w-4" />
-                  añadir pregunta
+                  Añadir pregunta
                 </Button>
               </div>
             </CardHeader>
@@ -819,14 +852,14 @@ export default function NewCasePage() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-lg">rúbrica de evaluación</CardTitle>
+                  <CardTitle className="text-lg">Rúbrica de evaluación</CardTitle>
                   <CardDescription>
                     Define los criterios y niveles de desempeño
                   </CardDescription>
                 </div>
                 <Button onClick={addRubricItem}>
                   <Plus className="mr-2 h-4 w-4" />
-                  añadir criterio
+                  Añadir criterio
                 </Button>
               </div>
             </CardHeader>

@@ -2,35 +2,39 @@ package com.uci.competencia.controller.api;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.uci.competencia.exception.ResourceNotFoundException;
 import com.uci.competencia.model.dto.response.BibliographyResponseDTO;
 import com.uci.competencia.model.entity.Bibliography;
 import com.uci.competencia.model.entity.SearchResult;
 import com.uci.competencia.repository.BibliographyRepository;
 import com.uci.competencia.repository.SearchResultRepository;
+import com.uci.competencia.security.UserIdentityResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/api/bibliography")
-@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:3001", "https://frontend.uci.cu"})
 @Slf4j
 @RequiredArgsConstructor
 public class BibliographyController {
 
     private final BibliographyRepository bibliographyRepository;
     private final SearchResultRepository searchResultRepository;
+    private final UserIdentityResolver userIdentityResolver;
     private final ObjectMapper objectMapper;
 
     /**
@@ -40,24 +44,20 @@ public class BibliographyController {
     @GetMapping("/history")
     @PreAuthorize("hasAnyRole('STUDENT', 'PROFESSOR')")
     public ResponseEntity<List<BibliographyResponseDTO>> getBibliographyHistory() {
-        String userId = getCurrentUserId();
-        log.info("Getting bibliography history for user: {}", userId);
+        String userIdentifier = getCurrentUserId();
+        Set<String> userIdentifiers = resolveUserIdentifiers(userIdentifier);
+        log.info("Getting bibliography history for user: {}", userIdentifier);
 
-        try {
-            List<Bibliography> bibliographies = bibliographyRepository.findByUserIdOrderByCreatedAtDesc(userId);
+        List<Bibliography> bibliographies = loadBibliographiesForUserIdentifiers(userIdentifiers);
 
-            List<BibliographyResponseDTO> result = new ArrayList<>();
-            for (Bibliography bib : bibliographies) {
-                List<SearchResult> results = findArticles(bib.getArticleIds());
-                result.add(toResponse(bib, results));
-            }
-
-            log.info("Retrieved {} bibliographies for user {}", result.size(), userId);
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            log.error("Error retrieving bibliography history for user {}", userId, e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        List<BibliographyResponseDTO> result = new ArrayList<>();
+        for (Bibliography bib : bibliographies) {
+            List<SearchResult> results = findArticles(bib.getArticleIds());
+            result.add(toResponse(bib, results));
         }
+
+        log.info("Retrieved {} bibliographies for user {}", result.size(), userIdentifier);
+        return ResponseEntity.ok(result);
     }
 
     /**
@@ -70,50 +70,102 @@ public class BibliographyController {
         @PathVariable String id,
         @RequestParam(required = false, defaultValue = "txt") String format
     ) {
-        String userId = getCurrentUserId();
-        log.info("Downloading bibliography {} in format {} for user {}", id, format, userId);
+        String userIdentifier = getCurrentUserId();
+        Set<String> userIdentifiers = resolveUserIdentifiers(userIdentifier);
+        log.info("Downloading bibliography {} in format {} for user {}", id, format, userIdentifier);
 
-        try {
-            Bibliography bibliography = bibliographyRepository.findByIdAndUserId(id, userId)
-                .orElseThrow(() -> new RuntimeException("Bibliography not found or access denied: " + id));
+        Bibliography bibliography = findBibliographyForUserIdentifiers(id, userIdentifiers)
+            .orElseThrow(() -> new ResourceNotFoundException("Bibliography not found: " + id));
 
-            byte[] content;
-            String fileName;
-            MediaType mediaType;
+        byte[] content;
+        String fileName;
+        MediaType mediaType;
 
-            if ("docx".equalsIgnoreCase(format)) {
-                content = generateDocxContent(bibliography);
-                fileName = bibliography.getName() + ".docx";
-                mediaType = MediaType.APPLICATION_OCTET_STREAM;
-            } else {
-                content = bibliography.getContent().getBytes(StandardCharsets.UTF_8);
-                fileName = bibliography.getName() + ".txt";
-                mediaType = MediaType.TEXT_PLAIN;
-            }
-
-            log.info("Bibliography {} downloaded successfully for user {}", id, userId);
-
-            return ResponseEntity.ok()
-                .contentType(mediaType)
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                    "attachment; filename=\"" + fileName + "\"")
-                .body(content);
-
-        } catch (RuntimeException e) {
-            log.warn("Error downloading bibliography {}: {}", id, e.getMessage());
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
-        } catch (Exception e) {
-            log.error("Error generating bibliography download for id {}", id, e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        if ("docx".equalsIgnoreCase(format)) {
+            content = generateDocxContent(bibliography);
+            fileName = bibliography.getName() + ".docx";
+            mediaType = MediaType.APPLICATION_OCTET_STREAM;
+        } else {
+            content = bibliography.getContent().getBytes(StandardCharsets.UTF_8);
+            fileName = bibliography.getName() + ".txt";
+            mediaType = MediaType.TEXT_PLAIN;
         }
+
+        log.info("Bibliography {} downloaded successfully for user {}", id, userIdentifier);
+
+        return ResponseEntity.ok()
+            .contentType(mediaType)
+            .header(HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename=\"" + fileName + "\"")
+            .body(content);
     }
 
     private String getCurrentUserId() {
-        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        if (principal instanceof UserDetails) {
-            return ((UserDetails) principal).getUsername();
+        return userIdentityResolver.getCurrentPrincipalIdentifier().orElse(null);
+    }
+
+    private Set<String> resolveUserIdentifiers(String userIdentifier) {
+        LinkedHashSet<String> identifiers = new LinkedHashSet<>();
+        if (userIdentifier == null || userIdentifier.isBlank()) {
+            return identifiers;
         }
-        return principal.toString();
+
+        identifiers.add(userIdentifier.trim());
+        identifiers.addAll(userIdentityResolver.resolveUserIdentifiers(userIdentifier));
+        return identifiers;
+    }
+
+    private List<Bibliography> loadBibliographiesForUserIdentifiers(Set<String> userIdentifiers) {
+        if (userIdentifiers == null || userIdentifiers.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, Bibliography> merged = new LinkedHashMap<>();
+        for (String identifier : userIdentifiers) {
+            if (identifier == null || identifier.isBlank()) {
+                continue;
+            }
+            try {
+                List<Bibliography> entries = bibliographyRepository.findByUserIdOrderByCreatedAtDesc(identifier);
+                for (Bibliography entry : entries) {
+                    if (entry != null && entry.getId() != null) {
+                        merged.putIfAbsent(entry.getId(), entry);
+                    }
+                }
+            } catch (Exception ex) {
+                log.debug("Unable to load bibliography list with identifier {}", identifier, ex);
+            }
+        }
+
+        return merged.values().stream()
+            .sorted((left, right) -> {
+                if (left.getCreatedAt() == null && right.getCreatedAt() == null) return 0;
+                if (left.getCreatedAt() == null) return 1;
+                if (right.getCreatedAt() == null) return -1;
+                return right.getCreatedAt().compareTo(left.getCreatedAt());
+            })
+            .toList();
+    }
+
+    private Optional<Bibliography> findBibliographyForUserIdentifiers(String bibliographyId, Set<String> userIdentifiers) {
+        if (bibliographyId == null || bibliographyId.isBlank() || userIdentifiers == null || userIdentifiers.isEmpty()) {
+            return Optional.empty();
+        }
+
+        for (String identifier : userIdentifiers) {
+            if (identifier == null || identifier.isBlank()) {
+                continue;
+            }
+            try {
+                Optional<Bibliography> bibliography = bibliographyRepository.findByIdAndUserId(bibliographyId, identifier);
+                if (bibliography.isPresent()) {
+                    return bibliography;
+                }
+            } catch (Exception ex) {
+                log.debug("Unable to load bibliography {} with identifier {}", bibliographyId, identifier, ex);
+            }
+        }
+        return Optional.empty();
     }
 
     private List<SearchResult> findArticles(String articleIdsJson) {

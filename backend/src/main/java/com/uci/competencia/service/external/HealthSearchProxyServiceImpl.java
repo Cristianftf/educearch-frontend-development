@@ -20,6 +20,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -69,29 +70,14 @@ public class HealthSearchProxyServiceImpl implements HealthSearchProxyService {
         }
         pruneExpiredEntries(now);
 
-        List<ExternalHealthSearchResponseDTO.ExternalHealthResultDTO> aggregated = new ArrayList<>();
-        List<String> providers = new ArrayList<>();
-
-        List<ExternalHealthSearchResponseDTO.ExternalHealthResultDTO> pubMedResults =
-            executeWithRetry(() -> fetchPubMedResults(normalizedQuery, safeMaxResults, criteria), "PubMed");
-        if (!pubMedResults.isEmpty()) {
-            aggregated.addAll(pubMedResults);
-            providers.add("PubMed");
-        }
-
-        List<ExternalHealthSearchResponseDTO.ExternalHealthResultDTO> europePmcResults =
-            executeWithRetry(() -> fetchEuropePmcResults(normalizedQuery, safeMaxResults, criteria), "Europe PMC");
-        if (!europePmcResults.isEmpty()) {
-            aggregated.addAll(europePmcResults);
-            providers.add("Europe PMC");
-        }
-
-        List<ExternalHealthSearchResponseDTO.ExternalHealthResultDTO> clinicalTrialsResults =
-            executeWithRetry(() -> fetchClinicalTrialsResults(normalizedQuery, safeMaxResults, criteria), "ClinicalTrials.gov");
-        if (!clinicalTrialsResults.isEmpty()) {
-            aggregated.addAll(clinicalTrialsResults);
-            providers.add("ClinicalTrials.gov");
-        }
+        List<ProviderBatch> providerBatches = executeProvidersInParallel(normalizedQuery, safeMaxResults, criteria);
+        List<ExternalHealthSearchResponseDTO.ExternalHealthResultDTO> aggregated = providerBatches.stream()
+            .flatMap(batch -> batch.results().stream())
+            .collect(Collectors.toCollection(ArrayList::new));
+        List<String> providers = providerBatches.stream()
+            .filter(batch -> !batch.results().isEmpty())
+            .map(ProviderBatch::provider)
+            .toList();
 
         List<ExternalHealthSearchResponseDTO.ExternalHealthResultDTO> deduped = dedupeResults(aggregated, safeMaxResults);
         String providerLabel = providers.isEmpty() ? "none" : String.join(" + ", providers);
@@ -108,6 +94,52 @@ public class HealthSearchProxyServiceImpl implements HealthSearchProxyService {
         }
 
         return response;
+    }
+
+    private List<ProviderBatch> executeProvidersInParallel(
+        String normalizedQuery,
+        int safeMaxResults,
+        FilterCriteria criteria
+    ) {
+        CompletableFuture<ProviderBatch> pubMedFuture = CompletableFuture.supplyAsync(() ->
+            new ProviderBatch(
+                "PubMed",
+                executeWithRetry(() -> fetchPubMedResults(normalizedQuery, safeMaxResults, criteria), "PubMed")
+            )
+        );
+        CompletableFuture<ProviderBatch> europePmcFuture = CompletableFuture.supplyAsync(() ->
+            new ProviderBatch(
+                "Europe PMC",
+                executeWithRetry(() -> fetchEuropePmcResults(normalizedQuery, safeMaxResults, criteria), "Europe PMC")
+            )
+        );
+        CompletableFuture<ProviderBatch> clinicalTrialsFuture = CompletableFuture.supplyAsync(() ->
+            new ProviderBatch(
+                "ClinicalTrials.gov",
+                executeWithRetry(
+                    () -> fetchClinicalTrialsResults(normalizedQuery, safeMaxResults, criteria),
+                    "ClinicalTrials.gov"
+                )
+            )
+        );
+
+        return CompletableFuture.allOf(pubMedFuture, europePmcFuture, clinicalTrialsFuture)
+            .thenApply(ignored -> List.of(pubMedFuture.join(), europePmcFuture.join(), clinicalTrialsFuture.join()))
+            .exceptionally(ignored -> List.of(
+                safeJoin(pubMedFuture, "PubMed"),
+                safeJoin(europePmcFuture, "Europe PMC"),
+                safeJoin(clinicalTrialsFuture, "ClinicalTrials.gov")
+            ))
+            .join();
+    }
+
+    private ProviderBatch safeJoin(CompletableFuture<ProviderBatch> future, String provider) {
+        try {
+            return future.join();
+        } catch (Exception ex) {
+            log.warn("Provider {} failed during parallel execution: {}", provider, ex.getMessage());
+            return new ProviderBatch(provider, List.of());
+        }
     }
 
     private List<ExternalHealthSearchResponseDTO.ExternalHealthResultDTO> fetchPubMedResults(
@@ -683,6 +715,11 @@ public class HealthSearchProxyServiceImpl implements HealthSearchProxyService {
                 studyTypesKey;
         }
     }
+
+    private record ProviderBatch(
+        String provider,
+        List<ExternalHealthSearchResponseDTO.ExternalHealthResultDTO> results
+    ) {}
 
     private record CacheEntry(ExternalHealthSearchResponseDTO response, long expiresAt) {}
 }

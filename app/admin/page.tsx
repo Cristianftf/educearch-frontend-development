@@ -31,6 +31,8 @@ import { useAuth } from "@/contexts/auth-context"
 import { adminSystemApi } from "@/lib/admin-system"
 import type { AdminDashboardData } from "@/types"
 
+const AUTO_REFRESH_MS = 30000
+
 const formatUptime = (uptimeMs?: number) => {
   if (!uptimeMs || uptimeMs <= 0) return "Sin datos"
   const totalSeconds = Math.floor(uptimeMs / 1000)
@@ -67,9 +69,9 @@ export default function AdminDashboard() {
   const [error, setError] = useState<string | null>(null)
   const [dashboard, setDashboard] = useState<AdminDashboardData | null>(null)
 
-  const loadDashboard = async (manual = false) => {
+  const loadDashboard = async ({ manual = false, background = false }: { manual?: boolean; background?: boolean } = {}) => {
     if (manual) setIsRefreshing(true)
-    setIsLoading(true)
+    if (!background) setIsLoading(true)
     setError(null)
     try {
       const response = await adminSystemApi.getDashboard()
@@ -77,17 +79,24 @@ export default function AdminDashboard() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cargar dashboard")
     } finally {
-      setIsLoading(false)
+      if (!background) setIsLoading(false)
       setIsRefreshing(false)
     }
   }
 
   const handleRefresh = () => {
-    loadDashboard(true)
+    loadDashboard({ manual: true })
   }
 
   useEffect(() => {
-    loadDashboard(false)
+    loadDashboard()
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      loadDashboard({ background: true })
+    }, AUTO_REFRESH_MS)
+    return () => window.clearInterval(timer)
   }, [])
 
   const stats = dashboard?.stats

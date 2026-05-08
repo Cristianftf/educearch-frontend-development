@@ -21,4 +21,15 @@ public class SearchAssistantRequestDTO {
     private List<String> operators;
     private List<String> recentTerms;
     private SearchRequestDTO.SearchFiltersDTO filters;
+    private String projectContext;
+    private List<ConversationMessageDTO> conversationHistory;
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class ConversationMessageDTO {
+        private String role;
+        private String content;
+    }
 }

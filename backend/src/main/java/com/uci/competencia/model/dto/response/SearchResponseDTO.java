@@ -48,5 +48,7 @@ public class SearchResponseDTO {
         private String searchTime;
         private String queryTransformed;
         private List<String> suggestedImprovements;
+        private Boolean fallbackUsed;
+        private List<String> warnings;
     }
 }

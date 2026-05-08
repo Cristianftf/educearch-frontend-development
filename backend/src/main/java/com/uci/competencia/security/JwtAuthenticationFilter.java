@@ -9,11 +9,11 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -35,20 +35,29 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             if (StringUtils.hasText(jwt) && tokenProvider.validateToken(jwt)) {
                 String username = tokenProvider.getUsernameFromToken(jwt);
-                String authorities = tokenProvider.getAuthoritiesFromToken(jwt);
+                List<String> authorities = tokenProvider.getNormalizedAuthoritiesFromToken(jwt);
 
-                List<GrantedAuthority> grantedAuthorities = Arrays.stream(authorities.split(","))
+                if (!StringUtils.hasText(username)) {
+                    SecurityContextHolder.clearContext();
+                    filterChain.doFilter(request, response);
+                    return;
+                }
+
+                List<GrantedAuthority> grantedAuthorities = authorities.stream()
+                    .filter(StringUtils::hasText)
                     .map(SimpleGrantedAuthority::new)
                     .collect(Collectors.toList());
 
                 UsernamePasswordAuthenticationToken authentication =
                     new UsernamePasswordAuthenticationToken(username, null, grantedAuthorities);
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authentication);
 
                 log.debug("Set Spring Security Authentication for user: {}", username);
             }
         } catch (Exception ex) {
             log.error("Could not set user authentication in security context", ex);
+            SecurityContextHolder.clearContext();
         }
 
         filterChain.doFilter(request, response);

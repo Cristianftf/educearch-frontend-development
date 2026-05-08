@@ -1,21 +1,18 @@
 package com.uci.competencia.controller.api;
 
 import com.uci.competencia.model.dto.response.StudentProgressDTO;
+import com.uci.competencia.security.UserIdentityResolver;
 import com.uci.competencia.service.StudentService;
 import com.uci.competencia.service.ProgressTrackingService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
-
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api/student")
-@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:3001", "https://frontend.uci.cu"})
 @PreAuthorize("hasRole('STUDENT')")
 @Slf4j
 public class StudentController {
@@ -25,6 +22,9 @@ public class StudentController {
 
     @Autowired
     private ProgressTrackingService progressTrackingService;
+
+    @Autowired
+    private UserIdentityResolver userIdentityResolver;
 
     @GetMapping("/dashboard/overview")
     public ResponseEntity<StudentProgressDTO> getDashboardOverview() {
@@ -54,10 +54,8 @@ public class StudentController {
      * Obtener ID del usuario autenticado
      */
     private String getCurrentUserId() {
-        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        if (principal instanceof UserDetails) {
-            return ((UserDetails) principal).getUsername();
-        }
-        return principal.toString();
+        return userIdentityResolver.getCurrentPrincipalIdentifier()
+            .map(userIdentityResolver::resolveCanonicalUserId)
+            .orElse(null);
     }
 }

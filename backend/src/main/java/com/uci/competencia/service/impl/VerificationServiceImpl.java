@@ -9,7 +9,7 @@ import com.uci.competencia.model.entity.User;
 import com.uci.competencia.model.entity.VerificationResult;
 import com.uci.competencia.model.enums.Verdict;
 import com.uci.competencia.model.enums.VerificationStatus;
-import com.uci.competencia.repository.UserRepository;
+import com.uci.competencia.security.UserIdentityResolver;
 import com.uci.competencia.repository.VerificationResultRepository;
 import com.uci.competencia.service.RAGService;
 import com.uci.competencia.service.VerificationService;
@@ -20,9 +20,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -36,7 +33,7 @@ import java.util.stream.Collectors;
 public class VerificationServiceImpl implements VerificationService {
 
     private final VerificationResultRepository verificationResultRepository;
-    private final UserRepository userRepository;
+    private final UserIdentityResolver userIdentityResolver;
     private final ObjectMapper objectMapper;
     private final RAGService ragService;
 
@@ -57,11 +54,7 @@ public class VerificationServiceImpl implements VerificationService {
         result.setSourceUrl(request.getSourceUrl());
         result.setStatus(VerificationStatus.PROCESSING);
 
-        String userId = getCurrentUserId();
-        if (userId != null) {
-            Optional<User> user = userRepository.findById(userId);
-            user.ifPresent(result::setUser);
-        }
+        resolveCurrentUser().ifPresent(result::setUser);
 
         VerificationResult saved = verificationResultRepository.save(result);
 
@@ -251,6 +244,8 @@ public class VerificationServiceImpl implements VerificationService {
         dto.setPmid(asString(item.get("pmid"), null));
         dto.setTitle(asString(item.get("title"), null));
         dto.setSnippet(asString(item.get("snippet"), asString(item.get("text"), null)));
+        dto.setSource(asString(item.get("source"), null));
+        dto.setSourceUrl(asString(item.get("sourceUrl"), null));
         dto.setSupports(asBoolean(item.get("supports"), defaultSupports));
         dto.setStance(asString(item.get("stance"), dto.getSupports() != null && dto.getSupports() ? "support" : "contradict"));
         dto.setRelevanceScore(asDouble(item.get("relevanceScore"), asDouble(item.get("similarity"), 0.0)));
@@ -288,12 +283,8 @@ public class VerificationServiceImpl implements VerificationService {
         return "No hay explicación disponible.";
     }
 
-    private String getCurrentUserId() {
-        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        if (principal instanceof UserDetails) {
-            return ((UserDetails) principal).getUsername();
-        }
-        return principal != null ? principal.toString() : null;
+    private Optional<User> resolveCurrentUser() {
+        return userIdentityResolver.resolveCurrentUser();
     }
 
     private String asString(Object value, String fallback) {

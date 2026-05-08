@@ -93,14 +93,26 @@ const CompetencyProgressChart = dynamic(
   { ssr: false, loading: () => <CompetencyChartSkeleton /> }
 )
 
+const ACTIVITY_FILTER_OPTIONS = ['all', 'search', 'verification', 'export', 'case_submission'] as const
+type ActivityFilter = (typeof ACTIVITY_FILTER_OPTIONS)[number]
+
+function getFirstName(name?: string | null): string {
+  if (typeof name !== 'string') return 'Estudiante'
+  const trimmed = name.trim()
+  if (!trimmed) return 'Estudiante'
+  return trimmed.split(/\s+/)[0] || 'Estudiante'
+}
+
 function formatTimeAgo(dateString: string): string {
   const date = new Date(dateString)
+  if (Number.isNaN(date.getTime())) return 'Fecha no disponible'
   const now = new Date()
-  const diff = now.getTime() - date.getTime()
+  const diff = Math.max(0, now.getTime() - date.getTime())
   const minutes = Math.floor(diff / 60000)
   const hours = Math.floor(diff / 3600000)
   const days = Math.floor(diff / 86400000)
 
+  if (minutes < 1) return 'Hace instantes'
   if (minutes < 60) return `Hace ${minutes} min`
   if (hours < 24) return `Hace ${hours}h`
   return `Hace ${days}d`
@@ -126,7 +138,7 @@ export default function StudentDashboard() {
   const { recentActivities } = useStudent()
 
   const router = useRouter()
-  const [activityFilter, setActivityFilter] = useState<Activity['type'] | 'all'>('all')
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all')
 
   const { data: progress, isLoading, error, refetch } = useQuery({
     queryKey: ['student', 'progress'],
@@ -153,7 +165,7 @@ export default function StudentDashboard() {
       {/* Header */}
       <div>
         <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-          Bienvenido, {user?.name?.split(' ')[0] || 'Estudiante'}
+          Bienvenido, {getFirstName(user?.name)}
         </h1>
         <p className="text-muted-foreground mt-1">
           Continúa desarrollando tus competencias informacionales en salud
@@ -239,7 +251,14 @@ export default function StudentDashboard() {
               <span className="text-sm text-muted-foreground">Filtrar:</span>
               <select
                 value={activityFilter}
-                onChange={(e) => setActivityFilter(e.target.value as any)}
+                onChange={(e) => {
+                  const nextValue = e.target.value
+                  setActivityFilter(
+                    ACTIVITY_FILTER_OPTIONS.includes(nextValue as ActivityFilter)
+                      ? (nextValue as ActivityFilter)
+                      : 'all'
+                  )
+                }}
                 className="px-3 py-1 rounded-md border border-input bg-background text-sm"
               >
                 <option value="all">Todas</option>

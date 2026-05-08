@@ -29,9 +29,18 @@ public class MeshMapper {
         MESH_MAPPING.put("diabetes", "Diabetes Mellitus");
         MESH_MAPPING.put("diabetes type 2", "Diabetes Mellitus, Type 2");
         MESH_MAPPING.put("type 2 diabetes", "Diabetes Mellitus, Type 2");
+        MESH_MAPPING.put("diabetes tipo 2", "Diabetes Mellitus, Type 2");
+        MESH_MAPPING.put("diabetes mellitus tipo 2", "Diabetes Mellitus, Type 2");
         MESH_MAPPING.put("t2dm", "Diabetes Mellitus, Type 2");
         MESH_MAPPING.put("insulin resistance", "Insulin Resistance");
         MESH_MAPPING.put("metformin", "Metformin");
+        MESH_MAPPING.put("metformina", "Metformin");
+        MESH_MAPPING.put("glycemic control", "Blood Glucose");
+        MESH_MAPPING.put("glucose control", "Blood Glucose");
+        MESH_MAPPING.put("control glucemico", "Blood Glucose");
+        MESH_MAPPING.put("control glucémico", "Blood Glucose");
+        MESH_MAPPING.put("glucemia", "Blood Glucose");
+        MESH_MAPPING.put("hiperglucemia", "Hyperglycemia");
         MESH_MAPPING.put("glibenclamide", "Glyburide");
         
         // Términos cardiología
@@ -59,6 +68,15 @@ public class MeshMapper {
         // Sinónimos
         SYNONYMS.put("Diabetes Mellitus", new HashSet<>(Arrays.asList(
             "diabetes", "diabetes mellitus", "dm", "glucose intolerance"
+        )));
+        SYNONYMS.put("Diabetes Mellitus, Type 2", new HashSet<>(Arrays.asList(
+            "type 2 diabetes", "diabetes type 2", "diabetes tipo 2", "diabetes mellitus tipo 2", "t2dm"
+        )));
+        SYNONYMS.put("Metformin", new HashSet<>(Arrays.asList(
+            "metformin", "metformina"
+        )));
+        SYNONYMS.put("Blood Glucose", new HashSet<>(Arrays.asList(
+            "glycemic control", "glucose control", "control glucemico", "control glucémico", "glucemia"
         )));
         SYNONYMS.put("Hypertension", new HashSet<>(Arrays.asList(
             "high blood pressure", "hypertension", "elevated blood pressure", "bp"

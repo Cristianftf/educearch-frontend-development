@@ -2,7 +2,6 @@ package com.uci.competencia.service.impl;
 
 import com.uci.competencia.model.entity.CompetencyProgress;
 import com.uci.competencia.model.entity.Student;
-import com.uci.competencia.model.entity.Badge;
 import com.uci.competencia.model.entity.SearchSession;
 import com.uci.competencia.model.dto.response.StudentProgressReport;
 import com.uci.competencia.repository.CompetencyProgressRepository;
@@ -21,7 +20,6 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -360,9 +358,6 @@ public class ProgressTrackingServiceImpl implements ProgressTrackingService {
 
         try {
             // Obtener sesiones de búsqueda del período
-            LocalDateTime startDateTime = LocalDate.now().minusDays(days).atStartOfDay();
-            LocalDateTime endDateTime = LocalDateTime.now();
-
             Pageable pageable = PageRequest.of(0, 1000);
             Page<SearchSession> sessions = searchSessionRepository.findByUser_Id(studentId, pageable);
 

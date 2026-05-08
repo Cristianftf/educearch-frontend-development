@@ -189,7 +189,7 @@ export default function ProfessorHedgesPage() {
 
   const handleCreateHedge = async () => {
     if (!formData.name.trim() || !formData.category.trim() || !formData.query.trim()) {
-      setError("Completa nombre, categoria y query.")
+      setError("Completa nombre, categoría y query.")
       return
     }
 
@@ -219,7 +219,7 @@ export default function ProfessorHedgesPage() {
   const handleUpdateHedge = async () => {
     if (!editingHedge) return
     if (!formData.name.trim() || !formData.category.trim() || !formData.query.trim()) {
-      setError("Completa nombre, categoria y query.")
+      setError("Completa nombre, categoría y query.")
       return
     }
 
@@ -252,7 +252,7 @@ export default function ProfessorHedgesPage() {
   }
 
   const handleDeleteHedge = async (id: string) => {
-    const confirmed = window.confirm("Estas seguro de que deseas eliminar este hedge?")
+    const confirmed = window.confirm("¿Estás seguro de que deseas eliminar este hedge?")
     if (!confirmed) return
 
     try {
@@ -327,7 +327,7 @@ export default function ProfessorHedgesPage() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Configurador de Search Hedges</h1>
           <p className="text-muted-foreground">
-            Crea y gestiona estrategias de busqueda predefinidas para tus estudiantes.
+            Crea y gestiona estrategias de búsqueda predefinidas para tus estudiantes.
           </p>
         </div>
 
@@ -342,7 +342,7 @@ export default function ProfessorHedgesPage() {
             <DialogHeader>
               <DialogTitle>Crear Search Hedge</DialogTitle>
               <DialogDescription>
-                Define una estrategia reutilizable. Se intentara guardar en API primero.
+                Define una estrategia reutilizable. Se intentará guardar en API primero.
               </DialogDescription>
             </DialogHeader>
             <HedgeForm
@@ -386,10 +386,10 @@ export default function ProfessorHedgesPage() {
         <Select value={selectedCategory} onValueChange={setSelectedCategory}>
           <SelectTrigger className="w-full sm:w-64">
             <Filter className="h-4 w-4 mr-2" />
-            <SelectValue placeholder="Filtrar por categoria" />
+            <SelectValue placeholder="Filtrar por categoría" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Todas las categorias</SelectItem>
+            <SelectItem value="all">Todas las categorías</SelectItem>
             {categories.map((cat) => (
               <SelectItem key={cat} value={cat}>
                 {cat}
@@ -416,7 +416,7 @@ export default function ProfessorHedgesPage() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     <CardTitle className="text-lg break-words">{hedge.name}</CardTitle>
-                    <CardDescription>{hedge.description || "Sin descripcion"}</CardDescription>
+                    <CardDescription>{hedge.description || "Sin descripción"}</CardDescription>
                   </div>
                   {hedge.isTemplate && <Badge variant="secondary">Plantilla</Badge>}
                 </div>
@@ -440,7 +440,7 @@ export default function ProfessorHedgesPage() {
                     </p>
                   </div>
                   <div className="bg-green-50 p-3 rounded">
-                    <p className="text-xs text-muted-foreground">Precision</p>
+                    <p className="text-xs text-muted-foreground">Precisión</p>
                     <p className="text-lg font-bold text-green-700">{normalizePercent(hedge.precision)}%</p>
                   </div>
                   <div className="bg-orange-50 p-3 rounded">
@@ -540,13 +540,13 @@ function HedgeForm({
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="category">Categoria *</Label>
+          <Label htmlFor="category">Categoría *</Label>
           <Select
             value={formData.category}
             onValueChange={(value) => setFormData((prev) => ({ ...prev, category: value }))}
           >
             <SelectTrigger>
-              <SelectValue placeholder="Seleccionar categoria" />
+              <SelectValue placeholder="Seleccionar categoría" />
             </SelectTrigger>
             <SelectContent>
               {categories.map((cat) => (
@@ -560,7 +560,7 @@ function HedgeForm({
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="description">Descripcion</Label>
+        <Label htmlFor="description">Descripción</Label>
         <Input
           id="description"
           value={formData.description}
@@ -576,12 +576,12 @@ function HedgeForm({
               {queryValidation === "valid" ? (
                 <>
                   <CheckCircle className="h-4 w-4 text-green-500" />
-                  <span className="text-sm text-green-600">Valida</span>
+                  <span className="text-sm text-green-600">Válida</span>
                 </>
               ) : (
                 <>
                   <AlertCircle className="h-4 w-4 text-red-500" />
-                  <span className="text-sm text-red-600">Invalida</span>
+                  <span className="text-sm text-red-600">Inválida</span>
                 </>
               )}
             </div>
@@ -608,7 +608,7 @@ function HedgeForm({
               <p className="font-semibold">{testResult.resultCount ?? 0}</p>
             </div>
             <div>
-              <span className="text-muted-foreground">Precision:</span>
+              <span className="text-muted-foreground">Precisión:</span>
               <p className="font-semibold">{normalizePercent(testResult.estimatedPrecision)}%</p>
             </div>
             <div>

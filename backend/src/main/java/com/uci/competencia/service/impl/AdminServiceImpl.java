@@ -12,6 +12,8 @@ import com.uci.competencia.repository.UserRepository;
 import com.uci.competencia.repository.SystemLogRepository;
 import com.uci.competencia.repository.SearchSessionRepository;
 import com.uci.competencia.service.AdminService;
+import com.uci.competencia.service.SystemErrorInsightService;
+import com.uci.competencia.service.external.OpenAIService;
 import com.uci.competencia.service.specification.UserSpecifications;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,6 +37,7 @@ import javax.sql.DataSource;
 import java.io.File;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.lang.management.ManagementFactory;
@@ -49,12 +52,18 @@ import java.util.stream.Collectors;
 @Slf4j
 public class AdminServiceImpl implements AdminService {
 
+    private static final double API_LATENCY_WARNING_MS = 700d;
+    private static final double API_LATENCY_OFFLINE_MS = 3000d;
+    private static final double PUBMED_USAGE_WARNING_PERCENT = 85d;
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final SystemLogRepository systemLogRepository;
     private final SearchSessionRepository searchSessionRepository;
+    private final SystemErrorInsightService systemErrorInsightService;
     private final DataSource dataSource;
     private final ObjectMapper objectMapper;
+    private final OpenAIService openAIService;
 
     @Autowired(required = false)
     private CacheManager cacheManager;
@@ -62,7 +71,7 @@ public class AdminServiceImpl implements AdminService {
     @Autowired(required = false)
     private RedisConnectionFactory redisConnectionFactory;
     
-    // Almacenamiento en memoria para backups (en producción usar BD)
+    // Almacenamiento en memoria para backups (en producciÃ³n usar BD)
     private static final Map<String, BackupStatus> backupRegistry = new ConcurrentHashMap<>();
     private static final Map<String, SystemConfiguration> configRegistry = new ConcurrentHashMap<>();
 
@@ -102,6 +111,12 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     public User createUser(User user) {
+        String normalizedEmail = normalizeEmail(user.getEmail());
+        if (userRepository.existsByEmail(normalizedEmail)) {
+            throw new IllegalArgumentException("User already exists with email: " + normalizedEmail);
+        }
+        user.setEmail(normalizedEmail);
+
         if (user.getUsername() == null || user.getUsername().trim().isEmpty()) {
             user.setUsername(generateUniqueUsername(user.getEmail()));
         }
@@ -118,9 +133,16 @@ public class AdminServiceImpl implements AdminService {
     @Override
     public User updateUser(String id, User user) {
         User existingUser = getUserById(id);
+        String normalizedEmail = normalizeEmail(user.getEmail());
+        userRepository.findByEmail(normalizedEmail)
+            .filter(found -> !Objects.equals(found.getId(), existingUser.getId()))
+            .ifPresent(found -> {
+                throw new IllegalArgumentException("User already exists with email: " + normalizedEmail);
+            });
+
         existingUser.setFirstName(user.getFirstName());
         existingUser.setLastName(user.getLastName());
-        existingUser.setEmail(user.getEmail());
+        existingUser.setEmail(normalizedEmail);
         existingUser.setFaculty(user.getFaculty());
         existingUser.setActive(user.isActive());
         if (user.getRole() != null) {
@@ -135,9 +157,8 @@ public class AdminServiceImpl implements AdminService {
         User existingUser = userRepository.findById(id)
             .orElseThrow(() -> new ResourceNotFoundException("User not found: " + id));
 
-        final UUID userUuid;
         try {
-            userUuid = UUID.fromString(id);
+            UUID.fromString(id);
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException("Invalid user ID format: " + id, ex);
         }
@@ -168,51 +189,51 @@ public class AdminServiceImpl implements AdminService {
                 "DELETE FROM evaluations WHERE submission_id IN (" +
                 "SELECT cs.id::text FROM case_submissions cs " +
                 "WHERE cs.case_id IN (" +
-                "SELECT c.id FROM case_studies c WHERE c.created_by = ? OR CAST(c.professor_id AS text) = ?))",
-                id, id
+                "SELECT c.id FROM case_studies c WHERE c.created_by = ?))",
+                id
             );
             jdbcTemplate.update(
                 "DELETE FROM submission_selected_articles WHERE submission_id IN (" +
                 "SELECT cs.id FROM case_submissions cs " +
                 "WHERE cs.case_id IN (" +
-                "SELECT c.id FROM case_studies c WHERE c.created_by = ? OR CAST(c.professor_id AS text) = ?))",
-                id, id
+                "SELECT c.id FROM case_studies c WHERE c.created_by = ?))",
+                id
             );
             jdbcTemplate.update(
                 "DELETE FROM case_submissions WHERE case_id IN (" +
-                "SELECT c.id FROM case_studies c WHERE c.created_by = ? OR CAST(c.professor_id AS text) = ?)",
-                id, id
+                "SELECT c.id FROM case_studies c WHERE c.created_by = ?)",
+                id
             );
             jdbcTemplate.update(
                 "DELETE FROM case_assigned_students WHERE case_id IN (" +
-                "SELECT c.id FROM case_studies c WHERE c.created_by = ? OR CAST(c.professor_id AS text) = ?)",
-                id, id
+                "SELECT c.id FROM case_studies c WHERE c.created_by = ?)",
+                id
             );
             jdbcTemplate.update(
                 "DELETE FROM case_rubric WHERE case_id IN (" +
-                "SELECT c.id FROM case_studies c WHERE c.created_by = ? OR CAST(c.professor_id AS text) = ?)",
-                id, id
+                "SELECT c.id FROM case_studies c WHERE c.created_by = ?)",
+                id
             );
             jdbcTemplate.update(
                 "DELETE FROM case_guiding_questions WHERE case_id IN (" +
-                "SELECT c.id FROM case_studies c WHERE c.created_by = ? OR CAST(c.professor_id AS text) = ?)",
-                id, id
+                "SELECT c.id FROM case_studies c WHERE c.created_by = ?)",
+                id
             );
             jdbcTemplate.update(
                 "DELETE FROM case_required_articles WHERE case_id IN (" +
-                "SELECT c.id FROM case_studies c WHERE c.created_by = ? OR CAST(c.professor_id AS text) = ?)",
-                id, id
+                "SELECT c.id FROM case_studies c WHERE c.created_by = ?)",
+                id
             );
             jdbcTemplate.update(
                 "DELETE FROM case_optional_articles WHERE case_id IN (" +
-                "SELECT c.id FROM case_studies c WHERE c.created_by = ? OR CAST(c.professor_id AS text) = ?)",
-                id, id
+                "SELECT c.id FROM case_studies c WHERE c.created_by = ?)",
+                id
             );
             jdbcTemplate.update(
-                "DELETE FROM case_studies WHERE created_by = ? OR CAST(professor_id AS text) = ?",
-                id, id
+                "DELETE FROM case_studies WHERE created_by = ?",
+                id
             );
-            jdbcTemplate.update("DELETE FROM professor_expertise WHERE CAST(professor_id AS text) = ?", id);
+            deleteProfessorExpertiseByUserId(jdbcTemplate, id);
 
             // --- Search/verification dependencies ---
             jdbcTemplate.update(
@@ -251,6 +272,35 @@ public class AdminServiceImpl implements AdminService {
         }
     }
 
+    private void deleteProfessorExpertiseByUserId(JdbcTemplate jdbcTemplate, String userId) {
+        List<String> candidateColumns = List.of("professor_id", "professor_user_id", "user_id");
+        String ownerColumn = candidateColumns.stream()
+            .filter(column -> hasColumn(jdbcTemplate, "professor_expertise", column))
+            .findFirst()
+            .orElse(null);
+
+        if (ownerColumn == null) {
+            log.warn("Skipping cleanup for professor_expertise: no owner column found");
+            return;
+        }
+
+        jdbcTemplate.update("DELETE FROM professor_expertise WHERE CAST(" + ownerColumn + " AS text) = ?", userId);
+    }
+
+    private boolean hasColumn(JdbcTemplate jdbcTemplate, String tableName, String columnName) {
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT COUNT(1) " +
+            "FROM information_schema.columns " +
+            "WHERE table_schema = current_schema() " +
+            "AND table_name = ? " +
+            "AND column_name = ?",
+            Integer.class,
+            tableName,
+            columnName
+        );
+        return count != null && count > 0;
+    }
+
     @Override
     public Map<String, Object> getSystemHealth() {
         Map<String, Object> health = new HashMap<>();
@@ -271,6 +321,7 @@ public class AdminServiceImpl implements AdminService {
         String status = dbConnections > 0 ? "UP" : "DEGRADED";
         health.put("status", status);
         health.put("timestamp", System.currentTimeMillis());
+        health.put("lastCheck", now.toString());
         health.put("cpu", cpu);
         health.put("memory", memory);
         health.put("disk", disk);
@@ -427,6 +478,7 @@ public class AdminServiceImpl implements AdminService {
                         if (userDTO.getLastName() != null) user.setLastName(userDTO.getLastName());
                         if (userDTO.getFaculty() != null) user.setFaculty(userDTO.getFaculty());
                         if (userDTO.getRole() != null) user.setRole(parseRole(userDTO.getRole()));
+                        if (userDTO.getActive() != null) user.setActive(Boolean.TRUE.equals(userDTO.getActive()));
                         
                         userRepository.save(user);
                         result.updated++;
@@ -439,9 +491,9 @@ public class AdminServiceImpl implements AdminService {
                         newUser.setLastName(userDTO.getLastName() != null ? userDTO.getLastName() : "");
                         newUser.setFaculty(userDTO.getFaculty());
                         newUser.setRole(userDTO.getRole() != null ? parseRole(userDTO.getRole()) : Role.ROLE_STUDENT);
-                        newUser.setActive(true);
+                        newUser.setActive(userDTO.getActive() == null || Boolean.TRUE.equals(userDTO.getActive()));
                         
-                        // Generar contraseña temporal si no está proporcionada
+                        // Generar contraseÃ±a temporal si no estÃ¡ proporcionada
                         String password = userDTO.getPasswordHash() != null && !userDTO.getPasswordHash().isEmpty() 
                             ? userDTO.getPasswordHash() 
                             : generateTemporaryPassword();
@@ -536,7 +588,7 @@ public class AdminServiceImpl implements AdminService {
             // Contar usuarios por rol
             long totalUsers = userRepository.count();
             
-            // Obtener estadísticas detalladas
+            // Obtener estadÃ­sticas detalladas
             Map<String, Long> usersByRole = new HashMap<>();
             usersByRole.put("ADMIN", countUsersByRole(Role.ROLE_ADMIN));
             usersByRole.put("PROFESSOR", countUsersByRole(Role.ROLE_PROFESSOR));
@@ -546,7 +598,7 @@ public class AdminServiceImpl implements AdminService {
             long activeUsers = userRepository.countByActive(true);
             long inactiveUsers = Math.max(0, totalUsers - activeUsers);
             
-            // Información del sistema
+            // InformaciÃ³n del sistema
             stats.put("totalUsers", totalUsers);
             stats.put("usersByRole", usersByRole);
             stats.put("activeUsers", activeUsers);
@@ -589,9 +641,27 @@ public class AdminServiceImpl implements AdminService {
     /**
      * Obtener uso de memoria del sistema
      */
+    @SuppressWarnings("deprecation")
     private Map<String, Object> getMemoryUsage() {
-        java.lang.Runtime runtime = java.lang.Runtime.getRuntime();
         Map<String, Object> memory = new HashMap<>();
+        try {
+            java.lang.management.OperatingSystemMXBean osBean = ManagementFactory.getOperatingSystemMXBean();
+            if (osBean instanceof com.sun.management.OperatingSystemMXBean) {
+                com.sun.management.OperatingSystemMXBean sunBean = (com.sun.management.OperatingSystemMXBean) osBean;
+                long totalPhysical = sunBean.getTotalPhysicalMemorySize();
+                long freePhysical = sunBean.getFreePhysicalMemorySize();
+                if (totalPhysical > 0) {
+                    memory.put("totalMemory", totalPhysical);
+                    memory.put("freeMemory", Math.max(0L, freePhysical));
+                    memory.put("usedMemory", Math.max(0L, totalPhysical - freePhysical));
+                    memory.put("maxMemory", totalPhysical);
+                    return memory;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        java.lang.Runtime runtime = java.lang.Runtime.getRuntime();
         memory.put("totalMemory", runtime.totalMemory());
         memory.put("freeMemory", runtime.freeMemory());
         memory.put("usedMemory", runtime.totalMemory() - runtime.freeMemory());
@@ -599,6 +669,7 @@ public class AdminServiceImpl implements AdminService {
         return memory;
     }
 
+    @SuppressWarnings("deprecation")
     private double getCpuUsagePercent() {
         try {
             java.lang.management.OperatingSystemMXBean osBean = ManagementFactory.getOperatingSystemMXBean();
@@ -623,16 +694,7 @@ public class AdminServiceImpl implements AdminService {
 
     private double getDiskUsagePercent() {
         try {
-            File[] roots = File.listRoots();
-            if (roots == null || roots.length == 0) {
-                return 0;
-            }
-            File selected = roots[0];
-            for (File root : roots) {
-                if (root.getTotalSpace() > selected.getTotalSpace()) {
-                    selected = root;
-                }
-            }
+            File selected = resolvePrimaryStorageRoot();
             long total = selected.getTotalSpace();
             long free = selected.getFreeSpace();
             if (total <= 0) return 0;
@@ -646,18 +708,7 @@ public class AdminServiceImpl implements AdminService {
     private Map<String, Object> getStorageInfo() {
         Map<String, Object> storage = new HashMap<>();
         try {
-            File[] roots = File.listRoots();
-            if (roots == null || roots.length == 0) {
-                storage.put("totalBytes", 0);
-                storage.put("freeBytes", 0);
-                return storage;
-            }
-            File selected = roots[0];
-            for (File root : roots) {
-                if (root.getTotalSpace() > selected.getTotalSpace()) {
-                    selected = root;
-                }
-            }
+            File selected = resolvePrimaryStorageRoot();
             storage.put("totalBytes", selected.getTotalSpace());
             storage.put("freeBytes", selected.getFreeSpace());
         } catch (Exception e) {
@@ -670,17 +721,29 @@ public class AdminServiceImpl implements AdminService {
     private int getDatabaseConnectionCount() {
         try {
             JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-            Integer count = jdbcTemplate.queryForObject("select count(*) from pg_stat_activity", Integer.class);
+            Integer count = jdbcTemplate.queryForObject(
+                "select count(*) from pg_stat_activity where datname = current_database()",
+                Integer.class
+            );
             return count != null ? count : 0;
         } catch (Exception e) {
-            return 0;
+            try {
+                JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+                Integer validation = jdbcTemplate.queryForObject("select 1", Integer.class);
+                return validation != null ? 1 : 0;
+            } catch (Exception ignored) {
+                return 0;
+            }
         }
     }
 
     private int getDatabaseMaxConnections() {
         try {
             JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-            Integer max = jdbcTemplate.queryForObject("show max_connections", Integer.class);
+            Integer max = jdbcTemplate.queryForObject(
+                "select current_setting('max_connections')::int",
+                Integer.class
+            );
             return max != null ? max : 0;
         } catch (Exception e) {
             return 0;
@@ -720,8 +783,11 @@ public class AdminServiceImpl implements AdminService {
             return redis;
         }
         try (RedisConnection connection = redisConnectionFactory.getConnection()) {
+            @SuppressWarnings("deprecation")
             Properties stats = connection.info("stats");
+            @SuppressWarnings("deprecation")
             Properties memory = connection.info("memory");
+            @SuppressWarnings("deprecation")
             Properties keyspace = connection.info("keyspace");
 
             long hits = parseLong(stats.getProperty("keyspace_hits"));
@@ -842,13 +908,35 @@ public class AdminServiceImpl implements AdminService {
         List<Map<String, Object>> services = new ArrayList<>();
         String now = LocalDateTime.now().toString();
 
-        services.add(serviceStatus("API Principal", "online", avgLatency(latency), null, now));
+        Double apiLatency = avgLatency(latency);
+        String apiStatus = "warning";
+        if (apiLatency != null) {
+            apiStatus = apiLatency >= API_LATENCY_OFFLINE_MS
+                ? "offline"
+                : apiLatency >= API_LATENCY_WARNING_MS ? "warning" : "online";
+        }
+        services.add(serviceStatus("API Principal", apiStatus, apiLatency, formatUptime(getSystemUptime()), now));
 
-        boolean dbOk = getDatabaseConnectionCount() > 0;
-        services.add(serviceStatus("Base de Datos", dbOk ? "online" : "warning", null, null, now));
+        int dbConnections = getDatabaseConnectionCount();
+        services.add(serviceStatus(
+            "Base de Datos",
+            dbConnections > 0 ? "online" : "offline",
+            null,
+            dbConnections > 0 ? "Activa" : "Sin conexion",
+            now
+        ));
 
-        boolean cacheOk = cacheManager != null;
-        services.add(serviceStatus("Cache Redis", cacheOk ? "online" : "warning", null, null, now));
+        boolean redisAvailable = isRedisAvailable();
+        String cacheStatus = redisConnectionFactory == null && cacheManager == null
+            ? "warning"
+            : redisAvailable ? "online" : "warning";
+        services.add(serviceStatus(
+            "Cache Redis",
+            cacheStatus,
+            null,
+            redisAvailable ? "Disponible" : "Sin telemetria",
+            now
+        ));
 
         boolean pubmedEnabled = true;
         try {
@@ -859,7 +947,17 @@ public class AdminServiceImpl implements AdminService {
             }
         } catch (Exception ignored) {
         }
-        services.add(serviceStatus("PubMed Gateway", pubmedEnabled ? "online" : "offline", null, null, now));
+        double usagePercent = readDouble(pubmedUsage, "percent");
+        String pubmedStatus = !pubmedEnabled
+            ? "offline"
+            : usagePercent >= PUBMED_USAGE_WARNING_PERCENT ? "warning" : "online";
+        services.add(serviceStatus(
+            "PubMed Gateway",
+            pubmedStatus,
+            null,
+            pubmedEnabled ? "Operativo" : "Deshabilitado",
+            now
+        ));
 
         boolean ragEnabled = true;
         try {
@@ -870,7 +968,13 @@ public class AdminServiceImpl implements AdminService {
             }
         } catch (Exception ignored) {
         }
-        services.add(serviceStatus("Servicio RAG", ragEnabled ? "online" : "offline", null, null, now));
+        services.add(serviceStatus(
+            "Servicio RAG",
+            ragEnabled ? "online" : "offline",
+            null,
+            ragEnabled ? "Operativo" : "Deshabilitado",
+            now
+        ));
 
         return services;
     }
@@ -889,6 +993,10 @@ public class AdminServiceImpl implements AdminService {
 
     private Double avgLatency(Map<String, Object> latency) {
         if (latency == null) return null;
+        Object p95 = latency.get("p95");
+        if (p95 instanceof Number) {
+            return ((Number) p95).doubleValue();
+        }
         Object p50 = latency.get("p50");
         if (p50 instanceof Number) {
             return ((Number) p50).doubleValue();
@@ -930,7 +1038,6 @@ public class AdminServiceImpl implements AdminService {
         Map<String, Object> activity = new HashMap<>();
         List<Map<String, Object>> userItems = new ArrayList<>();
         List<Map<String, Object>> systemItems = new ArrayList<>();
-        List<Map<String, Object>> apiItems = new ArrayList<>();
 
         Page<SystemLog> logs = systemLogRepository.findAll(
             PageRequest.of(0, 50, Sort.by(Sort.Direction.DESC, "timestamp"))
@@ -952,69 +1059,165 @@ public class AdminServiceImpl implements AdminService {
                 userItems.add(item);
             } else if (action == ActionType.BACKUP || action == ActionType.RESTORE || action == ActionType.CHANGE_SETTINGS || action == ActionType.GENERATE_REPORT) {
                 systemItems.add(item);
-            } else {
-                Map<String, Object> apiItem = new HashMap<>();
-                apiItem.put("endpoint", log.getEndpoint() != null ? log.getEndpoint() : "API");
-                apiItem.put("calls", 1);
-                apiItem.put("status", log.getResponseStatus() != null && log.getResponseStatus() >= 400 ? "WARN" : "OK");
-                apiItems.add(apiItem);
             }
 
-            if (userItems.size() >= 6 && systemItems.size() >= 6 && apiItems.size() >= 6) {
+            if (userItems.size() >= 6 && systemItems.size() >= 6) {
                 break;
             }
         }
 
         activity.put("users", userItems);
         activity.put("system", systemItems);
-        activity.put("api", aggregateApiUsage(apiItems));
+        activity.put("api", buildApiUsageToday());
         return activity;
     }
 
-    private List<Map<String, Object>> aggregateApiUsage(List<Map<String, Object>> raw) {
-        Map<String, Map<String, Object>> grouped = new LinkedHashMap<>();
-        for (Map<String, Object> item : raw) {
-            String endpoint = String.valueOf(item.getOrDefault("endpoint", "API"));
-            Map<String, Object> existing = grouped.computeIfAbsent(endpoint, (key) -> {
-                Map<String, Object> map = new HashMap<>();
-                map.put("endpoint", key);
-                map.put("calls", 0);
-                map.put("status", "OK");
-                return map;
-            });
-            int calls = ((Number) existing.get("calls")).intValue();
-            existing.put("calls", calls + 1);
-            String status = String.valueOf(item.getOrDefault("status", "OK"));
-            if ("WARN".equals(status)) {
-                existing.put("status", "WARN");
+    private List<Map<String, Object>> buildApiUsageToday() {
+        try {
+            LocalDateTime startToday = LocalDateTime.now().toLocalDate().atStartOfDay();
+            List<Object[]> rows = systemLogRepository.summarizeEndpointUsageSince(
+                startToday,
+                PageRequest.of(0, 6)
+            );
+            List<Map<String, Object>> items = new ArrayList<>();
+            for (Object[] row : rows) {
+                if (row == null || row.length < 3) {
+                    continue;
+                }
+                Map<String, Object> item = new HashMap<>();
+                item.put("endpoint", row[0] != null ? row[0].toString() : "API");
+                item.put("calls", row[1] instanceof Number ? ((Number) row[1]).longValue() : 0L);
+                int hasWarnings = row[2] instanceof Number ? ((Number) row[2]).intValue() : 0;
+                item.put("status", hasWarnings > 0 ? "WARN" : "OK");
+                items.add(item);
             }
+            return items;
+        } catch (Exception ex) {
+            log.warn("Could not build API usage activity: {}", ex.getMessage());
+            return List.of();
         }
-        return new ArrayList<>(grouped.values());
+    }
+
+    private File resolvePrimaryStorageRoot() {
+        File workDir = new File(System.getProperty("user.dir", ".")).getAbsoluteFile();
+        File current = workDir;
+        while (current.getParentFile() != null) {
+            current = current.getParentFile();
+        }
+        if (current.getTotalSpace() > 0) {
+            return current;
+        }
+        File[] roots = File.listRoots();
+        if (roots != null && roots.length > 0) {
+            return roots[0];
+        }
+        return workDir;
+    }
+
+    private boolean isRedisAvailable() {
+        if (redisConnectionFactory == null) {
+            return false;
+        }
+        try (RedisConnection connection = redisConnectionFactory.getConnection()) {
+            return connection != null && !connection.isClosed();
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    private String formatUptime(long uptimeMs) {
+        if (uptimeMs <= 0) {
+            return null;
+        }
+        long totalSeconds = uptimeMs / 1000L;
+        long days = totalSeconds / 86400L;
+        long hours = (totalSeconds % 86400L) / 3600L;
+        long minutes = (totalSeconds % 3600L) / 60L;
+        if (days > 0) {
+            return days + "d " + hours + "h";
+        }
+        if (hours > 0) {
+            return hours + "h " + minutes + "m";
+        }
+        return Math.max(1L, minutes) + "m";
+    }
+
+    private double readDouble(Map<String, Object> values, String key) {
+        if (values == null || key == null) {
+            return 0d;
+        }
+        Object value = values.get(key);
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        if (value == null) {
+            return 0d;
+        }
+        try {
+            return Double.parseDouble(value.toString());
+        } catch (NumberFormatException ex) {
+            return 0d;
+        }
     }
 
     private Map<String, String> resolveUserNames(List<SystemLog> logs) {
-        Set<String> ids = logs.stream()
+        Set<String> identifiers = logs.stream()
             .map(SystemLog::getUserId)
             .filter(Objects::nonNull)
+            .map(String::trim)
+            .filter(value -> !value.isBlank())
             .collect(Collectors.toSet());
-        if (ids.isEmpty()) return Map.of();
+        if (identifiers.isEmpty()) return Map.of();
+
         Map<String, String> names = new HashMap<>();
-        userRepository.findAllById(ids).forEach(user -> {
-            String name = String.format("%s %s",
-                Optional.ofNullable(user.getFirstName()).orElse(""),
-                Optional.ofNullable(user.getLastName()).orElse("")).trim();
-            names.put(user.getId(), name.isBlank() ? user.getEmail() : name);
+        Set<String> uuidIds = identifiers.stream()
+            .filter(this::isUuid)
+            .collect(Collectors.toSet());
+
+        userRepository.findAllById(uuidIds).forEach(user -> {
+            String displayName = toDisplayName(user);
+            names.put(user.getId(), displayName);
+            if (user.getEmail() != null && !user.getEmail().isBlank()) {
+                names.putIfAbsent(user.getEmail(), displayName);
+            }
+            if (user.getUsername() != null && !user.getUsername().isBlank()) {
+                names.putIfAbsent(user.getUsername(), displayName);
+            }
         });
+
+        identifiers.stream()
+            .filter(identifier -> !names.containsKey(identifier))
+            .forEach(identifier -> userRepository.findByEmail(identifier)
+                .or(() -> userRepository.findByUsername(identifier))
+                .ifPresent(user -> names.put(identifier, toDisplayName(user))));
+
         return names;
+    }
+
+    private boolean isUuid(String value) {
+        try {
+            UUID.fromString(value);
+            return true;
+        } catch (IllegalArgumentException ex) {
+            return false;
+        }
+    }
+
+    private String toDisplayName(User user) {
+        String displayName = String.format("%s %s",
+            Optional.ofNullable(user.getFirstName()).orElse(""),
+            Optional.ofNullable(user.getLastName()).orElse("")).trim();
+        return displayName.isBlank() ? user.getEmail() : displayName;
     }
 
     private List<Map<String, Object>> buildScheduledTasks() {
         List<Map<String, Object>> tasks = new ArrayList<>();
-        tasks.add(schedule("Backup diario", "Todos los días a las 22:00", "active"));
-        tasks.add(schedule("Limpieza de caché", "Cada 6 horas", "active"));
-        tasks.add(schedule("Sincronización MeSH", "Cada domingo a las 03:00", "active"));
+        tasks.add(schedule("Backup diario", "Todos los dias a las 22:00", "active"));
+        tasks.add(schedule("Limpieza de cache", "Cada 6 horas", "active"));
+        tasks.add(schedule("Sincronizacion MeSH", "Cada domingo a las 03:00", "active"));
         tasks.add(schedule("Reporte semanal", "Cada lunes a las 08:00", "active"));
-        tasks.add(schedule("Verificación de integridad", "Cada día a las 04:00", "active"));
+        tasks.add(schedule("Verificacion de integridad", "Cada dia a las 04:00", "active"));
+        tasks.add(schedule("Analisis IA de errores", "Cada 1 minuto", "active"));
         return tasks;
     }
 
@@ -1099,7 +1302,7 @@ public class AdminServiceImpl implements AdminService {
      */
     private void executeBackup(String backupId, AdminService.BackupStatus backupStatus) {
         try {
-            // Simular exportación de datos
+            // Simular exportaciÃ³n de datos
             Thread.sleep(1000); // Simular tiempo de procesamiento
             
             // Actualizar progreso
@@ -1109,7 +1312,7 @@ public class AdminServiceImpl implements AdminService {
             Thread.sleep(500);
             backupStatus.progress = 50;
 
-            // Simular export de datos adicionales si está incluido
+            // Simular export de datos adicionales si estÃ¡ incluido
             if (backupStatus.includeLogs) {
                 Thread.sleep(500);
                 backupStatus.progress = 75;
@@ -1131,12 +1334,12 @@ public class AdminServiceImpl implements AdminService {
     }
     
     /**
-     * Estimar tamaño de backup
+     * Estimar tamaÃ±o de backup
      */
     private long estimateBackupSize() {
         try {
             long userCount = userRepository.count();
-            return userCount * 1024; // Estimación aproximada: 1KB por usuario
+            return userCount * 1024; // EstimaciÃ³n aproximada: 1KB por usuario
         } catch (Exception e) {
             return 0;
         }
@@ -1180,11 +1383,11 @@ public class AdminServiceImpl implements AdminService {
                 throw new RuntimeException("Backup is not ready for restore, status: " + backupStatus.status);
             }
 
-            // Marcar como en restauración
+            // Marcar como en restauraciÃ³n
             backupStatus.status = "RESTORING";
             backupStatus.progress = 0;
             
-            // Ejecutar restauración en thread separado
+            // Ejecutar restauraciÃ³n en thread separado
             new Thread(() -> {
                 try {
                     executeRestore(backupId, backupStatus);
@@ -1204,23 +1407,23 @@ public class AdminServiceImpl implements AdminService {
     }
     
     /**
-     * Ejecutar proceso de restauración de datos
+     * Ejecutar proceso de restauraciÃ³n de datos
      */
     private void executeRestore(String backupId, BackupStatus backupStatus) {
         try {
-            // Simular tiempo de restauración
+            // Simular tiempo de restauraciÃ³n
             Thread.sleep(1000);
             backupStatus.progress = 25;
 
-            // Simular restauración de usuarios
+            // Simular restauraciÃ³n de usuarios
             Thread.sleep(500);
             backupStatus.progress = 50;
 
-            // Simular restauración de datos adicionales
+            // Simular restauraciÃ³n de datos adicionales
             Thread.sleep(500);
             backupStatus.progress = 75;
 
-            // Simular validación
+            // Simular validaciÃ³n
             Thread.sleep(250);
             backupStatus.progress = 100;
             backupStatus.status = "RESTORED";
@@ -1241,7 +1444,7 @@ public class AdminServiceImpl implements AdminService {
         log.debug("Fetching system configuration");
         
         try {
-            // Si existe configuración guardada, retornarla
+            // Si existe configuraciÃ³n guardada, retornarla
             if (!configRegistry.isEmpty()) {
                 return configRegistry.values().stream().findFirst().orElse(buildDefaultConfig());
             }
@@ -1260,39 +1463,53 @@ public class AdminServiceImpl implements AdminService {
     }
     
     /**
-     * Construir configuración por defecto del sistema
+     * Construir configuraciÃ³n por defecto del sistema
      */
     private static SystemConfiguration buildDefaultConfig() {
         SystemConfiguration config = new SystemConfiguration();
         
-        // Configuración PubMed
+        // ConfiguraciÃ³n PubMed
         Map<String, Object> pubmedConfig = new HashMap<>();
         pubmedConfig.put("apiKey", "");
         pubmedConfig.put("baseUrl", "https://pubmed.ncbi.nlm.nih.gov");
         pubmedConfig.put("enabled", true);
         pubmedConfig.put("cacheEnabled", true);
         pubmedConfig.put("cacheTTL", 3600);
+        pubmedConfig.put("rateLimitPerDay", 10000);
         config.pubmed = pubmedConfig;
         
-        // Configuración RAG (Retrieval Augmented Generation)
+        // ConfiguraciÃ³n RAG (Retrieval Augmented Generation)
         Map<String, Object> ragConfig = new HashMap<>();
         ragConfig.put("enabled", true);
-        ragConfig.put("modelProvider", "openai");
+        ragConfig.put("modelProvider", "gemini");
         ragConfig.put("temperature", 0.7);
+        ragConfig.put("topP", 0.9);
         ragConfig.put("maxTokens", 2000);
+        ragConfig.put("contextWindow", 4096);
         ragConfig.put("embeddingModel", "text-embedding-ada-002");
         config.rag = ragConfig;
         
-        // Configuración Pedagógica
+        // ConfiguraciÃ³n PedagÃ³gica
         Map<String, Object> pedagConfig = new HashMap<>();
         pedagConfig.put("competencyFramework", "SCONUL");
         pedagConfig.put("badgesEnabled", true);
         pedagConfig.put("alertsEnabled", true);
         pedagConfig.put("recommendationsEnabled", true);
         pedagConfig.put("hedgesEnabled", true);
+        pedagConfig.put("competencyThresholds", Map.of(
+            "access", 70,
+            "process", 75,
+            "communicate", 80
+        ));
+        pedagConfig.put("feedbackMessages", Map.of(
+            "excellent", "Excelente desempeño",
+            "good", "Buen trabajo",
+            "fair", "Necesitas mejorar",
+            "poor", "Requiere atención"
+        ));
         config.pedagogical = pedagConfig;
         
-        // Configuración de Seguridad
+        // ConfiguraciÃ³n de Seguridad
         Map<String, Object> securityConfig = new HashMap<>();
         securityConfig.put("passwordMinLength", 8);
         securityConfig.put("passwordRequireNumbers", true);
@@ -1311,12 +1528,12 @@ public class AdminServiceImpl implements AdminService {
         log.info("Updating system configuration");
         
         try {
-            // Validar configuración no nula
+            // Validar configuraciÃ³n no nula
             if (config == null) {
                 throw new IllegalArgumentException("Configuration cannot be null");
             }
             
-            // Validar secciones de configuración
+            // Validar secciones de configuraciÃ³n
             if (config.pubmed == null) {
                 config.pubmed = new HashMap<>();
             }
@@ -1330,19 +1547,19 @@ public class AdminServiceImpl implements AdminService {
                 config.security = new HashMap<>();
             }
             
-            // Validaciones específicas de seguridad
-            Integer minLength = (Integer) config.security.getOrDefault("passwordMinLength", 8);
+            // Validaciones especÃ­ficas de seguridad
+            Integer minLength = parseInteger(config.security.getOrDefault("passwordMinLength", 8), 8);
             if (minLength < 6) {
                 log.warn("Password minimum length too short, resetting to 6");
                 config.security.put("passwordMinLength", 6);
             }
             
-            Integer timeout = (Integer) config.security.getOrDefault("sessionTimeoutMinutes", 30);
+            Integer timeout = parseInteger(config.security.getOrDefault("sessionTimeoutMinutes", 30), 30);
             if (timeout < 1) {
                 throw new IllegalArgumentException("Session timeout must be at least 1 minute");
             }
             
-            // Guardar configuración
+            // Guardar configuraciÃ³n
             configRegistry.clear();
             configRegistry.put("DEFAULT", config);
             
@@ -1392,10 +1609,10 @@ public class AdminServiceImpl implements AdminService {
     }
 
     /**
-     * Genera una contraseña temporal aleatoria
+     * Genera una contraseÃ±a temporal aleatoria
      */
     private String generateTemporaryPassword() {
-        // Generar contraseña de 8 caracteres con letras y números
+        // Generar contraseÃ±a de 8 caracteres con letras y nÃºmeros
         String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < 8; i++) {
@@ -1403,6 +1620,20 @@ public class AdminServiceImpl implements AdminService {
             sb.append(chars.charAt(index));
         }
         return sb.toString();
+    }
+
+    private Integer parseInteger(Object value, int fallback) {
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        if (value == null) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(value.toString().trim());
+        } catch (NumberFormatException ex) {
+            return fallback;
+        }
     }
 
     private boolean isBcryptHash(String value) {
@@ -1427,6 +1658,17 @@ public class AdminServiceImpl implements AdminService {
             suffix++;
         }
         return candidate;
+    }
+
+    private String normalizeEmail(String email) {
+        if (email == null) {
+            throw new IllegalArgumentException("Email cannot be null");
+        }
+        String normalized = email.trim().toLowerCase();
+        if (normalized.isBlank() || !normalized.contains("@")) {
+            throw new IllegalArgumentException("Invalid email: " + email);
+        }
+        return normalized;
     }
 
     // ======================== ALERTS MANAGEMENT ========================
@@ -1503,7 +1745,7 @@ public class AdminServiceImpl implements AdminService {
     @Transactional
     public void deleteAlert(String alertId) {
         log.info("Deleting alert: {}", alertId);
-        // Implementación para eliminar alerta de BD
+        // ImplementaciÃ³n para eliminar alerta de BD
     }
 
     // ======================== PUBMED CONNECTION ========================
@@ -1610,7 +1852,7 @@ public class AdminServiceImpl implements AdminService {
 
         HttpURLConnection connection = null;
         try {
-            URL url = new URL(requestUrl);
+            URL url = new URI(requestUrl).toURL();
             connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(5000);
@@ -1730,7 +1972,13 @@ public class AdminServiceImpl implements AdminService {
         if (queryText == null) {
             return "evidence based medicine";
         }
-        String normalized = queryText.trim().replaceAll("\\s+", " ");
+        String normalized = queryText
+            .replaceAll("[\\u0000-\\u001f]+", " ")
+            .trim()
+            .replaceAll("\\s+", " ");
+        if (normalized.length() > 180) {
+            normalized = normalized.substring(0, 180);
+        }
         return normalized.isEmpty() ? "evidence based medicine" : normalized;
     }
 
@@ -1811,6 +2059,40 @@ public class AdminServiceImpl implements AdminService {
         return export;
     }
 
+    @Override
+    public Map<String, Object> getErrorMonitoringOverview(int windowMinutes, int limit) {
+        return systemErrorInsightService.getMonitoringOverview(windowMinutes, limit);
+    }
+
+    @Override
+    public Map<String, Object> analyzeRecentErrors(int windowMinutes, int limit) {
+        return systemErrorInsightService.analyzeRecentErrors(windowMinutes, limit);
+    }
+
+    @Override
+    public Map<String, Object> analyzeTestingLogs(Map<String, Object> payload) {
+        Map<String, Object> summary = extractTestingSummary(payload);
+        String prompt = buildTestingAiPrompt(payload, summary);
+        LocalDateTime now = LocalDateTime.now();
+
+        try {
+            String raw = openAIService.generateText(prompt, true);
+            Map<String, Object> parsed = parseTestingAiResponse(raw);
+            if (parsed != null) {
+                parsed.put("generatedAt", now.toString());
+                parsed.putIfAbsent("summary", buildFallbackSummaryText(summary));
+                parsed.putIfAbsent("confidence", 0.55d);
+                return parsed;
+            }
+        } catch (Exception ex) {
+            log.warn("AI testing analysis failed: {}", ex.getMessage());
+        }
+
+        Map<String, Object> fallback = buildFallbackTestingAnalysis(summary);
+        fallback.put("generatedAt", now.toString());
+        return fallback;
+    }
+
     // ======================== MAINTENANCE ========================
 
     @Override
@@ -1839,5 +2121,157 @@ public class AdminServiceImpl implements AdminService {
             log.error("Error cleaning logs: {}", e.getMessage());
             throw e;
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> extractTestingSummary(Map<String, Object> payload) {
+        Object summaryObj = payload != null ? payload.get("summary") : null;
+        Map<String, Object> summary = summaryObj instanceof Map ? new HashMap<>((Map<String, Object>) summaryObj) : new HashMap<>();
+        int total = toInt(summary.get("total"), 0);
+        int passed = toInt(summary.get("passed"), 0);
+        int failed = toInt(summary.get("failed"), 0);
+        int skipped = toInt(summary.get("skipped"), 0);
+        summary.put("total", Math.max(0, total));
+        summary.put("passed", Math.max(0, passed));
+        summary.put("failed", Math.max(0, failed));
+        summary.put("skipped", Math.max(0, skipped));
+        return summary;
+    }
+
+    private String buildTestingAiPrompt(Map<String, Object> payload, Map<String, Object> summary) {
+        String jsonPayload = safeJson(payload, 7500);
+        String summaryText = buildFallbackSummaryText(summary);
+        StringBuilder builder = new StringBuilder();
+        builder.append("Analiza resultados de pruebas de software XP y devuelve JSON valido sin markdown.\n");
+        builder.append("Formato exacto:\n");
+        builder.append("{\"summary\":\"...\",\"strengths\":[\"...\"],\"gaps\":[\"...\"],\"improvements\":[\"...\"],");
+        builder.append("\"risks\":[\"...\"],\"nextActions\":[\"...\"],\"confidence\":0.0}\n");
+        builder.append("Resumen actual: ").append(summaryText).append("\n");
+        builder.append("Contexto JSON (logs y plan): ").append(jsonPayload).append("\n");
+        builder.append("Condiciones:\n");
+        builder.append("1) Responde en espanol tecnico y accionable.\n");
+        builder.append("2) Prioriza recomendaciones para pruebas automatizadas primero.\n");
+        builder.append("3) Identifica brechas por suite y casos pendientes.\n");
+        builder.append("4) No incluyas texto fuera del JSON.\n");
+        return builder.toString();
+    }
+
+    private Map<String, Object> parseTestingAiResponse(String raw) {
+        if (!hasText(raw)) return null;
+        String json = extractFirstJsonObject(raw);
+        if (!hasText(json)) return null;
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("summary", trimToLength(node.path("summary").asText(""), 1800));
+            result.put("strengths", readStringArray(node.path("strengths"), 12));
+            result.put("gaps", readStringArray(node.path("gaps"), 12));
+            result.put("improvements", readStringArray(node.path("improvements"), 12));
+            result.put("risks", readStringArray(node.path("risks"), 10));
+            result.put("nextActions", readStringArray(node.path("nextActions"), 10));
+            double confidence = node.path("confidence").asDouble(0.6d);
+            confidence = Math.max(0d, Math.min(1d, confidence));
+            result.put("confidence", confidence);
+            return result;
+        } catch (Exception ex) {
+            log.debug("Could not parse AI testing JSON response: {}", ex.getMessage());
+            return null;
+        }
+    }
+
+    private Map<String, Object> buildFallbackTestingAnalysis(Map<String, Object> summary) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("summary", buildFallbackSummaryText(summary));
+        response.put("strengths", List.of("Existe una base de pruebas unitarias y evidencias en el panel."));
+        response.put("gaps", List.of("Brechas en integracion, E2E, resiliencia, seguridad y rendimiento."));
+        response.put("improvements", List.of(
+            "Automatizar suites B1-B8 y ampliar cobertura de API.",
+            "Agregar casos E2E por rol y flujos criticos.",
+            "Definir objetivos de rendimiento y medirlos en CI."
+        ));
+        response.put("risks", List.of(
+            "Cobertura incompleta puede ocultar fallos en produccion.",
+            "Faltan evidencias automatizadas de resiliencia y seguridad."
+        ));
+        response.put("nextActions", List.of(
+            "Priorizar ejecucion de pruebas criticas (auth, search, verify).",
+            "Registrar evidencia manual de las suites pendientes.",
+            "Preparar entorno para ejecutar E2E en CI."
+        ));
+        response.put("confidence", 0.45d);
+        return response;
+    }
+
+    private String buildFallbackSummaryText(Map<String, Object> summary) {
+        int total = toInt(summary.get("total"), 0);
+        int passed = toInt(summary.get("passed"), 0);
+        int failed = toInt(summary.get("failed"), 0);
+        int skipped = toInt(summary.get("skipped"), 0);
+        return String.format(
+            Locale.US,
+            "Total %d pruebas. Pasaron %d, fallaron %d, pendientes %d.",
+            total,
+            passed,
+            failed,
+            skipped
+        );
+    }
+
+    private String safeJson(Object payload, int maxLen) {
+        try {
+            String json = objectMapper.writeValueAsString(payload);
+            if (json.length() <= maxLen) return json;
+            return json.substring(0, maxLen) + "...";
+        } catch (Exception ex) {
+            return "";
+        }
+    }
+
+    private List<String> readStringArray(JsonNode node, int max) {
+        if (node == null || !node.isArray()) return List.of();
+        List<String> values = new ArrayList<>();
+        for (JsonNode item : node) {
+            if (values.size() >= max) break;
+            String value = trimToLength(item.asText(""), 420);
+            if (hasText(value)) values.add(value);
+        }
+        return values;
+    }
+
+    private String extractFirstJsonObject(String raw) {
+        int start = raw.indexOf('{');
+        if (start < 0) return null;
+        int depth = 0;
+        for (int i = start; i < raw.length(); i++) {
+            char ch = raw.charAt(i);
+            if (ch == '{') depth++;
+            if (ch == '}') depth--;
+            if (depth == 0) {
+                return raw.substring(start, i + 1);
+            }
+        }
+        return null;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private String trimToLength(String value, int max) {
+        if (value == null) return "";
+        if (value.length() <= max) return value.trim();
+        return value.substring(0, max).trim();
+    }
+
+    private int toInt(Object value, int fallback) {
+        if (value instanceof Number) return ((Number) value).intValue();
+        if (value instanceof String) {
+            try {
+                return Integer.parseInt(((String) value).trim());
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
     }
 }

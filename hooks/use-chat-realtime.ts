@@ -36,7 +36,12 @@ function resolveWsUrl(): string | null {
 
   if (apiUrl && apiUrl.startsWith('/api') && typeof window !== 'undefined') {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    return `${protocol}//${window.location.hostname}:8080/ws-native`
+    const hostname = window.location.hostname
+    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1'
+    if (isLocalhost) {
+      return `${protocol}//${hostname}:8080/ws-native`
+    }
+    return `${protocol}//${window.location.host}/ws-native`
   }
 
   if (typeof window !== 'undefined') {

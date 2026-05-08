@@ -1,22 +1,22 @@
 package com.uci.competencia.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.uci.competencia.model.dto.request.ExternalHealthSearchRequestDTO;
 import com.uci.competencia.model.dto.request.SearchRequestDTO;
+import com.uci.competencia.model.dto.response.ExternalHealthSearchResponseDTO;
 import com.uci.competencia.model.dto.response.SearchResponseDTO;
 import com.uci.competencia.model.entity.SearchResult;
 import com.uci.competencia.model.entity.SearchSession;
-import com.uci.competencia.model.entity.User;
 import com.uci.competencia.repository.SearchSessionRepository;
 import com.uci.competencia.repository.SearchResultRepository;
-import com.uci.competencia.repository.UserRepository;
+import com.uci.competencia.security.UserIdentityResolver;
 import com.uci.competencia.service.SearchService;
+import com.uci.competencia.service.external.HealthSearchProxyService;
 import com.uci.competencia.service.external.PubMedApiService;
 import com.uci.competencia.util.EvidenceLevelMapper;
 import com.uci.competencia.util.PubMedQueryBuilder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -24,7 +24,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -34,33 +33,44 @@ public class SearchServiceImpl implements SearchService {
 
     private final SearchSessionRepository searchSessionRepository;
     private final SearchResultRepository searchResultRepository;
-    private final UserRepository userRepository;
+    private final UserIdentityResolver userIdentityResolver;
     private final ObjectMapper objectMapper;
     private final PubMedApiService pubMedApiService;
     private final PubMedQueryBuilder pubMedQueryBuilder;
+    private final HealthSearchProxyService healthSearchProxyService;
 
     public SearchServiceImpl(
         SearchSessionRepository searchSessionRepository,
         SearchResultRepository searchResultRepository,
-        UserRepository userRepository,
+        UserIdentityResolver userIdentityResolver,
         ObjectMapper objectMapper,
         PubMedApiService pubMedApiService,
-        PubMedQueryBuilder pubMedQueryBuilder
+        PubMedQueryBuilder pubMedQueryBuilder,
+        HealthSearchProxyService healthSearchProxyService
     ) {
         this.searchSessionRepository = searchSessionRepository;
         this.searchResultRepository = searchResultRepository;
-        this.userRepository = userRepository;
+        this.userIdentityResolver = userIdentityResolver;
         this.objectMapper = objectMapper;
         this.pubMedApiService = pubMedApiService;
         this.pubMedQueryBuilder = pubMedQueryBuilder;
+        this.healthSearchProxyService = healthSearchProxyService;
     }
 
     @Override
     public SearchResponseDTO executeSearch(SearchRequestDTO request) {
+        return executeSearch(request, true);
+    }
+
+    @Override
+    public SearchResponseDTO executeSearch(SearchRequestDTO request, boolean persistSession) {
+        long startedAt = System.currentTimeMillis();
         log.info("Executing search with terms: {}", request.getQuery().getTerms());
 
         SearchResponseDTO response = new SearchResponseDTO();
         response.setSearchId(null);
+        List<String> warnings = new ArrayList<>();
+        boolean fallbackUsed = false;
 
         List<SearchResponseDTO.SearchResultDTO> results = executePubMedSearch(request);
         if (results.isEmpty()) {
@@ -68,12 +78,25 @@ public class SearchServiceImpl implements SearchService {
             for (SearchResult result : localResults) {
                 results.add(mapToResultDTO(result));
             }
+            if (!localResults.isEmpty()) {
+                fallbackUsed = true;
+                warnings.add("Se usaron resultados locales por ausencia de resultados directos en PubMed.");
+            }
+        }
+        if (results.isEmpty()) {
+            results.addAll(executeExternalFallbackSearch(request));
+            if (!results.isEmpty()) {
+                fallbackUsed = true;
+                warnings.add("Se activaron proveedores externos de respaldo para completar la busqueda.");
+            }
         }
         response.setResults(results);
         
         SearchResponseDTO.SearchMetadataDTO metadata = new SearchResponseDTO.SearchMetadataDTO();
         metadata.setTotalResults(results.size());
-        metadata.setSearchTime("0ms");
+        metadata.setSearchTime((System.currentTimeMillis() - startedAt) + "ms");
+        metadata.setFallbackUsed(fallbackUsed);
+        metadata.setWarnings(warnings.isEmpty() ? null : warnings);
         response.setMetadata(metadata);
 
         Integer minSampleSize = request.getFilters() != null ? request.getFilters().getMinSampleSize() : null;
@@ -88,7 +111,11 @@ public class SearchServiceImpl implements SearchService {
             }
         }
 
-        persistSearchSession(request, response);
+        if (persistSession) {
+            persistSearchSession(request, response);
+        } else if (request != null && request.getContext() != null && request.getContext().getSessionId() != null) {
+            response.setSearchId(request.getContext().getSessionId());
+        }
 
         return response;
     }
@@ -167,6 +194,47 @@ public class SearchServiceImpl implements SearchService {
             }
         }
         return results;
+    }
+
+    private List<SearchResponseDTO.SearchResultDTO> executeExternalFallbackSearch(SearchRequestDTO request) {
+        try {
+            String queryText = buildOriginalQuery(request);
+            if (queryText.isBlank()) {
+                return List.of();
+            }
+
+            ExternalHealthSearchRequestDTO fallbackRequest = new ExternalHealthSearchRequestDTO();
+            fallbackRequest.setQueryText(queryText);
+            if (request.getQuery() != null) {
+                fallbackRequest.setTerms(request.getQuery().getTerms());
+            }
+            if (request.getFilters() != null) {
+                fallbackRequest.setYearFrom(request.getFilters().getYearFrom());
+                fallbackRequest.setYearTo(request.getFilters().getYearTo());
+                fallbackRequest.setStudyTypes(request.getFilters().getStudyTypes());
+                fallbackRequest.setLanguage(request.getFilters().getLanguage());
+                fallbackRequest.setHasFullText(request.getFilters().getHasFullText());
+                fallbackRequest.setMinSampleSize(request.getFilters().getMinSampleSize());
+                fallbackRequest.setMaxResults(request.getFilters().getMaxResults());
+            }
+
+            int maxResults = fallbackRequest.getMaxResults() != null
+                ? Math.max(4, Math.min(30, fallbackRequest.getMaxResults()))
+                : 12;
+
+            ExternalHealthSearchResponseDTO fallbackResponse =
+                healthSearchProxyService.search(queryText, maxResults, fallbackRequest);
+            if (fallbackResponse == null || fallbackResponse.getResults() == null || fallbackResponse.getResults().isEmpty()) {
+                return List.of();
+            }
+
+            return fallbackResponse.getResults().stream()
+                .map(this::mapExternalResultToSearchResultDTO)
+                .toList();
+        } catch (Exception ex) {
+            log.warn("Error executing external fallback search", ex);
+            return List.of();
+        }
     }
 
     private boolean matchesQuery(SearchResult result, List<String> terms, List<String> operators) {
@@ -314,6 +382,27 @@ public class SearchServiceImpl implements SearchService {
         return dto;
     }
 
+    private SearchResponseDTO.SearchResultDTO mapExternalResultToSearchResultDTO(
+        ExternalHealthSearchResponseDTO.ExternalHealthResultDTO result
+    ) {
+        SearchResponseDTO.SearchResultDTO dto = new SearchResponseDTO.SearchResultDTO();
+        dto.setId(result.getId());
+        dto.setPmid(result.getPmid());
+        dto.setTitle(result.getTitle());
+        dto.setAbstractText(result.getAbstractText());
+        dto.setAuthors(result.getAuthors() != null ? result.getAuthors() : List.of());
+        dto.setJournal(result.getJournal());
+        dto.setYear(result.getYear() != null ? result.getYear() : LocalDate.now().getYear());
+        dto.setStudyType(result.getStudyType() != null ? result.getStudyType() : "unknown");
+        dto.setEvidenceLevel(result.getEvidenceLevel());
+        dto.setSampleSize(result.getSampleSize());
+        dto.setHasConflictOfInterest(result.getHasConflictOfInterest() != null ? result.getHasConflictOfInterest() : false);
+        dto.setDoi(result.getDoi());
+        dto.setFullTextUrl(result.getSourceUrl());
+        dto.setMeshTerms(List.of());
+        return dto;
+    }
+
     private Integer extractSampleSize(String abstractText) {
         if (abstractText == null || abstractText.isBlank()) {
             return null;
@@ -372,10 +461,7 @@ public class SearchServiceImpl implements SearchService {
             session.setIsPractice(request.getContext() != null && Boolean.TRUE.equals(request.getContext().getIsPractice()));
             session.setFiltersApplied(objectMapper.writeValueAsString(request));
 
-            String userIdentifier = getCurrentUserIdentifier();
-            if (userIdentifier != null && !userIdentifier.isBlank()) {
-                findUserByIdentifier(userIdentifier).ifPresent(session::setUser);
-            }
+            userIdentityResolver.resolveCurrentUser().ifPresent(session::setUser);
 
             SearchSession saved = searchSessionRepository.save(session);
             response.setSearchId(saved.getId());
@@ -394,34 +480,4 @@ public class SearchServiceImpl implements SearchService {
         return String.join(" ", request.getQuery().getTerms());
     }
 
-    private String getCurrentUserIdentifier() {
-        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        if (principal instanceof UserDetails) {
-            return ((UserDetails) principal).getUsername();
-        }
-        return principal != null ? principal.toString() : null;
-    }
-
-    private Optional<User> findUserByIdentifier(String identifier) {
-        if (identifier == null || identifier.isBlank()) {
-            return Optional.empty();
-        }
-
-        String normalized = identifier.trim();
-        try {
-            Optional<User> byId = userRepository.findById(normalized);
-            if (byId.isPresent()) {
-                return byId;
-            }
-        } catch (Exception e) {
-            log.debug("Identifier {} is not a direct user ID", normalized);
-        }
-
-        Optional<User> byEmail = userRepository.findByEmail(normalized);
-        if (byEmail.isPresent()) {
-            return byEmail;
-        }
-
-        return userRepository.findByUsername(normalized);
-    }
 }

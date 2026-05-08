@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useCallback, useEffect } from "react"
+import { useMemo, useState, useCallback, useEffect, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { EvidencePyramid } from "@/components/evidence-pyramid"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -23,6 +23,23 @@ type StudyBlock = {
   journal: string
   studyType?: string
   doi?: string
+}
+
+type PyramidResponseLevel = {
+  level: number
+  studies: Array<{
+    id: string
+    pmid?: string
+    title: string
+    year?: number
+    sampleSize?: number
+    evidenceLevel?: number
+    hasConflictOfInterest?: boolean
+    authors?: string[]
+    journal?: string
+    studyType?: string
+    doi?: string
+  }>
 }
 
 function mapToSearchResult(study: StudyBlock): SearchResult {
@@ -54,12 +71,14 @@ function mapToSearchResult(study: StudyBlock): SearchResult {
 export default function EvidencePyramidPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const searchId = (searchParams.get("searchId") ?? "").trim()
   const [selectedLevel, setSelectedLevel] = useState<number | null>(null)
   const [selectedStudies, setSelectedStudies] = useState<string[]>([])
   const [query, setQuery] = useState("")
   const [studies, setStudies] = useState<StudyBlock[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const lastAutoQueryRef = useRef<string | null>(null)
 
   const inferEvidenceLevel = useCallback((studyType?: string) => {
     if (!studyType) return 6
@@ -88,14 +107,34 @@ export default function EvidencePyramidPage() {
     }))
   }, [inferEvidenceLevel])
 
-  const runSearch = useCallback(async (term?: string) => {
-    const searchTerm = (term ?? query).trim()
+  const mapPyramidStudies = useCallback((levels: PyramidResponseLevel[]) => {
+    return levels.flatMap((level) =>
+      level.studies.map((study) => ({
+        id: study.id,
+        pmid: study.pmid,
+        title: study.title,
+        year: study.year ?? new Date().getFullYear(),
+        sampleSize: study.sampleSize ?? 0,
+        level: study.evidenceLevel ?? level.level,
+        hasConflictsOfInterest: study.hasConflictOfInterest ?? false,
+        authors: Array.isArray(study.authors) ? study.authors : [],
+        journal: study.journal ?? "",
+        studyType: study.studyType,
+        doi: study.doi,
+      }))
+    )
+  }, [])
+
+  const runSearch = useCallback(async (term: string) => {
+    const searchTerm = term.trim()
     if (!searchTerm) {
       setError("Ingresa un tema para buscar evidencia.")
       return
     }
+
     setIsSearching(true)
     setError(null)
+
     try {
       const session = await searchApi.execute({
         id: `pyramid-${Date.now()}`,
@@ -113,20 +152,52 @@ export default function EvidencePyramidPage() {
     } finally {
       setIsSearching(false)
     }
-  }, [query, mapResultsToStudies])
+  }, [mapResultsToStudies])
 
-  const initialQuery = searchParams.get("q")
+  const initialQuery = useMemo(() => (searchParams.get("q") ?? "").trim(), [searchParams])
 
   useEffect(() => {
-    if (initialQuery) {
-      setQuery(initialQuery)
-      runSearch(initialQuery)
+    if (searchId) {
+      let cancelled = false
+      setIsSearching(true)
+      setError(null)
+
+      void searchApi
+        .getEvidencePyramid(searchId)
+        .then((response) => {
+          if (cancelled) return
+          const resolvedQuery = response.query?.raw || response.query?.terms?.join(" ") || initialQuery
+          if (resolvedQuery) {
+            setQuery(resolvedQuery)
+          }
+          setStudies(mapPyramidStudies(response.levels))
+          setSelectedStudies([])
+          setSelectedLevel(null)
+        })
+        .catch((err) => {
+          if (cancelled) return
+          console.error("[pyramid] Error fetching consolidated pyramid:", err)
+          setError("No se pudo cargar la piramide consolidada de esta busqueda.")
+        })
+        .finally(() => {
+          if (cancelled) return
+          setIsSearching(false)
+        })
+
+      return () => {
+        cancelled = true
+      }
     }
-  }, [initialQuery, runSearch])
+
+    if (!initialQuery || lastAutoQueryRef.current === initialQuery) return
+    lastAutoQueryRef.current = initialQuery
+    setQuery(initialQuery)
+    void runSearch(initialQuery)
+  }, [initialQuery, mapPyramidStudies, runSearch, searchId])
 
   const filteredStudies = useMemo(() => {
     if (!selectedLevel) return studies
-    return studies.filter((s) => s.level === selectedLevel)
+    return studies.filter((study) => study.level === selectedLevel)
   }, [selectedLevel, studies])
 
   const handleStudySelect = (study: StudyBlock) => {
@@ -137,9 +208,10 @@ export default function EvidencePyramidPage() {
 
   const handleAddToBibliography = (studyIds: string[]) => {
     const payload = studyIds
-      .map((id) => studies.find((s) => s.id === id))
+      .map((id) => studies.find((study) => study.id === id))
       .filter(Boolean)
       .map((study) => mapToSearchResult(study as StudyBlock))
+
     localStorage.setItem(
       "evidence_pyramid_selection_v2",
       JSON.stringify({ version: 2, items: payload })
@@ -152,10 +224,10 @@ export default function EvidencePyramidPage() {
       <div>
         <h1 className="text-2xl sm:text-3xl font-bold tracking-tight flex items-center gap-3">
           <Layers className="h-7 w-7 text-primary" />
-          Pirámide de Evidencia Interactiva
+          Piramide de Evidencia Interactiva
         </h1>
         <p className="text-muted-foreground mt-1">
-          Explora la jerarquía de evidencia y selecciona estudios para tu bibliografía.
+          Explora la jerarquia de evidencia y selecciona estudios para tu bibliografia.
         </p>
       </div>
 
@@ -166,18 +238,20 @@ export default function EvidencePyramidPage() {
             Buscar evidencia real
           </CardTitle>
           <CardDescription>
-            Ingresa un tema o pregunta clínica para consultar PubMed.
+            {searchId
+              ? "Visualiza la distribucion consolidada de la busqueda seleccionada o lanza una nueva consulta."
+              : "Ingresa un tema o pregunta clinica para consultar PubMed."}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-col gap-3 sm:flex-row">
             <Input
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(event) => setQuery(event.target.value)}
               placeholder="Ej: diabetes tipo 2 y metformina"
               disabled={isSearching}
             />
-            <Button onClick={() => runSearch()} disabled={isSearching || !query.trim()}>
+            <Button onClick={() => runSearch(query)} disabled={isSearching || !query.trim()}>
               {isSearching ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -188,12 +262,10 @@ export default function EvidencePyramidPage() {
               )}
             </Button>
           </div>
-          {error && (
-            <p className="text-sm text-destructive">{error}</p>
-          )}
+          {error && <p className="text-sm text-destructive">{error}</p>}
           {!error && studies.length === 0 && (
             <p className="text-sm text-muted-foreground">
-              Aún no hay resultados. Realiza una búsqueda para cargar estudios reales.
+              Aun no hay resultados. Realiza una busqueda para cargar estudios reales.
             </p>
           )}
         </CardContent>
@@ -225,7 +297,7 @@ export default function EvidencePyramidPage() {
             <CardContent className="space-y-3 text-sm text-muted-foreground">
               <p>1. Selecciona un nivel para filtrar el tipo de estudio.</p>
               <p>2. Haz clic en los bloques para marcar evidencia relevante.</p>
-              <p>3. Genera tu bibliografía con la selección actual.</p>
+              <p>3. Genera tu bibliografia con la seleccion actual.</p>
             </CardContent>
           </Card>
 
@@ -233,24 +305,22 @@ export default function EvidencePyramidPage() {
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
                 <BookOpen className="h-5 w-5 text-primary" />
-                Selección actual
+                Seleccion actual
               </CardTitle>
               <CardDescription>
                 {selectedStudies.length === 0
-                  ? "No hay estudios seleccionados aún."
-                  : "Revisa tu selección y genera bibliografía."}
+                  ? "No hay estudios seleccionados aun."
+                  : "Revisa tu seleccion y genera bibliografia."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Badge variant="secondary">
-                {selectedStudies.length} estudios seleccionados
-              </Badge>
+              <Badge variant="secondary">{selectedStudies.length} estudios seleccionados</Badge>
               <Button
                 className="w-full"
                 disabled={selectedStudies.length === 0}
                 onClick={() => handleAddToBibliography(selectedStudies)}
               >
-                Ir a bibliografía
+                Ir a bibliografia
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </CardContent>

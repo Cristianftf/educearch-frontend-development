@@ -16,14 +16,15 @@ import com.uci.competencia.repository.CaseSubmissionRepository;
 import com.uci.competencia.repository.CompetencyProgressRepository;
 import com.uci.competencia.repository.EvaluationRepository;
 import com.uci.competencia.repository.SearchSessionRepository;
-import com.uci.competencia.repository.UserRepository;
 import com.uci.competencia.repository.VerificationResultRepository;
+import com.uci.competencia.security.UserIdentityResolver;
 import com.uci.competencia.service.ProgressService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -42,6 +43,7 @@ import java.util.stream.Collectors;
 
 @Service
 @Slf4j
+@Transactional(readOnly = true)
 public class ProgressServiceImpl implements ProgressService {
 
     @Autowired
@@ -66,7 +68,7 @@ public class ProgressServiceImpl implements ProgressService {
     private EvaluationRepository evaluationRepository;
 
     @Autowired
-    private UserRepository userRepository;
+    private UserIdentityResolver userIdentityResolver;
 
     private static final int RECENT_ACTIVITY_LIMIT = 10;
 
@@ -76,23 +78,22 @@ public class ProgressServiceImpl implements ProgressService {
 
         Set<String> studentIdentifiers = resolveUserIdentifiers(studentId);
         String canonicalStudentId = resolveCanonicalUserId(studentId);
-        Set<String> sessionUserIds = resolveEntityUserIds(studentIdentifiers);
+        Set<String> repositoryUserIds = resolveRepositoryUserIds(studentIdentifiers, canonicalStudentId);
 
         if (studentIdentifiers.isEmpty() && canonicalStudentId != null && !canonicalStudentId.isBlank()) {
             studentIdentifiers = new LinkedHashSet<>();
             studentIdentifiers.add(canonicalStudentId);
         }
-        if (sessionUserIds.isEmpty() && canonicalStudentId != null && !canonicalStudentId.isBlank()) {
-            sessionUserIds = new LinkedHashSet<>();
-            sessionUserIds.add(canonicalStudentId);
-        }
+        String effectiveStudentId = canonicalStudentId != null && !canonicalStudentId.isBlank()
+            ? canonicalStudentId
+            : studentId;
 
-        CompetencyProgress competencyProgress = loadCompetencyProgress(canonicalStudentId, studentIdentifiers)
-            .orElse(createDefaultProgress(canonicalStudentId));
+        CompetencyProgress competencyProgress = loadCompetencyProgress(repositoryUserIds)
+            .orElse(createDefaultProgress(effectiveStudentId));
 
         StudentProgressDTO dto = new StudentProgressDTO();
-        dto.setStudentId(canonicalStudentId);
-        dto.setUserId(canonicalStudentId);
+        dto.setStudentId(effectiveStudentId);
+        dto.setUserId(effectiveStudentId);
 
         Map<String, StudentProgressDTO.CompetencyProgressDTO> competencies = new HashMap<>();
         competencies.put(
@@ -118,8 +119,8 @@ public class ProgressServiceImpl implements ProgressService {
             .orElse(0.0);
         dto.setOverallProgress(overallProgress);
 
-        int totalSearches = countSearches(sessionUserIds);
-        int totalVerifications = countVerifications(sessionUserIds);
+        int totalSearches = countSearches(repositoryUserIds);
+        int totalVerifications = countVerifications(repositoryUserIds);
         int totalBibliographies = countBibliographies(studentIdentifiers);
 
         if (totalSearches == 0 && competencyProgress.getTotalSearches() != null) {
@@ -132,8 +133,8 @@ public class ProgressServiceImpl implements ProgressService {
             totalBibliographies = competencyProgress.getBibliographiesGenerated();
         }
 
-        List<CaseSubmission> submissions = loadSubmissions(studentIdentifiers);
-        int totalCases = countAssignedCases(studentIdentifiers);
+        List<CaseSubmission> submissions = loadSubmissions(repositoryUserIds);
+        int totalCases = countAssignedCases(repositoryUserIds);
         int casesCompleted = (int) submissions.stream()
             .filter(submission -> submission.getStatus() == SubmissionStatus.REVIEWED
                 || submission.getStatus() == SubmissionStatus.EVALUATED)
@@ -153,12 +154,12 @@ public class ProgressServiceImpl implements ProgressService {
         dto.setTotalSearches(totalSearches);
         dto.setTotalVerifications(totalVerifications);
         dto.setTotalBibliographies(totalBibliographies);
-        dto.setRecentActivities(buildRecentActivities(studentIdentifiers, sessionUserIds, submissions));
+        dto.setRecentActivities(buildRecentActivities(studentIdentifiers, repositoryUserIds, submissions));
 
         dto.setCasesCompleted(casesCompleted);
         dto.setTotalCases(totalCases);
         dto.setAverageGrade(calculateAverageGrade(submissions));
-        dto.setHoursSpent(calculateHoursSpent(sessionUserIds));
+        dto.setHoursSpent(calculateHoursSpent(repositoryUserIds));
         dto.setRecommendations(buildRecommendations(competencies, totalCases, casesCompleted, totalSearches));
 
         log.debug("Student progress retrieved successfully for: {}", studentId);
@@ -179,14 +180,8 @@ public class ProgressServiceImpl implements ProgressService {
         }
     }
 
-    private Optional<CompetencyProgress> loadCompetencyProgress(String canonicalStudentId, Set<String> studentIdentifiers) {
-        LinkedHashSet<String> candidateIds = new LinkedHashSet<>();
-        if (canonicalStudentId != null && !canonicalStudentId.isBlank()) {
-            candidateIds.add(canonicalStudentId);
-        }
-        candidateIds.addAll(resolveEntityUserIds(studentIdentifiers));
-
-        for (String candidateId : candidateIds) {
+    private Optional<CompetencyProgress> loadCompetencyProgress(Set<String> repositoryUserIds) {
+        for (String candidateId : safeCollection(repositoryUserIds)) {
             Optional<CompetencyProgress> progress = competencyProgressRepository.findByStudentId(candidateId);
             if (progress.isPresent()) {
                 return progress;
@@ -440,16 +435,19 @@ public class ProgressServiceImpl implements ProgressService {
             .limit(RECENT_ACTIVITY_LIMIT * 2L)
             .forEach(submission -> {
                 LocalDateTime timestamp = submission.getSubmittedAt();
+                Map<String, Object> metadata = new LinkedHashMap<>();
+                metadata.put("caseId", safeText(submission.getCaseId(), ""));
+                metadata.put(
+                    "status",
+                    submission.getStatus() != null ? submission.getStatus().name().toLowerCase() : "pending"
+                );
                 entries.add(new ActivityEntry(
                     new ActivityDTO(
                         submission.getId(),
                         "case_submission",
                         "Entrega de caso: " + safeText(submission.getCaseId(), "sin identificar"),
                         toTimestamp(timestamp),
-                        Map.of(
-                            "caseId", submission.getCaseId(),
-                            "status", submission.getStatus() != null ? submission.getStatus().name().toLowerCase() : "pending"
-                        )
+                        metadata
                     ),
                     timestamp
                 ));
@@ -508,19 +506,29 @@ public class ProgressServiceImpl implements ProgressService {
         }
 
         identifiers.add(userIdentifier.trim());
-        findUserByIdentifier(userIdentifier).ifPresent(user -> addUserIdentifiers(identifiers, user));
+        findUserByIdentifier(userIdentifier).ifPresent(user -> userIdentityResolver.addUserIdentifiers(identifiers, user));
         return identifiers;
     }
 
-    private Set<String> resolveEntityUserIds(Set<String> identifiers) {
+    private Set<String> resolveRepositoryUserIds(Set<String> identifiers, String fallbackIdentifier) {
         LinkedHashSet<String> userIds = new LinkedHashSet<>();
         if (identifiers == null || identifiers.isEmpty()) {
+            if (isUuid(fallbackIdentifier)) {
+                userIds.add(fallbackIdentifier.trim());
+            }
             return userIds;
         }
         for (String identifier : identifiers) {
             findUserByIdentifier(identifier)
                 .map(User::getId)
-                .ifPresentOrElse(userIds::add, () -> userIds.add(identifier));
+                .filter(this::isUuid)
+                .ifPresent(userIds::add);
+            if (isUuid(identifier)) {
+                userIds.add(identifier.trim());
+            }
+        }
+        if (isUuid(fallbackIdentifier)) {
+            userIds.add(fallbackIdentifier.trim());
         }
         return userIds;
     }
@@ -535,45 +543,15 @@ public class ProgressServiceImpl implements ProgressService {
     }
 
     private Optional<User> findUserByIdentifier(String identifier) {
-        if (identifier == null || identifier.isBlank()) {
-            return Optional.empty();
-        }
-
-        String normalized = identifier.trim();
-        try {
-            Optional<User> byId = userRepository.findById(normalized);
-            if (byId.isPresent()) {
-                return byId;
-            }
-        } catch (Exception e) {
-            log.debug("Identifier {} is not a direct user ID", normalized);
-        }
-
-        Optional<User> byEmail = userRepository.findByEmail(normalized);
-        if (byEmail.isPresent()) {
-            return byEmail;
-        }
-
-        return userRepository.findByUsername(normalized);
-    }
-
-    private void addUserIdentifiers(Set<String> target, User user) {
-        if (target == null || user == null) {
-            return;
-        }
-        if (user.getId() != null && !user.getId().isBlank()) {
-            target.add(user.getId());
-        }
-        if (user.getEmail() != null && !user.getEmail().isBlank()) {
-            target.add(user.getEmail());
-        }
-        if (user.getUsername() != null && !user.getUsername().isBlank()) {
-            target.add(user.getUsername());
-        }
+        return userIdentityResolver.findUserByIdentifier(identifier);
     }
 
     private Collection<String> safeCollection(Set<String> values) {
         return values != null ? values : Set.of();
+    }
+
+    private boolean isUuid(String value) {
+        return userIdentityResolver.isUuid(value);
     }
 
     private static class ActivityEntry {

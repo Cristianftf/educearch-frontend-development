@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { searchApi } from '@/lib/api'
 import { searchAssistantApi } from '@/lib/search-assistant'
+import type { AssistantConversationMessage } from '@/lib/search-assistant'
 import type { MeshTerm, SearchQuery, SearchSession, SearchFilters, SearchResult } from '@/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -47,10 +48,25 @@ import {
   Palette,
   Settings,
   CheckCircle2,
+  Activity,
 } from 'lucide-react'
 import QueryBuilder from '@/components/query-builder'
 import { useStudent } from '@/contexts/student-context'
 import { useStudentSearch } from '@/hooks/use-student-search'
+import {
+  subscribeExternalApiActivity,
+  type ExternalApiActivityEvent,
+} from '@/lib/external-api-activity'
+import {
+  type RequestLoadProfile,
+  DEFAULT_REQUEST_LOAD_PROFILE,
+  REQUEST_LOAD_PROFILE_LABELS,
+  REQUEST_LOAD_PROFILE_DESCRIPTIONS,
+  SEARCH_MAX_RESULTS_BY_PROFILE,
+  normalizeRequestLoadProfile,
+  readStoredRequestLoadProfile,
+  writeStoredRequestLoadProfile,
+} from '@/lib/request-load-profile'
 
 const BOOLEAN_OPERATORS = ['AND', 'OR', 'NOT'] as const
 type BooleanOperator = (typeof BOOLEAN_OPERATORS)[number]
@@ -74,6 +90,11 @@ const STUDY_TYPE_IDS = new Set(STUDY_TYPES.map((type) => type.id))
 const LANGUAGE_IDS = new Set(LANGUAGE_OPTIONS.map((language) => language.id))
 const YEAR_MIN = 2000
 const YEAR_MAX = 2026
+const MAX_EXTERNAL_ACTIVITY_EVENTS = 80
+const MIN_MESH_INPUT_CHARS = 2
+const MAX_MESH_INPUT_LENGTH = 180
+const MAX_SELECTED_RESULTS = 200
+const MAX_ASSISTANT_MESSAGES = 18
 
 type NormalizedSearchFilters = Required<
   Pick<SearchFilters, 'yearRange' | 'studyTypes' | 'minSampleSize' | 'languages' | 'hasFullText' | 'maxResults'>
@@ -114,7 +135,76 @@ const DEFAULT_FILTERS: NormalizedSearchFilters = {
 const INITIAL_ASSISTANT_MESSAGE =
   'Soy tu asistente IA de busqueda clinica. Puedo sugerir terminos MeSH, operadores y filtros listos para aplicar.'
 
+const ASSISTANT_PROJECT_CONTEXT =
+  'Proyecto EDUSEARCH: asistente de busqueda avanzada en salud para estudiantes y profesores. ' +
+  'Objetivo: mejorar estrategias con terminos MeSH, operadores booleanos y filtros clinicos aplicables. ' +
+  'Prioriza evidencia de alta calidad (revision sistematica, metaanalisis, ECA), evita inventar datos y entrega recomendaciones accionables listas para aplicar en la interfaz.'
+
 const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
+const sanitizeInputText = (value: string) => value.trim().slice(0, MAX_MESH_INPUT_LENGTH)
+
+const normalizeQueryMode = (value: string): 'visual' | 'advanced' =>
+  value === 'visual' || value === 'advanced' ? value : 'advanced'
+
+const normalizeBooleanOperator = (value: unknown): BooleanOperator | null =>
+  value === 'AND' || value === 'OR' || value === 'NOT' ? value : null
+
+const buildSafeExternalUrl = (sourceUrl?: string, doi?: string): string | null => {
+  const source = typeof sourceUrl === 'string' ? sourceUrl.trim() : ''
+  if (/^https?:\/\//i.test(source)) {
+    return source
+  }
+  const normalizedDoi = typeof doi === 'string' ? doi.trim() : ''
+  if (normalizedDoi) {
+    return `https://doi.org/${normalizedDoi}`
+  }
+  return null
+}
+
+const formatActivityTimestamp = (timestamp: string): string => {
+  const parsed = new Date(timestamp)
+  if (Number.isNaN(parsed.getTime())) return '--:--:--'
+  return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+const getActivityDotClassName = (status: ExternalApiActivityEvent['status']): string => {
+  switch (status) {
+    case 'success':
+      return 'bg-emerald-500'
+    case 'warning':
+      return 'bg-amber-500'
+    case 'error':
+      return 'bg-red-500'
+    default:
+      return 'bg-blue-500'
+  }
+}
+
+const getActivityItemClassName = (status: ExternalApiActivityEvent['status']): string => {
+  switch (status) {
+    case 'success':
+      return 'border-emerald-200 bg-emerald-50/70'
+    case 'warning':
+      return 'border-amber-200 bg-amber-50/70'
+    case 'error':
+      return 'border-red-200 bg-red-50/70'
+    default:
+      return 'border-border bg-background'
+  }
+}
+
+const buildAssistantConversationHistory = (
+  messages: AssistantMessage[],
+  nextUserMessage: AssistantMessage
+): AssistantConversationMessage[] =>
+  [...messages, nextUserMessage]
+    .map((entry) => ({
+      role: entry.role,
+      content: entry.content.trim(),
+    }))
+    .filter((entry) => entry.content.length > 0)
+    .slice(-8)
 
 const normalizeYearRange = (range?: SearchFilters['yearRange']): [number, number] => {
   if (!Array.isArray(range) || range.length !== 2) {
@@ -277,12 +367,15 @@ const buildRawQuery = (
 }
 
 export default function SearchPage() {
+  const [requestLoadProfile, setRequestLoadProfile] = useState<RequestLoadProfile>(
+    DEFAULT_REQUEST_LOAD_PROFILE
+  )
   const [searchTerm, setSearchTerm] = useState('')
   const [suggestions, setSuggestions] = useState<MeshTerm[]>([])
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
   const [selectedTerms, setSelectedTerms] = useState<MeshTerm[]>([])
   const [operators, setOperators] = useState<BooleanOperator[]>([])
-  const [queryMode, setQueryMode] = useState<'visual' | 'advanced'>('visual')
+  const [queryMode, setQueryMode] = useState<'visual' | 'advanced'>('advanced')
   const [visualQuery, setVisualQuery] = useState<{
     rawQuery: string
     terms: MeshTerm[]
@@ -294,6 +387,7 @@ export default function SearchPage() {
     loadHistory,
     executeSearch: executeSearchHook,
     error: searchHookError,
+    clearError: clearSearchHookError,
   } = useStudentSearch()
   const [currentSession, setCurrentSession] = useState<SearchSession | null>(null)
   const [isSearching, setIsSearching] = useState(false)
@@ -312,52 +406,161 @@ export default function SearchPage() {
   const [assistantSuggestedOperators, setAssistantSuggestedOperators] = useState<BooleanOperator[]>([])
   const [assistantSuggestedFilters, setAssistantSuggestedFilters] = useState<AssistantSuggestedFilters | null>(null)
   const [assistantAutoPlan, setAssistantAutoPlan] = useState<AssistantAutoPlan | null>(null)
+  const [activeSearchRunId, setActiveSearchRunId] = useState<string | null>(null)
+  const [externalApiEvents, setExternalApiEvents] = useState<ExternalApiActivityEvent[]>([])
+  const activeSearchRunIdRef = useRef<string | null>(null)
+  const isMountedRef = useRef(true)
+  const searchExecutionIdRef = useRef(0)
+  const assistantRequestIdRef = useRef(0)
+  const historyLoadedRef = useRef(false)
+  const suggestionRequestIdRef = useRef(0)
+  const exportMessageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { toggleSearchFavorite } = useStudent()
   const router = useRouter()
+  const profileMaxResults = SEARCH_MAX_RESULTS_BY_PROFILE[requestLoadProfile]
+  const normalizedSearchInput = useMemo(() => sanitizeInputText(searchTerm), [searchTerm])
 
   const handleVisualQueryChange = useCallback(
     (data: { rawQuery: string; terms: MeshTerm[]; operators: BooleanOperator[] }) => {
+      const normalizedTerms = sanitizeMeshTerms(Array.isArray(data.terms) ? data.terms : [])
+      const normalizedOperators = (Array.isArray(data.operators) ? data.operators : [])
+        .map((operator) => normalizeBooleanOperator(operator))
+        .filter((operator): operator is BooleanOperator => Boolean(operator))
+        .slice(0, Math.max(0, normalizedTerms.length - 1))
+      while (normalizedOperators.length < Math.max(0, normalizedTerms.length - 1)) {
+        normalizedOperators.push('AND')
+      }
+      const normalizedRawQuery =
+        typeof data.rawQuery === 'string' && data.rawQuery.trim().length > 0
+          ? data.rawQuery.trim()
+          : buildRawQuery(normalizedTerms, normalizedOperators, filters)
       setVisualQuery((prev) => {
         if (
           prev &&
-          prev.rawQuery === data.rawQuery &&
-          areTermsEqual(prev.terms, data.terms) &&
-          areOperatorsEqual(prev.operators, data.operators)
+          prev.rawQuery === normalizedRawQuery &&
+          areTermsEqual(prev.terms, normalizedTerms) &&
+          areOperatorsEqual(prev.operators, normalizedOperators)
         ) {
           return prev
         }
-        return data
+        return {
+          rawQuery: normalizedRawQuery,
+          terms: normalizedTerms,
+          operators: normalizedOperators,
+        }
       })
     },
-    []
+    [filters]
   )
 
   // Debounced MeSH suggestions
   useEffect(() => {
-    if (searchTerm.length < 2) {
+    if (normalizedSearchInput.length < MIN_MESH_INPUT_CHARS) {
+      suggestionRequestIdRef.current += 1
       setSuggestions([])
+      setIsLoadingSuggestions(false)
       return
     }
 
+    const requestId = suggestionRequestIdRef.current + 1
+    suggestionRequestIdRef.current = requestId
     const timer = setTimeout(async () => {
       setIsLoadingSuggestions(true)
       try {
-        const results = await searchApi.getMeshSuggestions(searchTerm)
-        setSuggestions(results)
+        const results = await searchApi.getMeshSuggestions(normalizedSearchInput)
+        if (suggestionRequestIdRef.current !== requestId) return
+        setSuggestions(
+          results.filter(
+            (result) => typeof result.term === 'string' && result.term.trim().length >= MIN_MESH_INPUT_CHARS
+          )
+        )
       } catch (err) {
+        if (suggestionRequestIdRef.current !== requestId) return
+        setSuggestions([])
         console.error('[v0] Error fetching MeSH suggestions:', err)
       } finally {
+        if (suggestionRequestIdRef.current !== requestId) return
         setIsLoadingSuggestions(false)
       }
     }, 300)
 
     return () => clearTimeout(timer)
-  }, [searchTerm])
+  }, [normalizedSearchInput])
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (historyLoadedRef.current) return
+    historyLoadedRef.current = true
+    void loadHistory(1, 10)
+  }, [loadHistory])
+
+  useEffect(() => {
+    if (!searchHookError) return
+    setError(searchHookError)
+  }, [searchHookError])
+
+  useEffect(() => {
+    return () => {
+      if (exportMessageTimeoutRef.current) {
+        clearTimeout(exportMessageTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    activeSearchRunIdRef.current = activeSearchRunId
+  }, [activeSearchRunId])
+
+  useEffect(() => {
+    const unsubscribe = subscribeExternalApiActivity((event) => {
+      const runId = activeSearchRunIdRef.current
+      if (!runId || event.runId !== runId) return
+      setExternalApiEvents((prev) => {
+        if (prev.some((entry) => entry.id === event.id)) return prev
+        const next = [...prev, event]
+        return next.slice(-MAX_EXTERNAL_ACTIVITY_EVENTS)
+      })
+    })
+    return unsubscribe
+  }, [])
+
+  useEffect(() => {
+    const stored = readStoredRequestLoadProfile()
+    setRequestLoadProfile(stored)
+  }, [])
+
+  useEffect(() => {
+    writeStoredRequestLoadProfile(requestLoadProfile)
+    const maxByProfile = SEARCH_MAX_RESULTS_BY_PROFILE[requestLoadProfile]
+    setFilters((prev) => {
+      if (prev.maxResults <= maxByProfile) return prev
+      return {
+        ...prev,
+        maxResults: maxByProfile,
+      }
+    })
+  }, [requestLoadProfile])
 
   const addTerm = useCallback((term: MeshTerm) => {
+    const normalized = sanitizeMeshTerms([term])[0]
+    if (!normalized) return
     setSelectedTerms((prev) => {
-      if (prev.some((t) => t.id === term.id)) return prev
-      return [...prev, term]
+      const normalizedTerm = normalized.term.trim().toLowerCase()
+      if (
+        prev.some(
+          (candidate) =>
+            candidate.id === normalized.id || candidate.term.trim().toLowerCase() === normalizedTerm
+        )
+      ) {
+        return prev
+      }
+      return [...prev, normalized]
     })
     setSearchTerm('')
     setSuggestions([])
@@ -381,12 +584,14 @@ export default function SearchPage() {
   }, [])
 
   const addOperator = useCallback((operator: BooleanOperator) => {
+    const normalizedOperator = normalizeBooleanOperator(operator)
+    if (!normalizedOperator) return
     setOperators((prev) => {
       const maxOperators = Math.max(0, selectedTerms.length - 1)
       if (maxOperators === 0 || prev.length >= maxOperators) {
         return prev
       }
-      return [...prev, operator]
+      return [...prev, normalizedOperator]
     })
   }, [selectedTerms.length])
 
@@ -399,9 +604,11 @@ export default function SearchPage() {
   )
 
   const executeSearch = useCallback(async () => {
+    const executionId = searchExecutionIdRef.current + 1
+    searchExecutionIdRef.current = executionId
     const activeTerms = queryMode === 'visual' ? (visualQuery?.terms ?? []) : selectedTerms
     const activeOperators = queryMode === 'visual' ? (visualQuery?.operators ?? []) : operators
-    const normalizedQuery = normalizeQueryParts(activeTerms, activeOperators)
+    const normalizedQuery = normalizeQueryParts(sanitizeMeshTerms(activeTerms), activeOperators)
     const activeRawQuery = buildRawQuery(normalizedQuery.terms, normalizedQuery.operators, filters)
 
     if (normalizedQuery.terms.length === 0) {
@@ -409,8 +616,12 @@ export default function SearchPage() {
       return
     }
 
+    const activityRunId = `search-run-${Date.now()}`
+    setActiveSearchRunId(activityRunId)
+    setExternalApiEvents([])
     setIsSearching(true)
     setError(null)
+    clearSearchHookError()
 
     try {
       const query: SearchQuery = {
@@ -422,36 +633,65 @@ export default function SearchPage() {
         createdAt: new Date().toISOString(),
       }
 
-      const session = await executeSearchHook(query)
+      const session = await executeSearchHook(query, { activityRunId, loadProfile: requestLoadProfile })
+      if (!isMountedRef.current || searchExecutionIdRef.current !== executionId) {
+        return
+      }
       if (!session) {
-        setError(searchHookError || 'No se pudieron obtener resultados validos para esta busqueda.')
+        setError('La busqueda fue cancelada o no retorno resultados validos.')
         return
       }
       setCurrentSession(session)
       setSelectedResults([])
+      setSelectedArticle(null)
       await loadHistory(1, 10)
     } catch (err) {
+      if (!isMountedRef.current || searchExecutionIdRef.current !== executionId) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Error al ejecutar la busqueda. Intenta de nuevo.'
       setError(message)
       console.error('[v0] Search error:', err)
     } finally {
+      if (!isMountedRef.current || searchExecutionIdRef.current !== executionId) {
+        return
+      }
       setIsSearching(false)
+      setActiveSearchRunId(null)
     }
-  }, [selectedTerms, operators, filters, queryMode, visualQuery, executeSearchHook, loadHistory, searchHookError])
+  }, [
+    selectedTerms,
+    operators,
+    filters,
+    queryMode,
+    visualQuery,
+    executeSearchHook,
+    loadHistory,
+    requestLoadProfile,
+    clearSearchHookError,
+  ])
 
   const toggleResultSelection = useCallback((result: SearchResult) => {
+    if (!result?.id) return
     setSelectedResults((prev) => {
       const exists = prev.some((item) => item.id === result.id)
       if (exists) {
         return prev.filter((item) => item.id !== result.id)
+      }
+      if (prev.length >= MAX_SELECTED_RESULTS) {
+        return prev
       }
       return [...prev, result]
     })
   }, [])
 
   const addResultSelection = useCallback((result: SearchResult) => {
+    if (!result?.id) return
     setSelectedResults((prev) => {
       if (prev.some((item) => item.id === result.id)) {
+        return prev
+      }
+      if (prev.length >= MAX_SELECTED_RESULTS) {
         return prev
       }
       return [...prev, result]
@@ -470,29 +710,43 @@ export default function SearchPage() {
         JSON.stringify({ version: 2, items: selectedResults })
       )
       setExportMessage('Seleccion enviada a bibliografias.')
-      setTimeout(() => setExportMessage(null), 2000)
+      if (exportMessageTimeoutRef.current) {
+        clearTimeout(exportMessageTimeoutRef.current)
+      }
+      exportMessageTimeoutRef.current = setTimeout(() => {
+        setExportMessage(null)
+      }, 2000)
       router.push('/student/bibliography?source=search')
     } catch (err) {
       console.error('[v0] Error exporting selection:', err)
+      setError('No se pudo exportar la seleccion. Verifica espacio en el navegador e intentalo de nuevo.')
     }
   }, [selectedResults, router])
 
   const toggleFavorite = useCallback(async (searchId: string, currentFavorite: boolean) => {
+    if (!searchId) return
     try {
       await searchApi.saveSearch(searchId, !currentFavorite)
       toggleSearchFavorite(searchId)
       await loadHistory(1, 10)
     } catch (err) {
+      setError('No se pudo actualizar el favorito de la busqueda.')
       console.error('[v0] Error toggling favorite:', err)
     }
   }, [toggleSearchFavorite, loadHistory])
 
   const reuseSearch = useCallback((query: SearchQuery) => {
-    const normalized = normalizeQueryParts(query.terms, query.operators as BooleanOperator[])
+    const normalized = normalizeQueryParts(
+      sanitizeMeshTerms(Array.isArray(query.terms) ? query.terms : []),
+      (Array.isArray(query.operators) ? query.operators : [])
+        .map((operator) => normalizeBooleanOperator(operator))
+        .filter((operator): operator is BooleanOperator => Boolean(operator))
+    )
     setSelectedTerms(normalized.terms)
     setOperators(normalized.operators)
     setFilters(normalizeFilters(query.filters))
     setQueryMode('advanced')
+    setError(null)
     setVisualQuery({
       rawQuery: query.rawQuery,
       terms: normalized.terms,
@@ -516,16 +770,21 @@ export default function SearchPage() {
 
   const askAssistant = useCallback(async (message: string) => {
     const trimmed = message.trim()
-    if (!trimmed) return
+    if (!trimmed || assistantLoading) return
+
+    const requestId = assistantRequestIdRef.current + 1
+    assistantRequestIdRef.current = requestId
 
     const userMessage: AssistantMessage = {
       id: `assistant-user-${Date.now()}`,
       role: 'user',
       content: trimmed,
     }
-    setAssistantMessages((prev) => [...prev, userMessage])
+    const conversationHistory = buildAssistantConversationHistory(assistantMessages, userMessage)
+    setAssistantMessages((prev) => [...prev, userMessage].slice(-MAX_ASSISTANT_MESSAGES))
     setAssistantLoading(true)
     setAssistantStatus(null)
+    setAssistantAutoPlan(null)
 
     try {
       const response = await searchAssistantApi.ask({
@@ -533,6 +792,8 @@ export default function SearchPage() {
         selectedTerms: selectedTerms.map((term) => term.term),
         operators,
         recentTerms: recentSearchTerms,
+        projectContext: ASSISTANT_PROJECT_CONTEXT,
+        conversationHistory,
         filters: {
           yearFrom: filters.yearRange[0],
           yearTo: filters.yearRange[1],
@@ -544,44 +805,63 @@ export default function SearchPage() {
         },
       })
 
+      if (!isMountedRef.current || assistantRequestIdRef.current !== requestId) {
+        return
+      }
+
       setAssistantMessages((prev) => [
         ...prev,
         {
           id: `assistant-reply-${Date.now()}`,
-          role: 'assistant',
+          role: 'assistant' as const,
           content: response.reply,
         },
-      ])
+      ].slice(-MAX_ASSISTANT_MESSAGES))
 
-      const mappedTerms: MeshTerm[] = response.suggestedTerms.map((term, index) => ({
-        id: term.id || `${term.term.toUpperCase().replace(/\s+/g, '_')}-${index + 1}`,
-        term: term.term,
-        description: term.description,
-      }))
+      const mappedTerms = sanitizeMeshTerms(
+        response.suggestedTerms.map((term, index) => ({
+          id: term.id || `${term.term.toUpperCase().replace(/\s+/g, '_')}-${index + 1}`,
+          term: term.term,
+          description: term.description,
+        }))
+      )
+      const mappedOperators = response.suggestedOperators
+        .map((operator) => normalizeBooleanOperator(operator))
+        .filter((operator): operator is BooleanOperator => Boolean(operator))
 
       setAssistantSuggestedTerms(mappedTerms)
-      setAssistantSuggestedOperators(response.suggestedOperators as BooleanOperator[])
+      setAssistantSuggestedOperators(mappedOperators)
       setAssistantSuggestedFilters(response.suggestedFilters ?? null)
+      const autoPlanTerms = Array.isArray(response.autoPlan?.terms)
+        ? response.autoPlan.terms
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0)
+            .slice(0, 4)
+        : []
       const normalizedAutoPlan: AssistantAutoPlan | null =
-        response.canAutoApply && response.autoPlan && response.autoPlan.terms.length > 0
+        response.canAutoApply && autoPlanTerms.length > 0
           ? {
-              terms: response.autoPlan.terms.slice(0, 4),
-              operators: response.autoPlan.operators.filter((operator): operator is BooleanOperator =>
-                BOOLEAN_OPERATORS.includes(operator)
-              ),
-              filters: response.autoPlan.filters ?? undefined,
-              rationale: response.autoPlan.rationale,
+              terms: autoPlanTerms,
+              operators: (response.autoPlan?.operators ?? [])
+                .map((operator) => normalizeBooleanOperator(operator))
+                .filter((operator): operator is BooleanOperator => Boolean(operator))
+                .slice(0, Math.max(0, autoPlanTerms.length - 1)),
+              filters: response.autoPlan?.filters ?? undefined,
+              rationale: response.autoPlan?.rationale || 'Plan IA aplicado.',
             }
           : null
       setAssistantAutoPlan(normalizedAutoPlan)
-      setAssistantTips(response.tips ?? [])
+      setAssistantTips((response.tips ?? []).slice(0, 4))
       setAssistantStatus(
         response.usedAi
           ? 'Respuesta generada por IA en tiempo real.'
-          : 'Sin conexion a modelo IA. Configura GEMINI_API_KEY (o GOOGLE_AI_API_KEY) o GROQ_API_KEY en backend, o ejecuta Ollama en localhost:11434.'
+          : 'Sin conexion a Gemini. Configura GEMINI_API_KEY (o GOOGLE_AI_API_KEY) en backend.'
       )
       setAssistantInput('')
     } catch (err) {
+      if (!isMountedRef.current || assistantRequestIdRef.current !== requestId) {
+        return
+      }
       const fallbackMessage =
         err instanceof Error
           ? `No pude consultar la IA externa ahora: ${err.message}`
@@ -590,16 +870,22 @@ export default function SearchPage() {
         ...prev,
         {
           id: `assistant-error-${Date.now()}`,
-          role: 'assistant',
+          role: 'assistant' as const,
           content: fallbackMessage,
         },
-      ])
+      ].slice(-MAX_ASSISTANT_MESSAGES))
+      setAssistantSuggestedTerms([])
+      setAssistantSuggestedOperators([])
+      setAssistantSuggestedFilters(null)
       setAssistantAutoPlan(null)
       setAssistantStatus('Fallo temporal del asistente.')
     } finally {
+      if (!isMountedRef.current || assistantRequestIdRef.current !== requestId) {
+        return
+      }
       setAssistantLoading(false)
     }
-  }, [selectedTerms, operators, recentSearchTerms, filters])
+  }, [assistantMessages, assistantLoading, selectedTerms, operators, recentSearchTerms, filters])
 
   const requestAssistantSuggestions = useCallback(() => {
     const defaultPrompt =
@@ -618,9 +904,13 @@ export default function SearchPage() {
       ])
 
       const nextStudyTypes = Array.isArray(value.studyTypes)
-        ? value.studyTypes
-            .map((entry) => normalizeStudyTypeValue(entry))
-            .filter((entry) => STUDY_TYPE_IDS.has(entry))
+        ? Array.from(
+            new Set(
+              value.studyTypes
+                .map((entry) => normalizeStudyTypeValue(entry))
+                .filter((entry) => STUDY_TYPE_IDS.has(entry))
+            )
+          )
         : prev.studyTypes
 
       const languageCandidate =
@@ -645,16 +935,20 @@ export default function SearchPage() {
         maxResults:
           typeof value.maxResults === 'number' &&
           Number.isFinite(value.maxResults)
-            ? clampNumber(Math.round(value.maxResults), 5, 200)
+            ? clampNumber(
+                Math.round(value.maxResults),
+                5,
+                SEARCH_MAX_RESULTS_BY_PROFILE[requestLoadProfile]
+              )
             : prev.maxResults,
       }
     })
-  }, [])
+  }, [requestLoadProfile])
 
   const applyAssistantFilters = useCallback(() => {
     if (!assistantSuggestedFilters) return
     applySuggestedFiltersValue(assistantSuggestedFilters)
-    setAssistantStatus('Filtros sugeridos aplicados al query.')
+    setAssistantStatus('Filtros sugeridos aplicados a la query.')
   }, [assistantSuggestedFilters, applySuggestedFiltersValue])
 
   const submitAssistantInput = useCallback(() => {
@@ -674,11 +968,13 @@ export default function SearchPage() {
 
   const applyAssistantAutoPlan = useCallback(() => {
     if (!assistantAutoPlan) return
-    const mappedTerms: MeshTerm[] = assistantAutoPlan.terms.map((term, index) => ({
-      id: `${term.toUpperCase().replace(/\s+/g, '_')}-${index + 1}`,
-      term,
-      description: 'Termino aplicado desde plan IA',
-    }))
+    const mappedTerms = sanitizeMeshTerms(
+      assistantAutoPlan.terms.map((term, index) => ({
+        id: `${term.toUpperCase().replace(/\s+/g, '_')}-${index + 1}`,
+        term,
+        description: 'Termino aplicado desde plan IA',
+      }))
+    )
     const normalized = normalizeQueryParts(mappedTerms, assistantAutoPlan.operators)
     setQueryMode('advanced')
     setSelectedTerms(normalized.terms)
@@ -720,34 +1016,40 @@ export default function SearchPage() {
   }, [maxResultsValue[0]])
 
   const updateYearRange = useCallback((value: [number, number]) => {
+    const from = typeof value?.[0] === 'number' && Number.isFinite(value[0]) ? value[0] : YEAR_MIN
+    const to = typeof value?.[1] === 'number' && Number.isFinite(value[1]) ? value[1] : YEAR_MAX
+    const bounded = normalizeYearRange([from, to])
     setFilters((prev) => {
       const current = prev.yearRange
-      if (current[0] === value[0] && current[1] === value[1]) {
+      if (current[0] === bounded[0] && current[1] === bounded[1]) {
         return prev
       }
-      return { ...prev, yearRange: value }
+      return { ...prev, yearRange: bounded }
     })
   }, [])
 
   const updateMinSampleSize = useCallback((value: number) => {
+    const bounded = Number.isFinite(value) ? clampNumber(Math.round(value), 0, 1000) : 0
     setFilters((prev) => {
       const current = prev.minSampleSize
-      if (current === value) {
+      if (current === bounded) {
         return prev
       }
-      return { ...prev, minSampleSize: value }
+      return { ...prev, minSampleSize: bounded }
     })
   }, [])
 
   const updateMaxResults = useCallback((value: number) => {
+    const safeValue = Number.isFinite(value) ? Math.round(value) : DEFAULT_FILTERS.maxResults
+    const boundedValue = clampNumber(safeValue, 5, SEARCH_MAX_RESULTS_BY_PROFILE[requestLoadProfile])
     setFilters((prev) => {
       const current = prev.maxResults
-      if (current === value) {
+      if (current === boundedValue) {
         return prev
       }
-      return { ...prev, maxResults: value }
+      return { ...prev, maxResults: boundedValue }
     })
-  }, [])
+  }, [requestLoadProfile])
 
   const displayQuery = queryMode === 'visual'
     ? buildQueryString(visualQuery?.terms ?? [], visualQuery?.operators ?? [])
@@ -756,13 +1058,27 @@ export default function SearchPage() {
   const canSearch = useMemo(() => {
     const activeTerms = queryMode === 'visual' ? (visualQuery?.terms ?? []) : selectedTerms
     const activeOperators = queryMode === 'visual' ? (visualQuery?.operators ?? []) : operators
-    return normalizeQueryParts(activeTerms, activeOperators).terms.length > 0
+    return normalizeQueryParts(sanitizeMeshTerms(activeTerms), activeOperators).terms.length > 0
   }, [queryMode, visualQuery, selectedTerms, operators])
+
+  const externalApiProviders = useMemo(() => {
+    const providerCounter = new Map<string, number>()
+    for (const event of externalApiEvents) {
+      providerCounter.set(event.provider, (providerCounter.get(event.provider) ?? 0) + 1)
+    }
+    return Array.from(providerCounter.entries())
+      .map(([provider, count]) => ({ provider, count }))
+      .sort((left, right) => right.count - left.count)
+      .slice(0, 6)
+  }, [externalApiEvents])
 
   const filteredResults = useMemo(() => {
     if (!currentSession) return []
+    const sourceResults = Array.isArray(currentSession.results) ? currentSession.results : []
     const [yearFrom, yearTo] = filters.yearRange
-    const filtered = currentSession.results.filter((result) => {
+    const filtered = sourceResults.filter((result) => {
+      if (!result || typeof result !== 'object') return false
+      if (!result.id || !result.title) return false
       if (result.year < yearFrom || result.year > yearTo) {
         return false
       }
@@ -792,6 +1108,9 @@ export default function SearchPage() {
     filters.hasFullText,
     filters.maxResults,
   ])
+  const selectedArticleExternalUrl = selectedArticle
+    ? buildSafeExternalUrl(selectedArticle.sourceUrl, selectedArticle.doi)
+    : null
 
   return (
     <div className="space-y-6">
@@ -806,7 +1125,7 @@ export default function SearchPage() {
       <div className="grid gap-6 xl:grid-cols-3">
         {/* Query Builder */}
         <div className="space-y-6 min-w-0 xl:col-span-2">
-          <Tabs value={queryMode} onValueChange={(value) => setQueryMode(value as 'visual' | 'advanced')} className="w-full">
+          <Tabs value={queryMode} onValueChange={(value) => setQueryMode(normalizeQueryMode(value))} className="w-full">
             <TabsList className="grid h-auto w-full grid-cols-1 gap-2 sm:grid-cols-2">
               <TabsTrigger value="visual" className="flex items-center gap-2">
                 <Palette className="h-4 w-4" />
@@ -819,6 +1138,44 @@ export default function SearchPage() {
             </TabsList>
 
             <TabsContent value="visual" className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Search className="h-5 w-5" />
+                    Buscar terminos para el constructor
+                  </CardTitle>
+                  <CardDescription>
+                    Escribe una palabra clave y arrastra los terminos sugeridos al constructor visual.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Buscar terminos MeSH (ej: diabetes, hypertension)..."
+                      className="pl-10"
+                      value={searchTerm}
+                      onChange={(event) => setSearchTerm(event.target.value.slice(0, MAX_MESH_INPUT_LENGTH))}
+                    />
+                    {isLoadingSuggestions && (
+                      <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin" />
+                    )}
+                  </div>
+                  {suggestions.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {suggestions.slice(0, 12).map((term) => (
+                        <Badge key={`visual-suggestion-${term.id}`} variant="outline" className="text-xs">
+                          {term.term}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Introduce al menos 2 caracteres para cargar sugerencias.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
               <QueryBuilder
                 availableTerms={suggestions}
                 onQueryChange={handleVisualQueryChange}
@@ -844,7 +1201,7 @@ export default function SearchPage() {
                   placeholder="Buscar terminos MeSH (ej: diabetes, hypertension)..."
                   className="pl-10"
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onChange={(e) => setSearchTerm(e.target.value.slice(0, MAX_MESH_INPUT_LENGTH))}
                 />
                 {isLoadingSuggestions && (
                   <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin" />
@@ -855,6 +1212,7 @@ export default function SearchPage() {
                     <CardContent className="p-2">
                       {suggestions.map((term) => (
                         <button
+                          type="button"
                           key={term.id}
                           className="w-full text-left px-3 py-2 rounded-md hover:bg-muted transition-colors"
                           onClick={() => addTerm(term)}
@@ -884,8 +1242,9 @@ export default function SearchPage() {
                             className="h-8 max-w-[96px] px-2 rounded border bg-background text-sm font-mono"
                             value={operators[index - 1] || 'AND'}
                             onChange={(e) => {
+                              const selectedOperator = normalizeBooleanOperator(e.target.value) ?? 'AND'
                               const newOps = [...operators]
-                              newOps[index - 1] = e.target.value as BooleanOperator
+                              newOps[index - 1] = selectedOperator
                               setOperators(newOps)
                             }}
                           >
@@ -997,7 +1356,13 @@ export default function SearchPage() {
                       )}
                     </CardDescription>
                   </div>
-                  <Button variant="outline" size="sm" onClick={exportSelection} className="w-full sm:w-auto">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={exportSelection}
+                    className="w-full sm:w-auto"
+                    disabled={selectedResults.length === 0}
+                  >
                     Exportar seleccion
                   </Button>
                 </div>
@@ -1005,11 +1370,13 @@ export default function SearchPage() {
               <CardContent>
                 <ScrollArea className="h-[420px] pr-4 sm:h-[500px]">
                   <div className="space-y-4">
-                    {filteredResults.map((result) => {
+                    {filteredResults.map((result, index) => {
                       const isSelected = selectedResults.some((item) => item.id === result.id)
+                      const authorsLabel =
+                        result.authors.length > 0 ? result.authors.slice(0, 3).join(', ') : 'Autor no disponible'
                       return (
                         <Card
-                          key={result.id}
+                          key={result.id || `result-${index + 1}`}
                           className="cursor-pointer hover:bg-muted/50 transition-colors"
                           onClick={() => setSelectedArticle(result)}
                         >
@@ -1040,7 +1407,7 @@ export default function SearchPage() {
                                 </Badge>
                               </div>
                               <p className="text-sm text-muted-foreground mt-1">
-                                {result.authors.slice(0, 3).join(', ')}
+                                {authorsLabel}
                                 {result.authors.length > 3 && ' et al.'}
                               </p>
                               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
@@ -1234,6 +1601,78 @@ export default function SearchPage() {
             </CardContent>
           </Card>
 
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Activity className="h-5 w-5" />
+                Actividad de APIs externas
+              </CardTitle>
+              <CardDescription>
+                Registro en tiempo real de las conexiones usadas para esta busqueda.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={activeSearchRunId ? 'default' : 'secondary'} className="text-xs">
+                  {activeSearchRunId ? 'Monitoreo activo' : 'Sin busqueda activa'}
+                </Badge>
+                <Badge variant="outline" className="text-xs">
+                  {externalApiEvents.length} eventos
+                </Badge>
+              </div>
+
+              {externalApiProviders.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {externalApiProviders.map((provider) => (
+                    <Badge
+                      key={`api-provider-${provider.provider}`}
+                      variant="outline"
+                      className="text-[11px]"
+                    >
+                      {provider.provider} ({provider.count})
+                    </Badge>
+                  ))}
+                </div>
+              )}
+
+              <ScrollArea className="h-56 rounded-md border bg-muted/20 p-2 sm:h-64">
+                <div className="space-y-2 pr-2">
+                  {externalApiEvents.length === 0 ? (
+                    <p className="px-2 py-3 text-xs text-muted-foreground">
+                      Ejecuta una busqueda para ver en vivo que APIs externas estan respondiendo.
+                    </p>
+                  ) : (
+                    externalApiEvents.map((event) => (
+                      <div
+                        key={event.id}
+                        className={`rounded-md border px-2.5 py-2 ${getActivityItemClassName(event.status)}`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span
+                              className={`h-2 w-2 shrink-0 rounded-full ${getActivityDotClassName(event.status)}`}
+                            />
+                            <span className="truncate text-xs font-medium">{event.provider}</span>
+                          </div>
+                          <span className="shrink-0 text-[11px] text-muted-foreground">
+                            {formatActivityTimestamp(event.timestamp)}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs leading-relaxed">{event.message}</p>
+                        {(typeof event.latencyMs === 'number' || typeof event.resultCount === 'number') && (
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            {typeof event.resultCount === 'number' ? `${event.resultCount} resultados` : 'Sin conteo'}
+                            {typeof event.latencyMs === 'number' ? ` - ${event.latencyMs} ms` : ''}
+                          </p>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+
           {/* Filters */}
           <Card>
             <CardHeader>
@@ -1243,6 +1682,33 @@ export default function SearchPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label htmlFor="request-load-profile">Carga de documentacion</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Controla cuanta evidencia se solicita por consulta para evitar sobrecarga.
+                  </p>
+                </div>
+                <Select
+                  value={requestLoadProfile}
+                  onValueChange={(value) => setRequestLoadProfile(normalizeRequestLoadProfile(value))}
+                >
+                  <SelectTrigger id="request-load-profile">
+                    <SelectValue placeholder="Selecciona nivel de carga" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(REQUEST_LOAD_PROFILE_LABELS) as RequestLoadProfile[]).map((profile) => (
+                      <SelectItem key={profile} value={profile}>
+                        {REQUEST_LOAD_PROFILE_LABELS[profile]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {REQUEST_LOAD_PROFILE_DESCRIPTIONS[requestLoadProfile]}
+                </p>
+              </div>
+
               {/* Year Range */}
               <div className="space-y-3">
                 <Label>
@@ -1253,8 +1719,14 @@ export default function SearchPage() {
                   max={2026}
                   step={1}
                   value={yearRangeDraft}
-                  onValueChange={(value) => setYearRangeDraft(value as [number, number])}
-                  onValueCommit={(value) => updateYearRange(value as [number, number])}
+                  onValueChange={(value) => {
+                    if (!Array.isArray(value) || value.length < 2) return
+                    setYearRangeDraft(normalizeYearRange([value[0], value[1]]))
+                  }}
+                  onValueCommit={(value) => {
+                    if (!Array.isArray(value) || value.length < 2) return
+                    updateYearRange([value[0], value[1]])
+                  }}
                   className="mt-2"
                 />
               </div>
@@ -1275,7 +1747,7 @@ export default function SearchPage() {
                           setFilters((prev) => ({
                             ...prev,
                             studyTypes: checked
-                              ? [...(prev.studyTypes || []), type.id]
+                              ? Array.from(new Set([...(prev.studyTypes || []), type.id]))
                               : prev.studyTypes?.filter((t) => t !== type.id),
                           }))
                         }}
@@ -1300,7 +1772,7 @@ export default function SearchPage() {
                   onValueChange={(value) =>
                     setFilters((prev) => ({
                       ...prev,
-                      languages: [value],
+                      languages: normalizeLanguages([value]),
                     }))
                   }
                 >
@@ -1349,8 +1821,11 @@ export default function SearchPage() {
                   max={1000}
                   step={10}
                   value={minSampleDraft}
-                  onValueChange={(value) => setMinSampleDraft(value as number[])}
-                  onValueCommit={([value]) => updateMinSampleSize(value)}
+                  onValueChange={(value) => {
+                    if (!Array.isArray(value) || value.length === 0) return
+                    setMinSampleDraft([clampNumber(Math.round(value[0] ?? 0), 0, 1000)])
+                  }}
+                  onValueCommit={([value]) => updateMinSampleSize(value ?? 0)}
                 />
               </div>
 
@@ -1361,12 +1836,20 @@ export default function SearchPage() {
                 </p>
                 <Slider
                   min={5}
-                  max={200}
+                  max={profileMaxResults}
                   step={5}
                   value={maxResultsDraft}
-                  onValueChange={(value) => setMaxResultsDraft(value as number[])}
-                  onValueCommit={([value]) => updateMaxResults(value)}
+                  onValueChange={(value) => {
+                    if (!Array.isArray(value) || value.length === 0) return
+                    setMaxResultsDraft([
+                      clampNumber(Math.round(value[0] ?? DEFAULT_FILTERS.maxResults), 5, profileMaxResults),
+                    ])
+                  }}
+                  onValueCommit={([value]) => updateMaxResults(value ?? DEFAULT_FILTERS.maxResults)}
                 />
+                <p className="text-xs text-muted-foreground">
+                  Tope del perfil actual: {profileMaxResults} resultados.
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -1387,13 +1870,15 @@ export default function SearchPage() {
                       <AccordionTrigger className="text-sm">
                         <div className="flex items-center gap-2">
                           {search.isFavorite && <Star className="h-3 w-3 text-warning" />}
-                          <span className="truncate max-w-[180px] sm:max-w-[240px]">{search.rawQuery}</span>
+                          <span className="truncate max-w-[180px] sm:max-w-[240px]">
+                            {search.rawQuery || 'Consulta sin texto'}
+                          </span>
                         </div>
                       </AccordionTrigger>
                       <AccordionContent>
                         <div className="space-y-2">
                           <p className="text-xs text-muted-foreground">
-                            {search.resultCount} resultados
+                            {search.resultCount ?? 0} resultados
                           </p>
                           <div className="flex gap-2">
                             <Button
@@ -1479,10 +1964,10 @@ export default function SearchPage() {
                   >
                     Anadir a bibliografia
                   </Button>
-                  {(selectedArticle.sourceUrl || selectedArticle.doi) && (
+                  {selectedArticleExternalUrl && (
                     <Button variant="outline" asChild className="w-full sm:w-auto">
                       <a
-                        href={selectedArticle.sourceUrl || `https://doi.org/${selectedArticle.doi}`}
+                        href={selectedArticleExternalUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                       >

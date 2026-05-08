@@ -1,6 +1,16 @@
 'use client'
 
-import { createContext, useContext, useState, useCallback, useMemo, type ReactNode, type Dispatch, type SetStateAction } from 'react'
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useMemo,
+  useEffect,
+  type ReactNode,
+  type Dispatch,
+  type SetStateAction,
+} from 'react'
 import type {
   CaseStudy,
   CaseSubmission,
@@ -58,19 +68,34 @@ interface ProfessorContextType {
 
 const ProfessorContext = createContext<ProfessorContextType | undefined>(undefined)
 
+const PROFESSOR_CASE_FILTER_STORAGE_KEY = 'professor_case_filter_v1'
+
+const readStoredCaseFilter = (): 'all' | 'draft' | 'active' | 'archived' => {
+  if (typeof window === 'undefined') return 'all'
+  const stored = window.localStorage.getItem(PROFESSOR_CASE_FILTER_STORAGE_KEY)
+  return stored === 'draft' || stored === 'active' || stored === 'archived' ? stored : 'all'
+}
+
 export function ProfessorProvider({ children }: { children: ReactNode }) {
   const [cases, setCasesState] = useState<CaseStudy[]>([])
   const [submissions, setSubmissionsState] = useState<CaseSubmission[]>([])
   const [students, setStudentsState] = useState<StudentProgress[]>([])
   const [hedges, setHedgesState] = useState<SearchHedge[]>([])
   const [evaluations, setEvaluationsState] = useState<Evaluation[]>([])
-  const [selectedCaseFilter, setSelectedCaseFilter] = useState<'all' | 'draft' | 'active' | 'archived'>('all')
+  const [selectedCaseFilter, setSelectedCaseFilter] = useState<'all' | 'draft' | 'active' | 'archived'>(
+    () => readStoredCaseFilter()
+  )
   const [analytics, setAnalytics] = useState<ProfessorAnalytics>({
     totalStudents: 0,
     averageProgress: 0,
     submissionsThisWeek: 0,
     lowProgressCount: 0,
   })
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(PROFESSOR_CASE_FILTER_STORAGE_KEY, selectedCaseFilter)
+  }, [selectedCaseFilter])
 
   const setCases = useCallback((updater: React.SetStateAction<CaseStudy[]>) => {
     setCasesState(updater)

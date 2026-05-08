@@ -3,11 +3,13 @@
 import type React from "react"
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname } from "next/navigation"
 import { useAuth } from "@/contexts/auth-context"
 import { AdminProvider } from "@/contexts/admin-context"
 import { adminSystemApi } from "@/lib/admin-system"
 import { RoleHelpPanel } from "@/components/role-help-panel"
+import { useDashboardSidebar } from "@/hooks/use-dashboard-sidebar"
+import { ExternalApiThinkingIndicator } from "@/components/external-api-thinking-indicator"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
@@ -34,8 +36,13 @@ import {
   Server,
   HardDrive,
   MessageCircle,
+  PanelLeftClose,
+  PanelLeftOpen,
+  FlaskConical,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+
+const STATUS_REFRESH_MS = 60000
 
 const adminNavItems = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
@@ -43,6 +50,7 @@ const adminNavItems = [
   { href: "/admin/audit", label: "Auditoría", icon: FileText },
   { href: "/admin/system", label: "Sistema", icon: Server },
   { href: "/admin/health", label: "Salud del Sistema", icon: Activity },
+  { href: "/admin/testing", label: "Pruebas XP", icon: FlaskConical },
   { href: "/admin/settings", label: "Configuración", icon: Settings },
   { href: "/admin/chat", label: "Chat", icon: MessageCircle },
 ]
@@ -54,19 +62,20 @@ export default function AdminLayout({
 }) {
   const { user, logout, isAuthenticated, isLoading } = useAuth()
   const pathname = usePathname()
-  const router = useRouter()
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [alertCount, setAlertCount] = useState(0)
-  const [systemStatus, setSystemStatus] = useState<"online" | "warning" | "offline">("online")
+  const {
+    sidebarOpen,
+    setSidebarOpen,
+    isDesktopSidebarCollapsed,
+    toggleDesktopSidebar,
+  } = useDashboardSidebar({ storageKey: "admin" })
+  const [adminStatus, setAdminStatus] = useState<{
+    alertCount: number
+    systemStatus: "online" | "warning" | "offline"
+  }>({ alertCount: 0, systemStatus: "online" })
 
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.push("/login")
-    }
-    if (!isLoading && isAuthenticated && user?.role !== "admin") {
-      router.push(`/${user?.role}`)
-    }
-  }, [isAuthenticated, isLoading, router, user])
+  const { alertCount, systemStatus } = adminStatus
+  const desktopSidebarWidthClass = isDesktopSidebarCollapsed ? "lg:w-20" : "lg:w-64"
+  const desktopMainOffsetClass = isDesktopSidebarCollapsed ? "lg:pl-20" : "lg:pl-64"
 
   useEffect(() => {
     let isMounted = true
@@ -80,16 +89,22 @@ export default function AdminLayout({
         if (!isMounted) return
         const status =
           String(health?.status ?? "UP").toUpperCase() === "UP" ? "online" : "warning"
-        setSystemStatus(status)
-        setAlertCount(alerts?.count ?? alerts?.alerts?.length ?? 0)
+        setAdminStatus({
+          systemStatus: status,
+          alertCount: alerts?.count ?? alerts?.alerts?.length ?? 0,
+        })
       } catch {
         if (!isMounted) return
-        setSystemStatus("warning")
+        setAdminStatus((prev) => ({ ...prev, systemStatus: "warning" }))
       }
     }
     loadAdminStatus()
+    const timer = window.setInterval(() => {
+      loadAdminStatus()
+    }, STATUS_REFRESH_MS)
     return () => {
       isMounted = false
+      window.clearInterval(timer)
     }
   }, [isAuthenticated, user?.role])
 
@@ -113,25 +128,39 @@ export default function AdminLayout({
     <div className="min-h-screen bg-muted/30">
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
-        <div
+        <button
+          type="button"
+          aria-label="Cerrar menú lateral"
           className="fixed inset-0 z-40 bg-black/50 lg:hidden"
           onClick={() => setSidebarOpen(false)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault()
+              setSidebarOpen(false)
+            }
+          }}
         />
       )}
 
       {/* Sidebar */}
       <aside
         className={cn(
-          "fixed left-0 top-0 z-50 h-full w-64 bg-card border-r border-border transform transition-transform duration-200 ease-in-out lg:translate-x-0",
+          "fixed left-0 top-0 z-50 h-full w-64 overflow-hidden bg-card border-r border-border transform transition-[width,transform] duration-200 ease-in-out lg:translate-x-0",
+          desktopSidebarWidthClass,
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
-        <div className="flex h-16 items-center justify-between px-4 border-b border-border">
+        <div
+          className={cn(
+            "flex h-16 items-center justify-between px-4 border-b border-border",
+            isDesktopSidebarCollapsed && "lg:justify-center lg:px-3"
+          )}
+        >
           <Link href="/admin" className="flex items-center gap-2">
             <div className="h-8 w-8 rounded-lg bg-destructive/10 flex items-center justify-center">
               <Shield className="h-5 w-5 text-destructive" />
             </div>
-            <div>
+            <div className={cn(isDesktopSidebarCollapsed && "lg:hidden")}>
               <span className="font-bold text-foreground">EDUCEARCH</span>
               <span className="text-xs text-destructive ml-1">Admin</span>
             </div>
@@ -146,33 +175,54 @@ export default function AdminLayout({
           </Button>
         </div>
 
-        <nav className="p-4 space-y-1">
+        <nav
+          className={cn(
+            "p-4 space-y-1",
+            isDesktopSidebarCollapsed && "lg:px-2"
+          )}
+        >
           {adminNavItems.map((item) => {
             const isActive = pathname === item.href
             return (
               <Link
                 key={item.href}
                 href={item.href}
+                title={item.label}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                  isDesktopSidebarCollapsed && "lg:justify-center lg:px-2",
                   isActive
                     ? "bg-destructive/10 text-destructive"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 )}
                 onClick={() => setSidebarOpen(false)}
               >
-                <item.icon className="h-5 w-5" />
-                {item.label}
-                {isActive && <ChevronRight className="h-4 w-4 ml-auto" />}
+                <item.icon className="h-5 w-5 shrink-0" />
+                <span className={cn("truncate", isDesktopSidebarCollapsed && "lg:hidden")}>
+                  {item.label}
+                </span>
+                {isActive && !isDesktopSidebarCollapsed && (
+                  <ChevronRight className="h-4 w-4 ml-auto" />
+                )}
               </Link>
             )
           })}
         </nav>
 
         <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-border">
-          <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-destructive/5">
+          <div
+            className={cn(
+              "flex items-center gap-3 px-3 py-2 rounded-lg bg-destructive/5",
+              isDesktopSidebarCollapsed && "lg:justify-center lg:px-2"
+            )}
+          >
             <HardDrive className="h-5 w-5 text-destructive" />
-            <div className="flex-1 min-w-0">
+            <div
+              className={cn(
+                "flex-1 min-w-0",
+                isDesktopSidebarCollapsed && "lg:hidden"
+              )}
+            >
               <p className="text-xs font-medium text-foreground">Estado del Sistema</p>
               <p
                 className={`text-xs ${
@@ -187,7 +237,7 @@ export default function AdminLayout({
                   ? "Operativo"
                   : systemStatus === "warning"
                     ? "Advertencia"
-                    : "No disponible"}
+                  : "No disponible"}
               </p>
             </div>
             <div
@@ -204,7 +254,7 @@ export default function AdminLayout({
       </aside>
 
       {/* Main content */}
-      <div className="lg:pl-64">
+      <div className={cn(desktopMainOffsetClass)}>
         {/* Header */}
         <header className="sticky top-0 z-30 h-16 bg-card/80 backdrop-blur-sm border-b border-border">
           <div className="flex h-full items-center justify-between px-4">
@@ -216,6 +266,28 @@ export default function AdminLayout({
                 onClick={() => setSidebarOpen(true)}
               >
                 <Menu className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="hidden lg:inline-flex"
+                onClick={toggleDesktopSidebar}
+                aria-label={
+                  isDesktopSidebarCollapsed
+                    ? "Expandir barra lateral"
+                    : "Colapsar barra lateral"
+                }
+                title={
+                  isDesktopSidebarCollapsed
+                    ? "Expandir barra lateral"
+                    : "Colapsar barra lateral"
+                }
+              >
+                {isDesktopSidebarCollapsed ? (
+                  <PanelLeftOpen className="h-5 w-5" />
+                ) : (
+                  <PanelLeftClose className="h-5 w-5" />
+                )}
               </Button>
               <div className="hidden sm:block">
                 <h1 className="text-lg font-semibold text-foreground">
@@ -277,6 +349,7 @@ export default function AdminLayout({
         {/* Page content */}
         <main className="p-4 md:p-6">{children}</main>
       </div>
+      <ExternalApiThinkingIndicator />
       <RoleHelpPanel role="admin" />
     </div>
     </AdminProvider>

@@ -1,5 +1,5 @@
 import type { CaseSubmission, Evaluation } from '@/types'
-import { api } from './api-client'
+import { ApiHttpError, api } from './api-client'
 import {
   STUDENT_FALLBACK_KEYS,
   createLocalId,
@@ -9,53 +9,74 @@ import {
 } from './student-resilience'
 
 type EvaluationsResponse = {
-  evaluations?: Array<Record<string, any>>
+  evaluations?: Array<Record<string, unknown>>
   count?: number
 }
 
 type SubmissionResponse = {
-  submission?: Record<string, any>
+  submission?: Record<string, unknown>
 }
 
 type EvaluationResponse = {
-  evaluation?: Record<string, any>
+  evaluation?: Record<string, unknown>
 }
 
-function normalizeEvaluation(raw: Record<string, any> | null | undefined, fallback: Partial<Evaluation> = {}): Evaluation {
+type SubmissionPayload = SubmissionResponse | Record<string, unknown>
+type EvaluationPayload = EvaluationResponse | Record<string, unknown>
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+}
+
+function asString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback
+}
+
+function asNumber(value: unknown, fallback = 0): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : fallback
+  }
+  return fallback
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+function normalizeEvaluation(raw: Record<string, unknown> | null | undefined, fallback: Partial<Evaluation> = {}): Evaluation {
+  const scores = asRecord(raw?.scores)
+  const comments = asRecord(raw?.comments)
   return {
-    id: raw?.id ?? fallback.id ?? createLocalId('evaluation'),
-    submissionId: raw?.submissionId ?? fallback.submissionId ?? '',
-    professorId: raw?.professorId ?? fallback.professorId ?? '',
+    id: asString(raw?.id, fallback.id ?? createLocalId('evaluation')),
+    submissionId: asString(raw?.submissionId, fallback.submissionId ?? ''),
+    professorId: asString(raw?.professorId, fallback.professorId ?? ''),
     scores: {
-      access: typeof raw?.scores?.access === 'number' ? raw.scores.access : fallback.scores?.access ?? 0,
-      process: typeof raw?.scores?.process === 'number' ? raw.scores.process : fallback.scores?.process ?? 0,
-      communicate:
-        typeof raw?.scores?.communicate === 'number'
-          ? raw.scores.communicate
-          : fallback.scores?.communicate ?? 0,
+      access: asNumber(scores.access, fallback.scores?.access ?? 0),
+      process: asNumber(scores.process, fallback.scores?.process ?? 0),
+      communicate: asNumber(scores.communicate, fallback.scores?.communicate ?? 0),
     },
     comments: {
-      access:
-        typeof raw?.comments?.access === 'string' ? raw.comments.access : fallback.comments?.access ?? '',
-      process:
-        typeof raw?.comments?.process === 'string' ? raw.comments.process : fallback.comments?.process ?? '',
+      access: typeof comments.access === 'string' ? comments.access : fallback.comments?.access ?? '',
+      process: typeof comments.process === 'string' ? comments.process : fallback.comments?.process ?? '',
       communicate:
-        typeof raw?.comments?.communicate === 'string'
-          ? raw.comments.communicate
+        typeof comments.communicate === 'string'
+          ? comments.communicate
           : fallback.comments?.communicate ?? '',
     },
     overallScore:
-      typeof raw?.overallScore === 'number'
-        ? raw.overallScore
+      typeof raw?.overallScore === 'number' || typeof raw?.overallScore === 'string'
+        ? asNumber(raw.overallScore, 0)
         : fallback.overallScore ??
           Math.round(
-            ((typeof raw?.scores?.access === 'number' ? raw.scores.access : 0) +
-              (typeof raw?.scores?.process === 'number' ? raw.scores.process : 0) +
-              (typeof raw?.scores?.communicate === 'number' ? raw.scores.communicate : 0)) /
+            ((asNumber(scores.access, 0)) +
+              (asNumber(scores.process, 0)) +
+              (asNumber(scores.communicate, 0))) /
               3
           ),
-    feedback: typeof raw?.feedback === 'string' ? raw.feedback : fallback.feedback ?? '',
-    evaluatedAt: raw?.evaluatedAt ?? fallback.evaluatedAt ?? new Date().toISOString(),
+    feedback: asString(raw?.feedback, fallback.feedback ?? ''),
+    evaluatedAt: asString(raw?.evaluatedAt, fallback.evaluatedAt ?? new Date().toISOString()),
   }
 }
 
@@ -69,19 +90,35 @@ function normalizeStatus(status: unknown): CaseSubmission['status'] {
   return 'pending'
 }
 
-function normalizeSubmission(raw: Record<string, any>): CaseSubmission {
-  const id = raw.id ?? raw.submissionId ?? ''
+function normalizeSubmission(raw: Record<string, unknown>): CaseSubmission {
+  const id = asString(raw.id, asString(raw.submissionId))
   return {
     id,
-    caseId: raw.caseId ?? '',
-    studentId: raw.studentId ?? '',
-    submittedAt: raw.submittedAt ?? '',
-    content: raw.content ?? '',
-    selectedArticles: raw.selectedArticles ?? [],
-    bibliography: raw.bibliography ?? '',
+    caseId: asString(raw.caseId),
+    studentId: asString(raw.studentId),
+    submittedAt: asString(raw.submittedAt),
+    content: asString(raw.content),
+    selectedArticles: asStringArray(raw.selectedArticles),
+    bibliography: asString(raw.bibliography),
     status: normalizeStatus(raw.status),
-    evaluation: raw.evaluation,
+    evaluation: raw.evaluation ? normalizeEvaluation(asRecord(raw.evaluation)) : undefined,
   }
+}
+
+function extractSubmissionRecord(payload: SubmissionPayload | undefined): Record<string, unknown> {
+  const record = asRecord(payload)
+  if (record.submission && typeof record.submission === 'object') {
+    return asRecord(record.submission)
+  }
+  return record
+}
+
+function extractEvaluationRecord(payload: EvaluationPayload | undefined): Record<string, unknown> {
+  const record = asRecord(payload)
+  if (record.evaluation && typeof record.evaluation === 'object') {
+    return asRecord(record.evaluation)
+  }
+  return record
 }
 
 function readSubmissionsLocal(): CaseSubmission[] {
@@ -116,9 +153,17 @@ export const evaluationApi = {
     return items
   },
 
+  getAll: async () => {
+    const [pending, reviewed] = await Promise.all([evaluationApi.getPending(), evaluationApi.getReviewed()])
+    return { pending, reviewed, all: [...pending, ...reviewed] }
+  },
+
   submit: async (submissionId: string, evaluation: Omit<Evaluation, 'id' | 'evaluatedAt'>) => {
-    const res = await api.post<{ evaluation?: Evaluation }>(`/evaluations/${submissionId}`, evaluation)
-    const normalized = normalizeEvaluation(res?.evaluation as Record<string, any> | undefined, {
+    const res = await api.post<{ evaluation?: Evaluation } | Record<string, unknown>>(
+      `/evaluations/${submissionId}`,
+      evaluation
+    )
+    const normalized = normalizeEvaluation(extractEvaluationRecord(res), {
       ...evaluation,
       submissionId,
     })
@@ -134,11 +179,12 @@ export const evaluationApi = {
   },
 
   getBySubmission: async (submissionId: string) => {
-    const res = await api.get<EvaluationResponse>(`/evaluations/submission/${submissionId}`)
-    if (!res?.evaluation) {
+    const res = await api.get<EvaluationPayload>(`/evaluations/submission/${submissionId}`)
+    const record = extractEvaluationRecord(res)
+    if (!record.id && !record.submissionId) {
       throw new Error('Evaluation not found')
     }
-    const evaluation = normalizeEvaluation(res.evaluation, { submissionId })
+    const evaluation = normalizeEvaluation(record, { submissionId })
     const existing = readSubmissionsLocal().find((item) => item.id === submissionId)
     if (existing) {
       upsertSubmissionLocal({ ...existing, evaluation, status: 'reviewed' })
@@ -147,11 +193,23 @@ export const evaluationApi = {
   },
 
   getSubmission: async (submissionId: string) => {
-    const res = await api.get<SubmissionResponse>(`/submissions/${submissionId}`)
-    const submission = normalizeSubmission(res?.submission ?? {})
-    if (submission.id) {
+    try {
+      const res = await api.get<SubmissionPayload>(`/submissions/${submissionId}`)
+      const submission = normalizeSubmission(extractSubmissionRecord(res))
+      if (!submission.id) {
+        throw new Error('Submission not found')
+      }
       upsertSubmissionLocal(submission)
+      return submission
+    } catch (error) {
+      if (error instanceof ApiHttpError && error.status === 404) {
+        throw new Error('Submission not found')
+      }
+      const cached = readSubmissionsLocal().find((item) => item.id === submissionId)
+      if (cached) {
+        return cached
+      }
+      throw error
     }
-    return submission
   },
 }

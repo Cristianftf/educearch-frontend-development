@@ -70,7 +70,9 @@ function formatDate(dateString: string): string {
 }
 
 function formatDateTime(dateString: string): string {
-  return new Date(dateString).toLocaleString('es', {
+  const date = new Date(dateString)
+  if (Number.isNaN(date.getTime())) return 'Fecha no disponible'
+  return date.toLocaleString('es', {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
@@ -81,6 +83,7 @@ function formatDateTime(dateString: string): string {
 
 function getDaysRemaining(dueDate: string): number {
   const due = parseCalendarDateUtc(dueDate)
+  if (Number.isNaN(due.getTime())) return 0
   const now = new Date()
   const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
   const diff = due.getTime() - todayUtc
@@ -94,6 +97,42 @@ function parseCalendarDateUtc(value: string): Date {
     return new Date(Date.UTC(year, month - 1, day))
   }
   return new Date(value)
+}
+
+function getSafeCaseLabel(caseStudy: Pick<CaseStudy, 'id' | 'title'>): string {
+  const title = typeof caseStudy.title === 'string' ? caseStudy.title.trim() : ''
+  if (title) return title
+  const fallbackId = typeof caseStudy.id === 'string' ? caseStudy.id.trim() : ''
+  return fallbackId ? `Caso ${fallbackId.slice(0, 8)}` : 'Caso sin titulo'
+}
+
+function getQuestionText(question: CaseStudy['guidingQuestions'][number] | string): string {
+  if (typeof question === 'string') {
+    const trimmed = question.trim()
+    if (!trimmed.startsWith('{')) return trimmed
+    try {
+      const parsed = JSON.parse(trimmed) as { question?: unknown }
+      return typeof parsed.question === 'string' ? parsed.question.trim() : trimmed
+    } catch {
+      return trimmed
+    }
+  }
+  return typeof question.question === 'string' ? question.question.trim() : ''
+}
+
+function getRubricPoints(item: CaseStudy['rubric'][number]): number {
+  const candidate = (item as { maxPoints?: unknown; maxScore?: unknown }).maxPoints
+  const fallback = (item as { maxScore?: unknown }).maxScore
+  const value = typeof candidate === 'number' ? candidate : typeof fallback === 'number' ? fallback : 0
+  return Number.isFinite(value) ? Math.max(0, value) : 0
+}
+
+function getRubricCriteria(item: CaseStudy['rubric'][number]): string {
+  const criteria = (item as { criteria?: unknown; criterion?: unknown }).criteria
+  const fallback = (item as { criterion?: unknown }).criterion
+  if (typeof criteria === 'string' && criteria.trim()) return criteria.trim()
+  if (typeof fallback === 'string' && fallback.trim()) return fallback.trim()
+  return 'Sin criterio definido'
 }
 
 export default function CasesPage() {
@@ -234,7 +273,7 @@ export default function CasesPage() {
       if (!submission?.evaluation) continue
       if (seenSubmissionIds.has(submission.id)) continue
       const caseTitle =
-        cases.find((entry) => entry.id === caseId)?.title ?? `Caso ${caseId.slice(0, 8)}`
+        getSafeCaseLabel(cases.find((entry) => entry.id === caseId) ?? { id: caseId, title: '' })
       newNotifications.push({
         submissionId: submission.id,
         caseId,
@@ -262,16 +301,14 @@ export default function CasesPage() {
 
     setIsSubmitting(true)
     try {
-      const submission: Partial<CaseSubmission> = {
+      const submission: Omit<CaseSubmission, 'id' | 'submittedAt' | 'status'> = {
         caseId: selectedCase.id,
         content: submissionContent,
         selectedArticles: [],
         bibliography: '',
+        studentId: user?.id ?? '',
       }
-      if (user?.id) {
-        submission.studentId = user.id
-      }
-      const createdSubmission = await casesApi.submit(selectedCase.id, submission as CaseSubmission)
+      const createdSubmission = await casesApi.submit(selectedCase.id, submission)
       setSubmissionsByCaseId((prev) => ({ ...prev, [selectedCase.id]: createdSubmission }))
       setSelectedSubmission(createdSubmission)
       await loadCasesAndSubmissions()
@@ -651,22 +688,10 @@ export default function CasesPage() {
                     <MessageSquare className="h-4 w-4" />
                     Preguntas guía
                   </h4>
-                  <ol className="space-y-2 list-decimal list-inside">
+                          <ol className="space-y-2 list-decimal list-inside">
                     {selectedCase.guidingQuestions.map((question, idx) => {
                       const isString = typeof (question as unknown) === 'string'
-                      let questionText = isString
-                        ? (question as unknown as string)
-                        : question.question
-                      if (isString && questionText.trim().startsWith('{')) {
-                        try {
-                          const parsed = JSON.parse(questionText)
-                          if (parsed?.question) {
-                            questionText = parsed.question
-                          }
-                        } catch {
-                          // keep original string
-                        }
-                      }
+                      const questionText = getQuestionText(question as CaseStudy['guidingQuestions'][number] | string)
                       const key =
                         isString
                           ? `${idx}-${questionText}`
@@ -688,17 +713,17 @@ export default function CasesPage() {
                   </h4>
                   <div className="space-y-2">
                     {selectedCase.rubric.map((item, idx) => (
-                      <div key={item.id || idx} className="p-3 rounded-lg border">
+                        <div key={item.id || idx} className="p-3 rounded-lg border">
                         <div className="flex items-center justify-between">
                           <span className="text-sm font-medium capitalize">
                             {item.competency}
                           </span>
                           <Badge variant="outline">
-                            {'maxPoints' in item ? item.maxPoints : (item as any).maxScore} pts
+                            {getRubricPoints(item)} pts
                           </Badge>
                         </div>
                         <p className="text-sm text-muted-foreground mt-1">
-                          {'criteria' in item ? item.criteria : (item as any).criterion}
+                          {getRubricCriteria(item)}
                         </p>
                       </div>
                     ))}

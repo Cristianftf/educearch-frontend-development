@@ -18,6 +18,7 @@ import org.xml.sax.InputSource;
 import reactor.util.retry.Retry;
 
 import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.XMLConstants;
 import java.io.StringReader;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -46,6 +47,12 @@ public class PubMedApiServiceImpl implements PubMedApiService {
     @Value("${app.pubmed.api.max-retries:2}")
     private int maxRetries;
 
+    @Value("${app.pubmed.api.detail-batch-size:10}")
+    private int detailBatchSize;
+
+    @Value("${app.pubmed.api.max-in-memory-size-bytes:1048576}")
+    private int maxInMemorySizeBytes;
+
     @Value("${app.pubmed.api.tool:uci-competencia}")
     private String pubmedTool;
 
@@ -67,12 +74,7 @@ public class PubMedApiServiceImpl implements PubMedApiService {
             return List.of();
         }
 
-        String xml = fetchPubMedDetails(ids);
-        if (xml == null || xml.isBlank()) {
-            return List.of();
-        }
-
-        return parsePubMedXml(xml);
+        return fetchPubMedArticles(ids);
     }
 
     @Override
@@ -159,6 +161,9 @@ public class PubMedApiServiceImpl implements PubMedApiService {
     }
 
     private String fetchPubMedDetails(List<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return null;
+        }
         try {
             WebClient client = buildPubMedClient();
             String joined = String.join(",", ids);
@@ -183,8 +188,29 @@ public class PubMedApiServiceImpl implements PubMedApiService {
     private WebClient buildPubMedClient() {
         return webClientBuilder
             .baseUrl(pubmedBaseUrl)
+            .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(Math.max(262144, maxInMemorySizeBytes)))
             .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
             .build();
+    }
+
+    private List<PubMedArticle> fetchPubMedArticles(List<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+
+        int batchSize = Math.max(1, Math.min(detailBatchSize, 25));
+        List<PubMedArticle> articles = new ArrayList<>();
+        for (int start = 0; start < ids.size(); start += batchSize) {
+            int end = Math.min(start + batchSize, ids.size());
+            List<String> batch = ids.subList(start, end);
+            String xml = fetchPubMedDetails(batch);
+            if (xml == null || xml.isBlank()) {
+                log.warn("PubMed detail batch returned empty response for {} ids", batch.size());
+                continue;
+            }
+            articles.addAll(parsePubMedXml(xml));
+        }
+        return articles;
     }
 
     private java.net.URI buildEutilsUri(UriBuilder builder, String path, Map<String, String> params) {
@@ -206,8 +232,13 @@ public class PubMedApiServiceImpl implements PubMedApiService {
     private List<PubMedArticle> parsePubMedXml(String xml) {
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            // PubMed XML includes DOCTYPE. Keep parsing enabled but block external entities/DTDs for safety.
+            factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
             factory.setExpandEntityReferences(false);
+            factory.setXIncludeAware(false);
             Document doc = factory.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
 
             NodeList articles = doc.getElementsByTagName("PubmedArticle");

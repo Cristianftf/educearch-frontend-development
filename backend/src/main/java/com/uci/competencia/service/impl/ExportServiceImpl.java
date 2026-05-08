@@ -65,7 +65,6 @@ public class ExportServiceImpl implements ExportService {
 
             // Guardar archivo para descarga
             ExportedFile exportedFile = new ExportedFile();
-            exportedFile.id = result.exportId;
             exportedFile.content = bibliographyContent;
             exportedFile.contentType = "text/plain";
             exportedFile.createdAt = System.currentTimeMillis();
@@ -109,7 +108,6 @@ public class ExportServiceImpl implements ExportService {
 
             // Guardar archivo para descarga
             ExportedFile exportedFile = new ExportedFile();
-            exportedFile.id = result.reportId;
             exportedFile.content = reportContent;
             exportedFile.contentType = "application/pdf";
             exportedFile.createdAt = System.currentTimeMillis();
@@ -462,7 +460,6 @@ public class ExportServiceImpl implements ExportService {
      * Clase interna para almacenamiento temporal de archivos
      */
     private static class ExportedFile {
-        String id;
         String content;
         String contentType;
         long createdAt;

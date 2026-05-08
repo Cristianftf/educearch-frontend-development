@@ -1,5 +1,6 @@
 package com.uci.competencia.model.entity;
 
+import com.uci.competencia.model.converter.StringUuidConverter;
 import com.uci.competencia.model.enums.SubmissionStatus;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -21,9 +22,11 @@ public class CaseSubmission {
     private String id;
 
     @Column(nullable = false)
+    @Convert(converter = StringUuidConverter.class)
     private String caseId;
 
     @Column(nullable = false)
+    @Convert(converter = StringUuidConverter.class)
     private String studentId;
 
     @CreationTimestamp

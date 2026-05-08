@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -113,12 +113,34 @@ export function EvidencePyramid({
   selectedStudies = [],
   onAddToBibliography,
 }: EvidencePyramidProps) {
+  const currentYear = new Date().getFullYear()
   const [hoveredLevel, setHoveredLevel] = useState<number | null>(null)
   const [rotation, setRotation] = useState(0)
   const [zoom, setZoom] = useState(1)
-  const [yearRange, setYearRange] = useState<[number, number]>([2000, 2024])
+  const [yearRange, setYearRange] = useState<[number, number]>([2000, currentYear])
   const [minSampleSize, setMinSampleSize] = useState(0)
   const [showConflictsOnly, setShowConflictsOnly] = useState(false)
+
+  const yearBounds = useMemo<[number, number]>(() => {
+    const years = studies
+      .map((study) => study.year)
+      .filter((year) => Number.isFinite(year))
+    const minYear = years.length > 0 ? Math.min(...years, 2000) : 2000
+    const maxYear = years.length > 0 ? Math.max(...years, currentYear) : currentYear
+    return [Math.max(1900, minYear), maxYear]
+  }, [studies, currentYear])
+
+  useEffect(() => {
+    setYearRange((current) => {
+      const clamped: [number, number] = [
+        Math.max(yearBounds[0], Math.min(current[0], yearBounds[1])),
+        Math.max(yearBounds[0], Math.min(current[1], yearBounds[1])),
+      ]
+      if (clamped[0] > clamped[1]) return yearBounds
+      if (clamped[0] === current[0] && clamped[1] === current[1]) return current
+      return clamped
+    })
+  }, [yearBounds])
 
   const handleLevelClick = (level: number) => {
     if (interactive && onLevelSelect) {
@@ -133,7 +155,6 @@ export function EvidencePyramid({
   }
 
   const getStudyColor = (year: number): string => {
-    const currentYear = new Date().getFullYear()
     const age = currentYear - year
     if (age <= 2) return 'bg-blue-500'
     if (age <= 5) return 'bg-green-500'
@@ -309,8 +330,8 @@ export function EvidencePyramid({
             <Slider
               value={yearRange}
               onValueChange={(value) => setYearRange(value as [number, number])}
-              min={2000}
-              max={2024}
+              min={yearBounds[0]}
+              max={yearBounds[1]}
               step={1}
               className="mt-2"
             />

@@ -33,6 +33,7 @@ public class UserBatchImportDTO {
         private String lastName;
         private String role; // STUDENT, PROFESSOR, ADMIN
         private String faculty;
+        private Boolean active;
         private String passwordHash;
         private String institutionalId;
     }

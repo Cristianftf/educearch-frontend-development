@@ -9,7 +9,11 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import jakarta.annotation.PostConstruct;
+import java.util.Collections;
 import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Component
@@ -111,5 +115,36 @@ public class JwtTokenProvider {
             log.error("Error extracting authorities from token: {}", e.getMessage());
             return null;
         }
+    }
+
+    public List<String> getNormalizedAuthoritiesFromToken(String token) {
+        String rawAuthorities = getAuthoritiesFromToken(token);
+        if (rawAuthorities == null || rawAuthorities.isBlank()) {
+            return Collections.emptyList();
+        }
+
+        return java.util.Arrays.stream(rawAuthorities.split(","))
+            .map(String::trim)
+            .filter(value -> !value.isBlank())
+            .map(this::normalizeAuthority)
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+    }
+
+    private String normalizeAuthority(String authority) {
+        if (authority == null || authority.isBlank()) {
+            return null;
+        }
+
+        String normalized = authority.trim().toUpperCase(Locale.ROOT);
+        if (normalized.startsWith("ROLE_")) {
+            return normalized;
+        }
+
+        return switch (normalized) {
+            case "ADMIN", "PROFESSOR", "STUDENT" -> "ROLE_" + normalized;
+            default -> normalized;
+        };
     }
 }

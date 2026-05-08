@@ -1,0 +1,158 @@
+PLAN DE PRUEBAS (XP) PARA EDUSEARCH
+==================================
+
+Contexto analizado (resumen tecnico)
+------------------------------------
+- Frontend Next.js (app/ + components/ + lib/) con flujos por rol: publico, estudiante, profesor, administrador.
+- Backend Spring Boot (backend/) con API REST, JWT, WebSocket chat, Redis cache, PostgreSQL, Flyway.
+- Integraciones externas: PubMed, Europe PMC, ClinicalTrials.gov, MeSH, OpenAI/Gemini (segun config).
+- Estrategias de resiliencia en frontend: fallback local, cache local, reintentos y degradacion.
+
+Enfoque XP aplicado
+-------------------
+XP prioriza pruebas automatizadas desde el inicio con ciclos cortos:
+1) Pruebas de programador (unitarias) con TDD.
+2) Pruebas de integracion continua (API + DB + cache + colas/tareas).
+3) Pruebas de cliente (aceptacion) ligadas a historias de usuario.
+4) Pruebas exploratorias y de regresion frecuentes.
+
+Tipos de pruebas requeridas y que cubrir
+----------------------------------------
+
+A) Pruebas unitarias (TDD, rapidas)
+1. Autenticacion:
+   - Login: mapping de roles, tokens, expiracion, refresh, logout.
+   - Registro y politicas de contrasena.
+   - Reset de contrasena con token invalido/expirado.
+2. Validaciones y sanitizacion:
+   - Longitudes maximas (claim, URL, busqueda, filtros, campos admin).
+   - Normalizacion de fechas, niveles, puntajes y estados.
+3. Busqueda (frontend y backend):
+   - Construccion de query (terminos, operadores, filtros).
+   - Normalizacion de resultados y deduplicacion.
+   - Reglas de limit/max results por perfil de carga.
+4. Verificacion:
+   - Parseo de evidencia, score y estado (verified/conflicting/misinformation/pending).
+   - Regla de fusion de resultados y recomendaciones.
+   - Construccion de claim desde URL y stopwords.
+5. Bibliografia:
+   - Formatos APA/Vancouver/BibTeX/XML.
+   - Conteo de articulos y manejo de DOI.
+6. Casos y evaluaciones:
+   - Serializacion/deserializacion de rubricas y preguntas guia.
+   - Estados de casos (draft/active/archived) y de entregas.
+7. Admin y auditoria:
+   - Normalizacion de dashboards, salud del sistema, y logs.
+   - Sanitizacion de filtros y parametros.
+
+B) Pruebas de integracion (API + datos)
+1. Auth API:
+   - /api/auth/login, /refresh, /logout, /me.
+   - Permisos por rol y acceso denegado.
+2. Search API:
+   - /api/search/execute con filtros completos.
+   - /api/search/mesh/suggestions.
+   - /api/search/external-fallback y combinacion de resultados.
+3. Verification API:
+   - /api/verify/claim con claim y con URL.
+   - /api/verify/result/{id} y /api/verify/history.
+4. Bibliography API:
+   - /api/export/bibliography, /api/bibliography/history.
+   - /api/bibliography/{id}/download con txt/docx.
+5. Casos y evaluaciones:
+   - /api/cases CRUD, asignacion, entregas, y consultas.
+   - /api/evaluations/pending, /reviewed, /{submissionId}.
+6. Progreso y analiticas:
+   - /api/progress/me, /api/progress/{id}.
+   - /api/professor/analytics/overview y /student/{id}.
+7. Chat:
+   - REST: /api/chat/contacts, /messages, /send, /read.
+   - WebSocket: conexion, autorizacion, eventos y fallback REST.
+8. Admin:
+   - /api/admin/users CRUD + import CSV.
+   - /api/admin/audit/logs, /api/admin/audit/export.
+   - /api/admin/health, /api/admin/dashboard, /api/admin/system/overview.
+   - /api/admin/external-apis/check, /api/admin/test-pubmed.
+   - /api/admin/backup + restore + delete + list.
+   - /api/admin/cache/clear, /db/optimize, /logs/cleanup, /search/reindex.
+   - /api/admin/monitoring/errors + /analyze.
+
+C) Pruebas end-to-end (E2E) por rol (historias de usuario)
+1. Publico:
+   - Home informativo, registro, login.
+   - Recuperacion y reset de contrasena.
+2. Estudiante:
+   - Dashboard y progreso.
+   - Busqueda avanzada (constructor visual + query raw + filtros).
+   - Historial, favoritos, reuso en verificacion/bibliografia/piramide.
+   - Verificacion de claim y URL con semaforo + recomendaciones.
+   - Bibliografia (generar, copiar, descargar, historial).
+   - Piramide de evidencia.
+   - Casos asignados: ver, responder, adjuntar bibliografia, enviar entrega.
+   - Ver evaluaciones y notificaciones.
+   - Chat con profesores.
+3. Profesor:
+   - Dashboard docente con metricas.
+   - Busqueda avanzada y creacion de search hedges.
+   - CRUD de casos y asignacion a estudiantes.
+   - Evaluar entregas, calificar por competencia y rubrica.
+   - Analiticas de aula y progreso individual.
+   - Chat.
+4. Administrador:
+   - Dashboard operativo.
+   - Gestion de usuarios e import CSV.
+   - Auditoria: filtros, exportes, reportes.
+   - Salud de sistema, backups y restauracion.
+   - Mantenimiento: limpiar cache, optimizar DB, limpiar logs, reindexar.
+   - Diagnostico de APIs externas y prueba de PubMed.
+   - Configuracion avanzada (API keys, limites, IA).
+   - Monitor de errores y alertas.
+
+D) Pruebas de resiliencia y fallback (clave en el proyecto)
+1. Backend caido o lento:
+   - Busqueda y verificacion deben activar fallback externo o cache local.
+   - Mensajes de degradacion y no bloqueo del flujo.
+2. Errores de APIs externas:
+   - Reintentos, timeouts y degradacion controlada.
+   - Registro en auditoria y actividad externa.
+3. Modo offline parcial (frontend):
+   - Historial local de busquedas, verificaciones, bibliografias y casos.
+   - Consistencia al volver a estar online.
+4. WebSocket chat inestable:
+   - Fallback a REST y sincronizacion de no leidos.
+
+E) Pruebas de seguridad
+1. Autorizacion por rol en frontend y backend (RBAC real).
+2. Proteccion de rutas y endpoints (401/403).
+3. Validacion de entrada y proteccion contra inyecciones (SQL, XSS, CSV).
+4. Rate limiting y manejo de tokens expirados.
+5. Manejo seguro de errores (sin fuga de datos).
+
+F) Pruebas de rendimiento
+1. Busquedas concurrentes (latencia p50/p95/p99).
+2. Verificacion con RAG y tiempos de respuesta.
+3. Chat en tiempo real (concurrencia + orden).
+4. Cargas admin (auditoria y exportes grandes).
+
+G) Pruebas de usabilidad y accesibilidad
+1. Responsivo desktop/mobile en pantallas clave.
+2. Navegacion por teclado, focus visible, lector de pantalla.
+3. Mensajes de error claros y estados de carga.
+
+H) Pruebas de datos y migraciones
+1. Flyway: aplicar migraciones desde cero y sobre DB existente.
+2. Backups/restore y consistencia posterior.
+3. Limpieza de logs y cache sin perdida de datos criticos.
+
+Prioridad recomendada (XP)
+--------------------------
+1) Unitarias + integracion de APIs criticas (auth, search, verify, bibliography).
+2) E2E por rol (flujos principales).
+3) Resiliencia y seguridad.
+4) Rendimiento y usabilidad.
+
+Nota de ejecucion continua
+--------------------------
+- Ejecutar pruebas en cada iteracion corta (CI).
+- Agregar nuevas pruebas de aceptacion por cada historia de usuario nueva.
+- Re-ejecutar regresion antes de cada entrega.

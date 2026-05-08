@@ -5,7 +5,7 @@
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>4.0.2</version>
+		<version>4.0.6</version>
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>com.uci.competencia</groupId>
@@ -47,7 +47,11 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-security</artifactId>
 		</dependency>
-		<dependency>
+		<!--~~(org.springframework.data.build:spring-data-build:4.0.5 failed. Unable to download POM: org.springframework.data.build:spring-data-build:4.0.5. Tried repositories:
+https://repo.maven.apache.org/maven2: Connect timed out)~~>--><!--~~(org.springframework:spring-aspects:7.0.7 failed. Unable to download POM: org.springframework:spring-aspects:7.0.7. Tried repositories:
+https://repo.maven.apache.org/maven2: Connect timed out)~~>--><!--~~(org.springframework.boot:spring-boot-sql:4.0.6 failed. Unable to download POM: org.springframework.boot:spring-boot-sql:4.0.6. Tried repositories:
+https://repo.maven.apache.org/maven2: Connect timed out)~~>--><!--~~(org.springframework.boot:spring-boot-transaction:4.0.6 failed. Unable to download POM: org.springframework.boot:spring-boot-transaction:4.0.6. Tried repositories:
+https://repo.maven.apache.org/maven2: Connect timed out)~~>--><dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-jpa</artifactId>
 		</dependency>
@@ -85,8 +89,6 @@
 		<dependency>
 			<groupId>org.postgresql</groupId>
 			<artifactId>postgresql</artifactId>
-			<version>${postgresql.version}</version>
-			<scope>runtime</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.flywaydb</groupId>
@@ -122,15 +124,12 @@
 		<dependency>
 			<groupId>org.springframework.ldap</groupId>
 			<artifactId>spring-ldap-core</artifactId>
-			<version>3.2.1</version>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.security</groupId>
 			<artifactId>spring-security-ldap</artifactId>
-			<version>6.4.0</version>
 		</dependency>
 
-		<!-- OpenAPI/Swagger -->
 		<dependency>
 			<groupId>org.springdoc</groupId>
 			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
@@ -141,24 +140,23 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webflux</artifactId>
-			<version>4.0.2</version>
 		</dependency>
+		<!-- Note: com.google.genai SDK not available in standard repositories 
 		<dependency>
 			<groupId>com.google.genai</groupId>
 			<artifactId>google-genai</artifactId>
-			<version>1.0.0</version>
+			<version>0.9.0</version>
 		</dependency>
+		 -->
 		<dependency>
 			<groupId>org.apache.httpcomponents.client5</groupId>
 			<artifactId>httpclient5</artifactId>
-			<version>5.3.1</version>
 		</dependency>
 
 		<!-- Metrics and Monitoring -->
 		<dependency>
 			<groupId>io.micrometer</groupId>
 			<artifactId>micrometer-registry-prometheus</artifactId>
-			<version>1.14.1</version>
 		</dependency>
 
 		<!-- JSON Processing -->
@@ -170,15 +168,12 @@
 		<dependency>
 			<groupId>com.fasterxml.jackson.datatype</groupId>
 			<artifactId>jackson-datatype-jsr310</artifactId>
-			<version>2.18.0</version>
 		</dependency>
 
-		<!-- Validation -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-validation</artifactId>
 		</dependency>
-
 		<!-- XML Processing -->
 		<dependency>
 			<groupId>javax.xml.bind</groupId>
@@ -190,7 +185,6 @@
 		<dependency>
 			<groupId>org.apache.commons</groupId>
 			<artifactId>commons-lang3</artifactId>
-			<version>3.14.0</version>
 		</dependency>
 		<dependency>
 			<groupId>commons-io</groupId>
@@ -233,13 +227,11 @@
 		<dependency>
 			<groupId>org.testcontainers</groupId>
 			<artifactId>testcontainers</artifactId>
-			<version>${testcontainers.version}</version>
 			<scope>test</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.testcontainers</groupId>
 			<artifactId>postgresql</artifactId>
-			<version>${testcontainers.version}</version>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
@@ -251,7 +243,6 @@
 				<artifactId>spring-cloud-dependencies</artifactId>
 				<version>${spring-cloud.version}</version>
 				<type>pom</type>
-				<scope>import</scope>
 			</dependency>
 		</dependencies>
 	</dependencyManagement>
@@ -261,7 +252,6 @@
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-compiler-plugin</artifactId>
-				<version>3.11.0</version>
 				<configuration>
 					<source>21</source>
 					<target>21</target>
@@ -273,9 +263,7 @@
 						<arg>jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED</arg>
 					</compilerArgs>
 					<annotationProcessorPaths>
-						<path>
-							<groupId>org.projectlombok</groupId>
-							<artifactId>lombok</artifactId>
+						<path>						<groupId>org.projectlombok</groupId>							<artifactId>lombok</artifactId>
 							<version>1.18.38</version>
 						</path>
 					</annotationProcessorPaths>

@@ -1,0 +1,317 @@
+{
+  "cases": [
+    {
+      "id": "UT-01",
+      "suiteId": "unit",
+      "module": "Autenticacion (backend)",
+      "title": "Validar login con credenciales validas",
+      "automation": "automated",
+      "matches": ["UT-01"],
+      "seedData": [
+        "Usuario activo: doctor@educearch.test",
+        "Password plano: SecurePass1!",
+        "Role esperado: STUDENT"
+      ],
+      "steps": [
+        "Preparar un usuario activo con password codificado.",
+        "Invocar login con email y password correctos.",
+        "Verificar token JWT, refresh token y perfil del usuario."
+      ],
+      "expected": "Devuelve token JWT, refresh token y datos del usuario autenticado."
+    },
+    {
+      "id": "UT-02",
+      "suiteId": "unit",
+      "module": "Autenticacion (backend)",
+      "title": "Intento de login con contrasena incorrecta",
+      "automation": "automated",
+      "matches": ["UT-02"],
+      "seedData": [
+        "Usuario activo: doctor@educearch.test",
+        "Password almacenado: SecurePass1!",
+        "Password enviado: WrongPass9?"
+      ],
+      "steps": [
+        "Preparar un usuario activo en el repositorio.",
+        "Invocar login con password incorrecto.",
+        "Confirmar excepcion de credenciales invalidas."
+      ],
+      "expected": "Se rechaza la autenticacion con mensaje de error de credenciales."
+    },
+    {
+      "id": "UT-03",
+      "suiteId": "unit",
+      "module": "Busqueda cientifica (backend)",
+      "title": "Construccion de consulta MeSH a partir de termino de usuario",
+      "automation": "automated",
+      "matches": ["UT-03"],
+      "seedData": [
+        "Terminos: diabetes, metformin",
+        "Operadores: AND",
+        "Filtros: 2018-2024, full text, english, systematic_review"
+      ],
+      "steps": [
+        "Construir SearchRequestDTO con terminos y filtros.",
+        "Transformar terminos a MeSH con PubMedQueryBuilder.",
+        "Validar sintaxis PubMed final."
+      ],
+      "expected": "La consulta resultante usa terminos MeSH validos y filtros clinicos correctos."
+    },
+    {
+      "id": "UT-04",
+      "suiteId": "unit",
+      "module": "Busqueda cientifica (backend)",
+      "title": "Llamada a PubMed con terminos correctos",
+      "automation": "automated",
+      "matches": ["UT-04"],
+      "seedData": [
+        "Query: exercise AND diabetes",
+        "esearch mock -> PMID 12345",
+        "efetch mock -> articulo con DOI y autores"
+      ],
+      "steps": [
+        "Mockear esearch y efetch de PubMed.",
+        "Ejecutar searchArticles con un maxResults seguro.",
+        "Verificar parseo de articulos devueltos."
+      ],
+      "expected": "Retorna lista de articulos parseados correctamente desde la respuesta de PubMed."
+    },
+    {
+      "id": "UT-05",
+      "suiteId": "unit",
+      "module": "Validacion semantica (backend)",
+      "title": "Clasificar afirmacion: El ejercicio reduce la diabetes",
+      "automation": "automated",
+      "matches": ["UT-05"],
+      "seedData": [
+        "Claim: Regular exercise reduces type 2 diabetes risk",
+        "Evidence: Regular physical activity reduces insulin resistance and diabetes incidence"
+      ],
+      "steps": [
+        "Ejecutar analisis de stance con claim y evidencia coherente.",
+        "Medir score de similitud combinado.",
+        "Verificar clasificacion de apoyo."
+      ],
+      "expected": "Devuelve nivel alto de veracidad o postura SUPPORT para evidencia coherente."
+    },
+    {
+      "id": "UT-06",
+      "suiteId": "unit",
+      "module": "Validacion semantica (backend)",
+      "title": "Afirmacion invalida o sin sentido",
+      "automation": "automated",
+      "matches": ["UT-06"],
+      "seedData": [
+        "Claim: Purple engines cure silent triangles",
+        "Evidence: Exercise improves cardiovascular outcomes"
+      ],
+      "steps": [
+        "Ejecutar analisis de stance con claim sin sentido.",
+        "Comparar score contra evidencia no relacionada.",
+        "Verificar clasificacion de bajo soporte."
+      ],
+      "expected": "Devuelve nivel bajo de veracidad o postura no favorable para evidencia no relacionada."
+    },
+    {
+      "id": "UT-07",
+      "suiteId": "unit",
+      "module": "Generacion de bibliografia",
+      "title": "Solicitar cita de articulo con ID de PubMed",
+      "automation": "automated",
+      "matches": ["UT-07"],
+      "seedData": [
+        "PMID: 12345",
+        "Autores: Jane Smith, Robert Lee",
+        "DOI: 10.1000/j.jmb.2024.01.001"
+      ],
+      "steps": [
+        "Construir metadata bibliografica del articulo.",
+        "Formatear cita en APA.",
+        "Validar autores, ano, titulo y DOI."
+      ],
+      "expected": "Devuelve cita formateada en APA con los metadatos esperados."
+    },
+    {
+      "id": "UT-08",
+      "suiteId": "unit",
+      "module": "UI critica (React)",
+      "title": "Renderizar formulario de busqueda sin errores",
+      "automation": "automated",
+      "matches": ["UT-08"],
+      "seedData": [
+        "Pagina: /professor/search",
+        "Estado inicial limpio",
+        "QueryBuilder mock con un termino docente"
+      ],
+      "steps": [
+        "Renderizar la pagina de busqueda del profesor.",
+        "Verificar presencia del campo MeSH y boton de ejecucion.",
+        "Confirmar ausencia de errores de render."
+      ],
+      "expected": "Muestra campo de texto MeSH y boton de busqueda sin errores de render."
+    },
+    {
+      "id": "UT-09",
+      "suiteId": "unit",
+      "module": "UI critica (React)",
+      "title": "Usuario selecciona filtros y envia busqueda",
+      "automation": "automated",
+      "matches": ["UT-09"],
+      "seedData": [
+        "Filtro full text: true",
+        "Max results: 45",
+        "Termino visual: Diabetes Mellitus"
+      ],
+      "steps": [
+        "Renderizar la pagina con APIs mockeadas.",
+        "Cambiar filtros relevantes y preparar una query.",
+        "Ejecutar la busqueda y verificar la carga enviada."
+      ],
+      "expected": "Se actualiza el estado de filtros y se llama al API con la consulta esperada."
+    },
+
+    {
+      "id": "IT-01",
+      "suiteId": "integration",
+      "module": "API de autenticacion",
+      "title": "Auth API: /login, /refresh, /logout, /me",
+      "automation": "manual",
+      "steps": [
+        "Enviar request con credenciales validas e invalidas.",
+        "Verificar status HTTP y payload.",
+        "Confirmar refresh y logout efectivos."
+      ],
+      "expected": "La API responde con tokens correctos y manejo de errores adecuado."
+    },
+    {
+      "id": "IT-02",
+      "suiteId": "integration",
+      "module": "API de busqueda",
+      "title": "Search API: execute, mesh suggestions, fallback",
+      "automation": "manual",
+      "steps": [
+        "Ejecutar /api/search/execute con filtros completos.",
+        "Validar sugerencias MeSH.",
+        "Forzar fallback externo y verificar merge."
+      ],
+      "expected": "Los resultados se devuelven con filtros y fallback correcto."
+    },
+    {
+      "id": "IT-03",
+      "suiteId": "integration",
+      "module": "API de verificacion",
+      "title": "Verification API: claim, url, history",
+      "automation": "manual",
+      "steps": [
+        "Enviar claim y URL a /api/verify/claim.",
+        "Consultar /result/{id} y /history.",
+        "Verificar semaforo y recomendaciones."
+      ],
+      "expected": "La verificacion retorna score, evidencias y estado correcto."
+    },
+    {
+      "id": "IT-04",
+      "suiteId": "integration",
+      "module": "API de bibliografia",
+      "title": "Bibliography API: export, history, download",
+      "automation": "manual",
+      "steps": [
+        "Generar bibliografia en formatos soportados.",
+        "Validar historial.",
+        "Descargar archivo generado."
+      ],
+      "expected": "Los exportes son validos y el historial persiste."
+    },
+    {
+      "id": "E2E-01",
+      "suiteId": "e2e",
+      "module": "Flujo publico",
+      "title": "Home, registro, login y reset",
+      "automation": "automated",
+      "steps": [
+        "Ejecutar suite E2E.",
+        "Completar flujo de registro y login.",
+        "Probar reset de password."
+      ],
+      "expected": "El flujo publico completa sin bloqueos."
+    },
+    {
+      "id": "E2E-02",
+      "suiteId": "e2e",
+      "module": "Flujo estudiante",
+      "title": "Search, verify, bibliography, cases y chat",
+      "automation": "automated",
+      "steps": [
+        "Ejecutar suite E2E.",
+        "Completar busqueda avanzada y verificacion.",
+        "Enviar un caso y validar feedback."
+      ],
+      "expected": "El estudiante completa el flujo principal."
+    },
+    {
+      "id": "RS-01",
+      "suiteId": "resilience",
+      "module": "Fallback y degradacion",
+      "title": "Backend caido o lento",
+      "automation": "manual",
+      "steps": [
+        "Simular backend fuera de servicio.",
+        "Validar fallback externo/local.",
+        "Confirmar mensajes de degradacion."
+      ],
+      "expected": "La app degrada sin bloquear el flujo."
+    },
+    {
+      "id": "SC-01",
+      "suiteId": "security",
+      "module": "RBAC",
+      "title": "Proteccion por rol en rutas y endpoints",
+      "automation": "manual",
+      "steps": [
+        "Intentar acceso con roles no permitidos.",
+        "Validar 401/403.",
+        "Confirmar acceso correcto con rol valido."
+      ],
+      "expected": "Las restricciones por rol se aplican correctamente."
+    },
+    {
+      "id": "PF-01",
+      "suiteId": "performance",
+      "module": "Busqueda concurrente",
+      "title": "Latencias p50/p95/p99",
+      "automation": "manual",
+      "steps": [
+        "Ejecutar carga concurrente en busquedas.",
+        "Medir latencias p50/p95/p99.",
+        "Comparar con objetivos."
+      ],
+      "expected": "Las latencias se mantienen en limites aceptables."
+    },
+    {
+      "id": "UX-01",
+      "suiteId": "usability",
+      "module": "Responsive y teclado",
+      "title": "Responsive + navegacion por teclado",
+      "automation": "manual",
+      "steps": [
+        "Revisar pantallas clave en mobile/desktop.",
+        "Navegar solo con teclado.",
+        "Validar focus visible."
+      ],
+      "expected": "La interfaz es usable en diferentes dispositivos."
+    },
+    {
+      "id": "DT-01",
+      "suiteId": "data",
+      "module": "Migraciones y backup",
+      "title": "Flyway, backup y restore",
+      "automation": "manual",
+      "steps": [
+        "Inicializar BD limpia.",
+        "Aplicar migraciones y crear backup.",
+        "Restaurar y validar consistencia."
+      ],
+      "expected": "Las migraciones y restauraciones ocurren sin perdida de datos."
+    }
+  ]
+}

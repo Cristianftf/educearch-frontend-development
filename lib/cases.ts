@@ -37,6 +37,22 @@ type BackendAssignableStudent = {
   active?: boolean
 }
 
+type BackendEvaluation = {
+  id?: string
+  submissionId?: string
+  professorId?: string
+  scores?: Record<string, unknown>
+  comments?: Record<string, unknown>
+  overallScore?: number
+  feedback?: string
+  evaluatedAt?: string
+}
+
+type BackendCaseSubmission = Omit<CaseSubmission, 'evaluation' | 'selectedArticles'> & {
+  selectedArticles?: unknown
+  evaluation?: BackendEvaluation | null
+}
+
 function normalizeCompetency(value: unknown): RubricItem['competency'] {
   if (value === 'access' || value === 'process' || value === 'communicate') return value
   return 'access'
@@ -54,7 +70,95 @@ function normalizeCaseDifficulty(value: unknown): CaseStudy['difficulty'] {
 
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
-  return value.filter((item): item is string => typeof item === 'string' && item.length > 0)
+  return value
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((item) => item.trim())
+}
+
+function normalizeDateTimeValue(value: unknown, fallback?: string): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    return fallback ?? new Date().toISOString()
+  }
+  const normalized = normalizeDateTime(value)
+  return normalized ?? fallback ?? new Date().toISOString()
+}
+
+function normalizeCaseSubmissionStatus(value: unknown): CaseSubmission['status'] {
+  if (value === 'pending' || value === 'reviewed' || value === 'returned') return value
+  return 'pending'
+}
+
+function normalizeEvaluation(value: unknown, fallbackSubmissionId: string): CaseSubmission['evaluation'] {
+  if (!value || typeof value !== 'object') return undefined
+  const item = value as Record<string, unknown>
+  const scoresRaw = item.scores && typeof item.scores === 'object' ? (item.scores as Record<string, unknown>) : {}
+  const commentsRaw =
+    item.comments && typeof item.comments === 'object' ? (item.comments as Record<string, unknown>) : {}
+
+  const getScore = (key: 'access' | 'process' | 'communicate') => {
+    const value = scoresRaw[key]
+    return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0
+  }
+
+  const getComment = (key: 'access' | 'process' | 'communicate') => {
+    const value = commentsRaw[key]
+    return typeof value === 'string' ? value.trim() : ''
+  }
+
+  return {
+    id: typeof item.id === 'string' && item.id.trim() ? item.id : createLocalId('evaluation'),
+    submissionId:
+      typeof item.submissionId === 'string' && item.submissionId.trim()
+        ? item.submissionId
+        : fallbackSubmissionId,
+    professorId:
+      typeof item.professorId === 'string' && item.professorId.trim()
+        ? item.professorId
+        : 'unknown-professor',
+    scores: {
+      access: getScore('access'),
+      process: getScore('process'),
+      communicate: getScore('communicate'),
+    },
+    comments: {
+      access: getComment('access'),
+      process: getComment('process'),
+      communicate: getComment('communicate'),
+    },
+    overallScore:
+      typeof item.overallScore === 'number' && Number.isFinite(item.overallScore)
+        ? Math.max(0, Math.min(100, item.overallScore))
+        : 0,
+    feedback: typeof item.feedback === 'string' ? item.feedback.trim() : '',
+    evaluatedAt: normalizeDateTimeValue(item.evaluatedAt),
+  }
+}
+
+function normalizeCaseSubmission(
+  submission: BackendCaseSubmission,
+  fallbackCaseId?: string
+): CaseSubmission {
+  const id =
+    typeof submission.id === 'string' && submission.id.trim()
+      ? submission.id
+      : createLocalId('submission')
+  return {
+    id,
+    caseId:
+      typeof submission.caseId === 'string' && submission.caseId.trim()
+        ? submission.caseId
+        : fallbackCaseId ?? 'unknown-case',
+    studentId:
+      typeof submission.studentId === 'string' && submission.studentId.trim()
+        ? submission.studentId
+        : 'local-student',
+    submittedAt: normalizeDateTimeValue(submission.submittedAt),
+    content: typeof submission.content === 'string' ? submission.content : '',
+    selectedArticles: normalizeStringArray(submission.selectedArticles),
+    bibliography: typeof submission.bibliography === 'string' ? submission.bibliography : '',
+    status: normalizeCaseSubmissionStatus(submission.status),
+    evaluation: normalizeEvaluation(submission.evaluation, id),
+  }
 }
 
 function parseGuidingQuestion(rawValue: unknown, index: number): GuidingQuestion {
@@ -563,7 +667,8 @@ export const casesApi = {
 
   getSubmissions: (caseId: string) =>
     api
-      .get<CaseSubmission[]>(`/cases/${caseId}/submissions`)
+      .get<BackendCaseSubmission[]>(`/cases/${caseId}/submissions`)
+      .then((submissions) => submissions.map((submission) => normalizeCaseSubmission(submission, caseId)))
       .then((submissions) => {
         const existing = readSubmissionsLocal().filter((item) => item.caseId !== caseId)
         writeSubmissionsLocal([...submissions, ...existing])
@@ -603,10 +708,11 @@ export const casesApi = {
 
   submit: (caseId: string, submission: Omit<CaseSubmission, 'id' | 'submittedAt' | 'status'>) =>
     api
-      .post<CaseSubmission>(`/cases/${caseId}/submit`, submission)
+      .post<BackendCaseSubmission>(`/cases/${caseId}/submit`, submission)
       .then((response) => {
-        upsertSubmissionLocal(response)
-        return response
+        const normalized = normalizeCaseSubmission(response, caseId)
+        upsertSubmissionLocal(normalized)
+        return normalized
       })
       .catch(async (error) => {
         if (!isConnectivityError(error)) throw error
@@ -619,10 +725,11 @@ export const casesApi = {
 
   getMySubmission: async (caseId: string) => {
     try {
-      const response = await api.get<CaseSubmission | undefined>(`/cases/${caseId}/submission`)
+      const response = await api.get<BackendCaseSubmission | undefined>(`/cases/${caseId}/submission`)
       if (!response) return null
-      upsertSubmissionLocal(response)
-      return response
+      const normalized = normalizeCaseSubmission(response, caseId)
+      upsertSubmissionLocal(normalized)
+      return normalized
     } catch (error) {
       if (error instanceof ApiHttpError && error.status === 404) {
         return null

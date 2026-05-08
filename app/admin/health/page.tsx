@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { adminSystemApi } from "@/lib/admin-system"
-import type { SystemServiceStatus } from "@/types"
+import type { SystemHealth, SystemServiceStatus } from "@/types"
 import {
   Server,
   Database,
@@ -20,6 +20,8 @@ import {
   Globe,
   MemoryStick,
 } from "lucide-react"
+
+const AUTO_REFRESH_MS = 30000
 
 const formatRelative = (iso?: string) => {
   if (!iso) return "Sin datos"
@@ -35,7 +37,7 @@ const formatRelative = (iso?: string) => {
   if (diffHours < 24) return `hace ${diffHours} h`
 
   const diffDays = Math.floor(diffHours / 24)
-  return `hace ${diffDays} dia${diffDays === 1 ? "" : "s"}`
+  return `hace ${diffDays} día${diffDays === 1 ? "" : "s"}`
 }
 
 export default function AdminHealthPage() {
@@ -43,7 +45,7 @@ export default function AdminHealthPage() {
   const [cpuUsage, setCpuUsage] = useState(0)
   const [memoryUsage, setMemoryUsage] = useState(0)
   const [diskUsage, setDiskUsage] = useState(0)
-  const [health, setHealth] = useState<any | null>(null)
+  const [health, setHealth] = useState<SystemHealth | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [services, setServices] = useState<SystemServiceStatus[]>([])
 
@@ -65,6 +67,13 @@ export default function AdminHealthPage() {
 
   useEffect(() => {
     loadHealth()
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      loadHealth()
+    }, AUTO_REFRESH_MS)
+    return () => window.clearInterval(timer)
   }, [])
 
   const handleRefresh = () => {
@@ -150,6 +159,9 @@ export default function AdminHealthPage() {
               {totalServices > 0
                 ? `${onlineServices} de ${totalServices} servicios funcionando correctamente`
                 : "Sin datos de servicios"}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Última actualización: {formatRelative(health?.lastCheck)}
             </p>
           </div>
           <div className="text-right">

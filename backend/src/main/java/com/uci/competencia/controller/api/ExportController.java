@@ -6,14 +6,13 @@ import com.uci.competencia.model.entity.Bibliography;
 import com.uci.competencia.model.entity.SearchResult;
 import com.uci.competencia.repository.BibliographyRepository;
 import com.uci.competencia.repository.SearchResultRepository;
+import com.uci.competencia.security.UserIdentityResolver;
 import com.uci.competencia.util.CitationFormatter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -23,7 +22,6 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/export")
-@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:3001", "https://frontend.uci.cu"})
 @Slf4j
 @RequiredArgsConstructor
 public class ExportController {
@@ -32,6 +30,7 @@ public class ExportController {
     private final SearchResultRepository searchResultRepository;
     private final CitationFormatter citationFormatter;
     private final ObjectMapper objectMapper;
+    private final UserIdentityResolver userIdentityResolver;
 
     @PostMapping("/bibliography")
     @PreAuthorize("hasAnyRole('STUDENT', 'PROFESSOR')")
@@ -43,7 +42,27 @@ public class ExportController {
         String userId = getCurrentUserId();
         List<SearchResult> results = new ArrayList<>();
         if (request.getArticleIds() != null && !request.getArticleIds().isEmpty()) {
-            results = searchResultRepository.findAllById(request.getArticleIds());
+            // Separar IDs UUID (formato estándar) de IDs no-UUID (ej. PMID numéricos como "42023181")
+            List<String> uuidIds = new ArrayList<>();
+            List<String> nonUuidIds = new ArrayList<>();
+            for (String id : request.getArticleIds()) {
+                if (id == null || id.isBlank()) continue;
+                if (isValidUuid(id)) {
+                    uuidIds.add(id);
+                } else {
+                    nonUuidIds.add(id);
+                }
+            }
+            // Buscar por UUID (IDs de entidades JPA)
+            if (!uuidIds.isEmpty()) {
+                results.addAll(searchResultRepository.findAllById(uuidIds));
+            }
+            // Buscar por PMID para IDs no-UUID (ej. PubMed IDs numéricos)
+            for (String nonUuidId : nonUuidIds) {
+                searchResultRepository.findByPmid(nonUuidId)
+                    .filter(r -> results.stream().noneMatch(existing -> existing.getId().equals(r.getId())))
+                    .ifPresent(results::add);
+            }
         }
 
         List<GenerateBibliographyRequestDTO.ArticleDTO> requestedArticles =
@@ -89,11 +108,7 @@ public class ExportController {
     }
 
     private String getCurrentUserId() {
-        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        if (principal instanceof UserDetails) {
-            return ((UserDetails) principal).getUsername();
-        }
-        return principal.toString();
+        return userIdentityResolver.getCurrentPrincipalIdentifier().orElse(null);
     }
 
     private BibliographyResponseDTO toResponse(
@@ -410,5 +425,13 @@ public class ExportController {
             log.warn("Error serializing bibliography article IDs, storing fallback string", e);
             return articleIds.toString();
         }
+    }
+
+    /**
+     * Valida si un string tiene formato UUID estándar (8-4-4-4-12)
+     */
+    private boolean isValidUuid(String value) {
+        if (value == null || value.isBlank()) return false;
+        return value.matches("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$");
     }
 }
