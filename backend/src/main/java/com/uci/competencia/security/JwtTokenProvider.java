@@ -73,6 +73,17 @@ public class JwtTokenProvider {
             .compact();
     }
 
+    public String generatePasswordResetToken(String username, long expirationInMs) {
+        SecretKey key = Keys.hmacShaKeyFor(jwtSecret.getBytes());
+        return Jwts.builder()
+            .subject(username)
+            .claim("purpose", "password_reset")
+            .issuedAt(new Date())
+            .expiration(new Date(System.currentTimeMillis() + expirationInMs))
+            .signWith(key)
+            .compact();
+    }
+
     public String getUsernameFromToken(String token) {
         try {
             SecretKey key = Keys.hmacShaKeyFor(jwtSecret.getBytes());
@@ -113,6 +124,22 @@ public class JwtTokenProvider {
             return (String) claims.get("authorities");
         } catch (Exception e) {
             log.error("Error extracting authorities from token: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    public String getPurposeFromToken(String token) {
+        try {
+            SecretKey key = Keys.hmacShaKeyFor(jwtSecret.getBytes());
+            Claims claims = Jwts.parser()
+                .verifyWith(key)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
+            Object purpose = claims.get("purpose");
+            return purpose instanceof String ? (String) purpose : null;
+        } catch (Exception e) {
+            log.error("Error extracting token purpose: {}", e.getMessage());
             return null;
         }
     }

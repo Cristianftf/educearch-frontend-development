@@ -1,0 +1,74 @@
+{
+  "properties": [
+    {
+      "name": "jwt.secret",
+      "type": "java.lang.String",
+      "description": "JWT secret key for signing tokens"
+    },
+    {
+      "name": "jwt.expiration",
+      "type": "java.lang.Long",
+      "description": "JWT token expiration time in milliseconds"
+    },
+    {
+      "name": "jwt.refresh-expiration",
+      "type": "java.lang.Long",
+      "description": "JWT refresh token expiration time in milliseconds"
+    },
+    {
+      "name": "pubmed.api.base-url",
+      "type": "java.lang.String",
+      "description": "PubMed API base URL"
+    },
+    {
+      "name": "pubmed.api.api-key",
+      "type": "java.lang.String",
+      "description": "PubMed API key"
+    },
+    {
+      "name": "pubmed.api.rate-limit",
+      "type": "java.lang.Integer",
+      "description": "PubMed API rate limit"
+    },
+    {
+      "name": "pubmed.api.timeout",
+      "type": "java.lang.Integer",
+      "description": "PubMed API timeout in milliseconds"
+    },
+    {
+      "name": "rag.engine",
+      "type": "java.lang.String",
+      "description": "RAG engine type"
+    },
+    {
+      "name": "rag.model",
+      "type": "java.lang.String",
+      "description": "RAG model name"
+    },
+    {
+      "name": "rag.temperature",
+      "type": "java.lang.Double",
+      "description": "RAG model temperature parameter"
+    },
+    {
+      "name": "rag.max-tokens",
+      "type": "java.lang.Integer",
+      "description": "RAG maximum tokens per response"
+    },
+    {
+      "name": "uci.ldap.url",
+      "type": "java.lang.String",
+      "description": "UCI LDAP server URL"
+    },
+    {
+      "name": "uci.ldap.base-dn",
+      "type": "java.lang.String",
+      "description": "UCI LDAP base DN"
+    },
+    {
+      "name": "uci.ldap.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether LDAP authentication is enabled"
+    }
+  ]
+}

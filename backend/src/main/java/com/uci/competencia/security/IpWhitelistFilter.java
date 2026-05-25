@@ -24,6 +24,9 @@ public class IpWhitelistFilter implements Filter {
     @Value("${security.ip.whitelist:127.0.0.1,::1}")
     private String whitelistedIps;
 
+    @Value("${app.security.trust-proxy-headers:false}")
+    private boolean trustProxyHeaders;
+
     private Set<String> ipWhitelist;
 
     @Override
@@ -70,17 +73,7 @@ public class IpWhitelistFilter implements Filter {
         String xForwardedFor = request.getHeader("X-Forwarded-For");
         String xRealIp = request.getHeader("X-Real-IP");
 
-        if (isLocalhostAddress(remoteAddr)) {
-            if (StringUtils.hasText(xForwardedFor)) {
-                String forwardedIp = xForwardedFor.split(",")[0].trim();
-                if (isLocalhostAddress(forwardedIp)) {
-                    return forwardedIp;
-                }
-                log.debug("Ignoring X-Forwarded-For {} because remoteAddr is localhost", xForwardedFor);
-            }
-            if (StringUtils.hasText(xRealIp) && isLocalhostAddress(xRealIp.trim())) {
-                return xRealIp.trim();
-            }
+        if (!trustProxyHeaders) {
             return remoteAddr;
         }
 
@@ -151,6 +144,7 @@ public class IpWhitelistFilter implements Filter {
      */
     private boolean isSensitiveEndpoint(String path) {
         return path.contains("/api/metrics/") ||
+               path.contains("/api/system/metrics/") ||
                path.contains("/actuator") ||
                path.contains("/swagger-ui") ||
                path.contains("/v3/api-docs");

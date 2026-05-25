@@ -1,5 +1,5 @@
-﻿import { beforeEach, describe, expect, it } from "vitest"
-import { getScopedStorageKey, getStorageScope, paginateItems } from "@/lib/student-resilience"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { getScopedStorageKey, getStorageScope, isBackendReachable, paginateItems } from "@/lib/student-resilience"
 
 const makeToken = (payload: Record<string, unknown>) => {
   const header = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url")
@@ -10,6 +10,7 @@ const makeToken = (payload: Record<string, unknown>) => {
 describe("student resilience helpers", () => {
   beforeEach(() => {
     window.localStorage.clear()
+    vi.unstubAllGlobals()
   })
 
   it("paginates items safely", () => {
@@ -28,5 +29,16 @@ describe("student resilience helpers", () => {
     window.localStorage.setItem("auth_token", token)
 
     expect(getStorageScope()).toBe("student:user_test.com")
+  })
+
+  it("treats authenticated endpoint responses below 500 as reachable", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ status: 401 })
+    vi.stubGlobal("fetch", fetchMock)
+
+    await expect(isBackendReachable(true)).resolves.toBe(true)
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/auth/me",
+      expect.objectContaining({ method: "GET", cache: "no-store" })
+    )
   })
 })

@@ -125,12 +125,12 @@ export async function isBackendReachable(forceRefresh = false): Promise<boolean>
   const timeoutId = window.setTimeout(() => controller.abort(), BACKEND_CHECK_TIMEOUT_MS)
 
   try {
-    const response = await fetch(`${apiBaseUrl}/system/health`, {
+    const response = await fetch(`${apiBaseUrl}/auth/me`, {
       method: 'GET',
       signal: controller.signal,
       cache: 'no-store',
     })
-    const isAvailable = response.ok
+    const isAvailable = response.status < 500
     backendStatusCache = { checkedAt: Date.now(), isAvailable }
     return isAvailable
   } catch {

@@ -23,8 +23,36 @@ yarn-error.log*
 .tmp*
 *.tmp
 
-# env files
+# env files (excluir todos menos .env.example)
 .env*
+!.env.example
+
+# Docker
+/backend/target/
+/backend/.m2/
+/backend/*.log
+/docker-data/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# Coverage
+/coverage/
+/__pycache__/
+*.pyc
 
 # vercel
 .vercel

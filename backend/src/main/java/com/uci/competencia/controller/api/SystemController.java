@@ -25,6 +25,7 @@ public class SystemController {
     }
 
     @GetMapping("/metrics/prometheus")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<String> getPrometheusMetrics() {
         log.info("Getting Prometheus metrics");
         String metrics = systemHealthService.getPrometheusMetrics();

@@ -28,6 +28,9 @@ public class AuthServiceImpl implements AuthService {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @org.springframework.beans.factory.annotation.Value("${app.auth.password-reset.expiration-ms:900000}")
+    private long passwordResetExpirationMs;
+
     @Override
     public LoginResponseDTO login(LoginRequestDTO loginRequest) {
         log.info("Processing login for email: {}", loginRequest.getEmail());
@@ -77,7 +80,7 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public LoginResponseDTO refreshToken(String refreshToken) {
-        if (tokenProvider.validateToken(refreshToken)) {
+        if (tokenProvider.validateToken(refreshToken) && tokenProvider.getPurposeFromToken(refreshToken) == null) {
             String email = tokenProvider.getUsernameFromToken(refreshToken);
             User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
@@ -111,6 +114,43 @@ public class AuthServiceImpl implements AuthService {
         log.info("User logged out");
     }
 
+    @Override
+    public String requestPasswordReset(String email) {
+        String normalizedEmail = email != null ? email.trim().toLowerCase() : "";
+        if (normalizedEmail.isBlank()) {
+            return null;
+        }
+
+        return userRepository.findByEmail(normalizedEmail)
+            .filter(User::isActive)
+            .map(user -> tokenProvider.generatePasswordResetToken(user.getEmail(), passwordResetExpirationMs))
+            .orElse(null);
+    }
+
+    @Override
+    public void resetPassword(String token, String newPassword) {
+        if (token == null || token.isBlank() || !tokenProvider.validateToken(token)) {
+            throw new InvalidCredentialsException("Invalid reset token");
+        }
+        if (!"password_reset".equals(tokenProvider.getPurposeFromToken(token))) {
+            throw new InvalidCredentialsException("Invalid reset token");
+        }
+        if (!isPasswordStrong(newPassword)) {
+            throw new IllegalArgumentException("Password does not meet security requirements");
+        }
+
+        String email = tokenProvider.getUsernameFromToken(token);
+        User user = userRepository.findByEmail(email)
+            .orElseThrow(() -> new InvalidCredentialsException("Invalid reset token"));
+        if (!user.isActive()) {
+            throw new InvalidCredentialsException("Invalid reset token");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+        log.info("Password reset completed for user: {}", user.getEmail());
+    }
+
     private java.util.Optional<User> resolveLoginUser(String identifier) {
         if (identifier == null || identifier.isBlank()) {
             return java.util.Optional.empty();
@@ -130,5 +170,15 @@ public class AuthServiceImpl implements AuthService {
             return "ROLE_STUDENT";
         }
         return user.getRole().name();
+    }
+
+    private boolean isPasswordStrong(String password) {
+        if (password == null || password.length() < 8) {
+            return false;
+        }
+        boolean hasUpper = password.chars().anyMatch(Character::isUpperCase);
+        boolean hasNumber = password.chars().anyMatch(Character::isDigit);
+        boolean hasSymbol = password.chars().anyMatch(ch -> !Character.isLetterOrDigit(ch));
+        return hasUpper && hasNumber && hasSymbol;
     }
 }

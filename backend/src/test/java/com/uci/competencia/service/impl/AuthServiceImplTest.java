@@ -395,7 +395,81 @@ class AuthServiceImplTest {
     }
 
     // =========================================================================
-    //  5. buildAuthorityClaim() — roles y permisos (vía login indirectamente)
+    //  5. password reset
+    // =========================================================================
+
+    @Nested
+    @DisplayName("password reset - Recuperacion de contrasena")
+    class PasswordResetTests {
+
+        @Test
+        @DisplayName("Given active user, when requestPasswordReset, then returns reset token")
+        void givenActiveUser_whenRequestPasswordReset_thenReturnsResetToken() {
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(defaultUser));
+            when(tokenProvider.generatePasswordResetToken(eq(EMAIL), anyLong()))
+                .thenReturn("reset-token");
+
+            String token = authService.requestPasswordReset("  " + EMAIL.toUpperCase() + "  ");
+
+            assertEquals("reset-token", token);
+            verify(userRepository).findByEmail(EMAIL);
+            verify(tokenProvider).generatePasswordResetToken(eq(EMAIL), anyLong());
+        }
+
+        @Test
+        @DisplayName("Given inactive user, when requestPasswordReset, then returns null")
+        void givenInactiveUser_whenRequestPasswordReset_thenReturnsNull() {
+            defaultUser.setActive(false);
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(defaultUser));
+
+            assertNull(authService.requestPasswordReset(EMAIL));
+            verify(tokenProvider, never()).generatePasswordResetToken(anyString(), anyLong());
+        }
+
+        @Test
+        @DisplayName("Given valid reset token and strong password, when resetPassword, then updates hash")
+        void givenValidResetTokenAndStrongPassword_whenResetPassword_thenUpdatesHash() {
+            String resetToken = "reset-token";
+            String newPassword = "NuevaClave2026!";
+            when(tokenProvider.validateToken(resetToken)).thenReturn(true);
+            when(tokenProvider.getPurposeFromToken(resetToken)).thenReturn("password_reset");
+            when(tokenProvider.getUsernameFromToken(resetToken)).thenReturn(EMAIL);
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(defaultUser));
+            when(passwordEncoder.encode(newPassword)).thenReturn("new-hash");
+
+            authService.resetPassword(resetToken, newPassword);
+
+            assertEquals("new-hash", defaultUser.getPasswordHash());
+            verify(userRepository).save(defaultUser);
+        }
+
+        @Test
+        @DisplayName("Given token without reset purpose, when resetPassword, then rejects token")
+        void givenTokenWithoutResetPurpose_whenResetPassword_thenRejectsToken() {
+            String resetToken = "access-token";
+            when(tokenProvider.validateToken(resetToken)).thenReturn(true);
+            when(tokenProvider.getPurposeFromToken(resetToken)).thenReturn(null);
+
+            assertThrows(InvalidCredentialsException.class,
+                () -> authService.resetPassword(resetToken, "NuevaClave2026!"));
+            verify(userRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Given weak new password, when resetPassword, then rejects password")
+        void givenWeakNewPassword_whenResetPassword_thenRejectsPassword() {
+            String resetToken = "reset-token";
+            when(tokenProvider.validateToken(resetToken)).thenReturn(true);
+            when(tokenProvider.getPurposeFromToken(resetToken)).thenReturn("password_reset");
+
+            assertThrows(IllegalArgumentException.class,
+                () -> authService.resetPassword(resetToken, "weak"));
+            verify(userRepository, never()).save(any());
+        }
+    }
+
+    // =========================================================================
+    //  6. buildAuthorityClaim() — roles y permisos (vía login indirectamente)
     // =========================================================================
 
     @Nested

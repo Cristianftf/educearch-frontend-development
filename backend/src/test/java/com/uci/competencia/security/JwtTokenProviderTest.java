@@ -145,6 +145,23 @@ class JwtTokenProviderTest {
         }
     }
 
+    @Nested
+    @DisplayName("generatePasswordResetToken() - Generacion de token de recuperacion")
+    class GeneratePasswordResetTokenTests {
+
+        @Test
+        @DisplayName("Given username, when generatePasswordResetToken, then token has reset purpose")
+        void givenUsername_whenGeneratePasswordResetToken_thenTokenHasResetPurpose() {
+            String resetToken = tokenProvider.generatePasswordResetToken(USERNAME, 900000);
+
+            assertNotNull(resetToken);
+            assertTrue(tokenProvider.validateToken(resetToken));
+            assertEquals(USERNAME, tokenProvider.getUsernameFromToken(resetToken));
+            assertEquals("password_reset", tokenProvider.getPurposeFromToken(resetToken));
+            assertNull(tokenProvider.getAuthoritiesFromToken(resetToken));
+        }
+    }
+
     // =========================================================================
     //  4. validateToken()
     // =========================================================================

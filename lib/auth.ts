@@ -12,6 +12,20 @@ type LoginResponseDTO = {
   role: string
 }
 
+type UserResponseDTO = {
+  id: string
+  email: string
+  name?: string
+  firstName?: string
+  lastName?: string
+  role: string
+  avatar?: string
+  active?: boolean
+  isActive?: boolean
+  createdAt?: string | null
+  lastLogin?: string | null
+}
+
 function mapRole(role: string): User['role'] {
   const normalized = role?.toLowerCase() || 'student'
   if (normalized.includes('professor')) return 'professor'
@@ -33,6 +47,24 @@ function mapUser(dto: LoginResponseDTO): User {
   }
 }
 
+function mapCurrentUser(dto: UserResponseDTO): User {
+  const name =
+    dto.name?.trim() ||
+    `${dto.firstName ?? ''} ${dto.lastName ?? ''}`.trim() ||
+    dto.email
+
+  return {
+    id: dto.id,
+    email: dto.email,
+    name,
+    role: mapRole(dto.role),
+    avatar: dto.avatar,
+    createdAt: dto.createdAt ?? new Date().toISOString(),
+    lastLogin: dto.lastLogin ?? undefined,
+    isActive: dto.isActive ?? dto.active ?? true,
+  }
+}
+
 export const authApi = {
   login: (email: string, password: string) =>
     api.post<LoginResponseDTO>('/auth/login', { email, password }).then((dto) => ({
@@ -42,7 +74,7 @@ export const authApi = {
 
   logout: () => api.post<void>('/auth/logout'),
 
-  me: () => api.get<User>('/auth/me'),
+  me: () => api.get<UserResponseDTO>('/auth/me').then(mapCurrentUser),
 
   refreshToken: (token?: string) =>
     api

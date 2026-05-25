@@ -15,6 +15,8 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // Output standalone para Docker (producción)
+  output: process.env.NODE_ENV === 'production' ? 'standalone' : undefined,
   allowedDevOrigins,
   async headers() {
     return [

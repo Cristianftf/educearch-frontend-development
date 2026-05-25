@@ -9,6 +9,7 @@ import com.uci.competencia.model.enums.Role;
 import com.uci.competencia.repository.UserRepository;
 import com.uci.competencia.security.UserIdentityResolver;
 import com.uci.competencia.service.AuthService;
+import com.uci.competencia.service.external.EmailService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -22,6 +23,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -56,6 +58,9 @@ class AuthControllerTest {
 
     @Mock
     private UserIdentityResolver userIdentityResolver;
+
+    @Mock
+    private EmailService emailService;
 
     @InjectMocks
     private AuthController authController;
@@ -391,6 +396,56 @@ class AuthControllerTest {
 
             assertEquals(HttpStatusCode.valueOf(401), response.getStatusCode());
             assertNull(response.getBody());
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /api/auth/forgot-password - Solicitud de recuperacion")
+    class ForgotPasswordEndpointTests {
+
+        @Test
+        @DisplayName("Given existing user, when forgotPassword, then sends generic response and email")
+        void givenExistingUser_whenForgotPassword_thenSendsGenericResponseAndEmail() {
+            when(authService.requestPasswordReset(EMAIL)).thenReturn("reset-token");
+
+            ResponseEntity<Map<String, String>> response =
+                authController.forgotPassword(Map.of("email", EMAIL));
+
+            assertEquals(HttpStatusCode.valueOf(200), response.getStatusCode());
+            assertNotNull(response.getBody());
+            assertTrue(response.getBody().containsKey("message"));
+            verify(emailService).sendPasswordResetEmail(eq(EMAIL), contains("/reset-password/reset-token"));
+        }
+
+        @Test
+        @DisplayName("Given unknown user, when forgotPassword, then returns same generic response")
+        void givenUnknownUser_whenForgotPassword_thenReturnsGenericResponse() {
+            when(authService.requestPasswordReset(EMAIL)).thenReturn(null);
+
+            ResponseEntity<Map<String, String>> response =
+                authController.forgotPassword(Map.of("email", EMAIL));
+
+            assertEquals(HttpStatusCode.valueOf(200), response.getStatusCode());
+            assertNotNull(response.getBody());
+            assertTrue(response.getBody().containsKey("message"));
+            verify(emailService, never()).sendPasswordResetEmail(anyString(), anyString());
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /api/auth/reset-password - Cambio de contrasena")
+    class ResetPasswordEndpointTests {
+
+        @Test
+        @DisplayName("Given valid token and password, when resetPassword, then delegates to service")
+        void givenValidTokenAndPassword_whenResetPassword_thenDelegatesToService() {
+            ResponseEntity<Map<String, String>> response =
+                authController.resetPassword(Map.of("token", "reset-token", "password", PASSWORD));
+
+            assertEquals(HttpStatusCode.valueOf(200), response.getStatusCode());
+            assertNotNull(response.getBody());
+            assertEquals("Password updated successfully.", response.getBody().get("message"));
+            verify(authService).resetPassword("reset-token", PASSWORD);
         }
     }
 }

@@ -30,6 +30,11 @@ public class CorsSecurityConfig {
         this.allowedMethods.add("OPTIONS");
         this.allowedHeaders.add("Authorization");
         this.allowedHeaders.add("Content-Type");
+        this.allowedHeaders.add("Accept");
+        this.allowedHeaders.add("Origin");
+        this.allowedHeaders.add("X-Requested-With");
+        this.allowedHeaders.add("X-UCI-Platform");
+        this.allowedHeaders.add("X-User-Role");
     }
 
     public List<String> getAllowedOrigins() {

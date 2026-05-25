@@ -156,8 +156,8 @@ export const adminImportApi = {
     if (file.size <= 0) {
       throw new Error('El archivo CSV está vacío.')
     }
-    if (file.size > 10 * 1024 * 1024) {
-      throw new Error('El archivo CSV excede el límite de 10 MB.')
+    if (file.size > 5 * 1024 * 1024) {
+      throw new Error('El archivo CSV excede el límite de 5 MB.')
     }
     const formData = new FormData()
     formData.append('file', file)

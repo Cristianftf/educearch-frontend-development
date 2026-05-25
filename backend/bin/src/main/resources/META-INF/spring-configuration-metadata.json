@@ -1,0 +1,45 @@
+{
+  "groups": [
+    {
+      "name": "app.pubmed.api",
+      "type": "com.uci.competencia.config.PubmedApiProperties",
+      "sourceType": "com.uci.competencia.config.PubmedApiProperties",
+      "description": "Configuración de la API de PubMed NCBI para búsquedas de artículos científicos"
+    },
+    {
+      "name": "app.jwt",
+      "type": "com.uci.competencia.config.JwtProperties",
+      "sourceType": "com.uci.competencia.config.JwtProperties",
+      "description": "Configuración de tokens JWT para autenticación"
+    }
+  ],
+  "properties": [
+    {
+      "name": "app.pubmed.api.base-url",
+      "type": "java.lang.String",
+      "description": "Base URL para la API de PubMed NCBI",
+      "defaultValue": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils",
+      "sourceType": "com.uci.competencia.config.PubmedApiProperties"
+    },
+    {
+      "name": "app.pubmed.api.key",
+      "type": "java.lang.String",
+      "description": "API Key para autenticación en PubMed NCBI (variable de entorno: PUBMED_API_KEY)",
+      "sourceType": "com.uci.competencia.config.PubmedApiProperties"
+    },
+    {
+      "name": "app.pubmed.api.timeout",
+      "type": "java.lang.Integer",
+      "description": "Timeout en milisegundos para las solicitudes a PubMed",
+      "defaultValue": 30000,
+      "sourceType": "com.uci.competencia.config.PubmedApiProperties"
+    },
+    {
+      "name": "app.pubmed.api.max-retries",
+      "type": "java.lang.Integer",
+      "description": "Número máximo de reintentos en caso de fallo",
+      "defaultValue": 3,
+      "sourceType": "com.uci.competencia.config.PubmedApiProperties"
+    }
+  ]
+}

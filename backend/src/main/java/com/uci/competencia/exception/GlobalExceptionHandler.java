@@ -1,21 +1,33 @@
 package com.uci.competencia.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DataAccessException;
+import org.springframework.transaction.TransactionSystemException;
 
 import java.util.HashMap;
 import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     private record ErrorDescriptor(String code, HttpStatus status, String message) {}
 
@@ -42,6 +54,108 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
     }
 
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ErrorResponse> handleMissingParam(
+        MissingServletRequestParameterException ex,
+        WebRequest request,
+        HttpServletRequest httpServletRequest
+    ) {
+        markRequestError(httpServletRequest, ex);
+        ErrorResponse errorResponse = new ErrorResponse(
+            "MISSING_PARAMETER",
+            "Required parameter '" + ex.getParameterName() + "' is missing",
+            HttpStatus.BAD_REQUEST.value()
+        );
+        errorResponse.setPath(resolvePath(request));
+        return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleMethodNotAllowed(
+        HttpRequestMethodNotSupportedException ex,
+        WebRequest request,
+        HttpServletRequest httpServletRequest
+    ) {
+        markRequestError(httpServletRequest, ex);
+        ErrorResponse errorResponse = new ErrorResponse(
+            "METHOD_NOT_ALLOWED",
+            "HTTP method " + ex.getMethod() + " is not supported for this endpoint",
+            HttpStatus.METHOD_NOT_ALLOWED.value()
+        );
+        errorResponse.setPath(resolvePath(request));
+        return new ResponseEntity<>(errorResponse, HttpStatus.METHOD_NOT_ALLOWED);
+    }
+
+    @ExceptionHandler(MultipartException.class)
+    public ResponseEntity<ErrorResponse> handleMultipartException(
+        MultipartException ex,
+        WebRequest request,
+        HttpServletRequest httpServletRequest
+    ) {
+        markRequestError(httpServletRequest, ex);
+        ErrorResponse errorResponse = new ErrorResponse(
+            "MULTIPART_ERROR",
+            "File upload error: " + ex.getMostSpecificCause().getMessage(),
+            413
+        );
+        errorResponse.setPath(resolvePath(request));
+        return new ResponseEntity<>(errorResponse, HttpStatus.valueOf(413));
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ErrorResponse> handleDataIntegrityViolation(
+        DataIntegrityViolationException ex,
+        WebRequest request,
+        HttpServletRequest httpServletRequest
+    ) {
+        markRequestError(httpServletRequest, ex);
+        String message = ex.getMostSpecificCause() != null
+            ? ex.getMostSpecificCause().getMessage()
+            : ex.getMessage();
+        ErrorResponse errorResponse = new ErrorResponse(
+            "DATA_INTEGRITY_VIOLATION",
+            "A database constraint was violated",
+            HttpStatus.CONFLICT.value()
+        );
+        errorResponse.setPath(resolvePath(request));
+        log.error("Data integrity violation: {}", message);
+        return new ResponseEntity<>(errorResponse, HttpStatus.CONFLICT);
+    }
+
+    @ExceptionHandler(DataAccessException.class)
+    public ResponseEntity<ErrorResponse> handleDataAccessException(
+        DataAccessException ex,
+        WebRequest request,
+        HttpServletRequest httpServletRequest
+    ) {
+        markRequestError(httpServletRequest, ex);
+        log.error("Database access error: {}", ex.getMessage());
+        ErrorResponse errorResponse = new ErrorResponse(
+            "DATABASE_ERROR",
+            "A database error occurred",
+            HttpStatus.INTERNAL_SERVER_ERROR.value()
+        );
+        errorResponse.setPath(resolvePath(request));
+        return new ResponseEntity<>(errorResponse, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    @ExceptionHandler(TransactionSystemException.class)
+    public ResponseEntity<ErrorResponse> handleTransactionSystemException(
+        TransactionSystemException ex,
+        WebRequest request,
+        HttpServletRequest httpServletRequest
+    ) {
+        markRequestError(httpServletRequest, ex);
+        log.error("Transaction error: {}", ex.getMessage());
+        ErrorResponse errorResponse = new ErrorResponse(
+            "TRANSACTION_ERROR",
+            "A transaction error occurred",
+            HttpStatus.INTERNAL_SERVER_ERROR.value()
+        );
+        errorResponse.setPath(resolvePath(request));
+        return new ResponseEntity<>(errorResponse, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
     @ExceptionHandler({
         ResourceNotFoundException.class,
         InvalidCredentialsException.class,
@@ -49,6 +163,7 @@ public class GlobalExceptionHandler {
         AccessDeniedException.class,
         IllegalArgumentException.class,
         HttpMessageNotReadableException.class,
+        RateLimitExceededException.class,
         Exception.class
     })
     public ResponseEntity<ErrorResponse> handleException(
@@ -58,6 +173,12 @@ public class GlobalExceptionHandler {
     ) {
         markRequestError(httpServletRequest, ex);
         ErrorDescriptor descriptor = resolveErrorDescriptor(ex);
+
+        // Log internal server errors with full stack trace
+        if (descriptor.status() == HttpStatus.INTERNAL_SERVER_ERROR) {
+            log.error("Unhandled exception at {}: {}", resolvePath(request), ex.getMessage(), ex);
+        }
+
         ErrorResponse errorResponse = new ErrorResponse(
             descriptor.code(),
             descriptor.message(),
@@ -80,7 +201,7 @@ public class GlobalExceptionHandler {
             return new ErrorDescriptor(
                 "INVALID_CREDENTIALS",
                 HttpStatus.UNAUTHORIZED,
-                firstNonBlank(ex.getMessage(), "Invalid credentials")
+                "Invalid credentials provided"
             );
         }
 
@@ -88,7 +209,7 @@ public class GlobalExceptionHandler {
             return new ErrorDescriptor(
                 "AUTHENTICATION_FAILED",
                 HttpStatus.UNAUTHORIZED,
-                firstNonBlank(ex.getMessage(), "Authentication failed")
+                "Authentication is required to access this resource"
             );
         }
 
@@ -100,6 +221,14 @@ public class GlobalExceptionHandler {
             );
         }
 
+        if (ex instanceof RateLimitExceededException) {
+            return new ErrorDescriptor(
+                "RATE_LIMIT_EXCEEDED",
+                HttpStatus.TOO_MANY_REQUESTS,
+                firstNonBlank(ex.getMessage(), "Too many requests. Please try again later.")
+            );
+        }
+
         if (ex instanceof HttpMessageNotReadableException notReadableException) {
             Throwable root = notReadableException.getMostSpecificCause();
             return new ErrorDescriptor(
@@ -107,7 +236,6 @@ public class GlobalExceptionHandler {
                 HttpStatus.BAD_REQUEST,
                 firstNonBlank(
                     root != null ? root.getMessage() : null,
-                    ex.getMessage(),
                     "Malformed request payload"
                 )
             );
@@ -121,6 +249,14 @@ public class GlobalExceptionHandler {
             );
         }
 
+        if (ex instanceof NoResourceFoundException || ex instanceof NoHandlerFoundException) {
+            return new ErrorDescriptor(
+                "ENDPOINT_NOT_FOUND",
+                HttpStatus.NOT_FOUND,
+                "The requested endpoint does not exist"
+            );
+        }
+
         String message = firstNonBlank(ex.getMessage(), "An unexpected error occurred");
         String normalized = message.toLowerCase();
 
@@ -128,29 +264,33 @@ public class GlobalExceptionHandler {
             return new ErrorDescriptor("RESOURCE_NOT_FOUND", HttpStatus.NOT_FOUND, message);
         }
 
-        if (
-            normalized.contains("forbidden")
-                || normalized.contains("permission")
-                || normalized.contains("does not belong")
-        ) {
+        if (normalized.contains("forbidden")
+            || normalized.contains("permission")
+            || normalized.contains("does not belong")) {
             return new ErrorDescriptor("ACCESS_DENIED", HttpStatus.FORBIDDEN, message);
         }
 
-        if (
-            normalized.contains("invalid")
-                || normalized.contains("cannot")
-                || normalized.contains("required")
-                || normalized.contains("malformed")
-                || normalized.contains("not active")
-                || normalized.contains("not assigned")
-        ) {
+        if (normalized.contains("invalid")
+            || normalized.contains("cannot")
+            || normalized.contains("required")
+            || normalized.contains("malformed")
+            || normalized.contains("not active")
+            || normalized.contains("not assigned")) {
             return new ErrorDescriptor("BUSINESS_RULE_VIOLATION", HttpStatus.BAD_REQUEST, message);
+        }
+
+        if (normalized.contains("timeout") || normalized.contains("timed out")) {
+            return new ErrorDescriptor("REQUEST_TIMEOUT", HttpStatus.REQUEST_TIMEOUT, message);
+        }
+
+        if (normalized.contains("too large") || normalized.contains("exceeds")) {
+            return new ErrorDescriptor("PAYLOAD_TOO_LARGE", HttpStatus.valueOf(413), message);
         }
 
         return new ErrorDescriptor(
             "INTERNAL_SERVER_ERROR",
             HttpStatus.INTERNAL_SERVER_ERROR,
-            "An unexpected error occurred"
+            "An unexpected error occurred. Please try again later."
         );
     }
 

@@ -102,6 +102,7 @@ public class ExportController {
     }
 
     @GetMapping("/download/{id}")
+    @PreAuthorize("hasAnyRole('PROFESSOR', 'ADMIN')")
     public ResponseEntity<String> downloadExport(@PathVariable String id) {
         log.info("Downloading export: {}", id);
         return ResponseEntity.ok("Export file");

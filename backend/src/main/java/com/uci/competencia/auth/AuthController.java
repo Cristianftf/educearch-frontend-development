@@ -9,12 +9,17 @@ import com.uci.competencia.model.enums.Role;
 import com.uci.competencia.repository.UserRepository;
 import com.uci.competencia.security.UserIdentityResolver;
 import com.uci.competencia.service.AuthService;
+import com.uci.competencia.service.external.EmailService;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.HashMap;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -32,6 +37,15 @@ public class AuthController {
 
     @Autowired
     private UserIdentityResolver userIdentityResolver;
+
+    @Autowired
+    private EmailService emailService;
+
+    @Value("${app.frontend.base-url:http://localhost:3000}")
+    private String frontendBaseUrl;
+
+    @Value("${app.auth.password-reset.expose-dev-link:false}")
+    private boolean exposePasswordResetDevLink;
 
     @PostMapping("/login")
     public ResponseEntity<LoginResponseDTO> login(@Valid @RequestBody LoginRequestDTO loginRequest) {
@@ -94,6 +108,34 @@ public class AuthController {
         return ResponseEntity.ok().build();
     }
 
+    @PostMapping("/forgot-password")
+    public ResponseEntity<Map<String, String>> forgotPassword(@RequestBody Map<String, String> request) {
+        String email = request != null ? request.get("email") : null;
+        log.info("Password reset requested for email: {}", email);
+
+        String resetToken = authService.requestPasswordReset(email);
+        Map<String, String> response = new HashMap<>();
+        response.put("message", "If the email exists, password reset instructions will be sent.");
+
+        if (resetToken != null) {
+            String resetUrl = buildResetUrl(resetToken);
+            emailService.sendPasswordResetEmail(email.trim().toLowerCase(), resetUrl);
+            if (exposePasswordResetDevLink) {
+                response.put("resetUrl", resetUrl);
+            }
+        }
+
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<Map<String, String>> resetPassword(@RequestBody Map<String, String> request) {
+        String token = request != null ? request.get("token") : null;
+        String password = request != null ? request.get("password") : null;
+        authService.resetPassword(token, password);
+        return ResponseEntity.ok(Map.of("message", "Password updated successfully."));
+    }
+
     @GetMapping("/me")
     public ResponseEntity<UserDTO> getCurrentUser() {
         User user = resolveCurrentUser();
@@ -132,5 +174,12 @@ public class AuthController {
         boolean hasNumber = password.chars().anyMatch(Character::isDigit);
         boolean hasSymbol = password.chars().anyMatch(ch -> !Character.isLetterOrDigit(ch));
         return hasUpper && hasNumber && hasSymbol;
+    }
+
+    private String buildResetUrl(String token) {
+        String baseUrl = frontendBaseUrl != null && !frontendBaseUrl.isBlank()
+            ? frontendBaseUrl.replaceAll("/+$", "")
+            : "http://localhost:3000";
+        return baseUrl + "/reset-password/" + token;
     }
 }
