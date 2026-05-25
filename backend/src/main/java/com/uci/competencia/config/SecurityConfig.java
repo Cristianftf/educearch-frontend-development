@@ -90,6 +90,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers("/api/auth/**").permitAll()
+                .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                 .requestMatchers("/ws-native", "/ws-native/**", "/ws/**").permitAll()
                 .requestMatchers("/error").permitAll()
                 // Endpoints sensibles - requieren autenticación

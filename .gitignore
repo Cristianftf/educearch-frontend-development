@@ -29,6 +29,7 @@ yarn-error.log*
 
 # Docker
 /backend/target/
+/backend/bin/
 /backend/.m2/
 /backend/*.log
 /docker-data/
@@ -64,3 +65,10 @@ next-env.d.ts
 # backend local cache/logs
 backend/.m2/
 backend/*.log
+backend/bin/
+
+# local git/debug snapshots
+.git_status.txt
+.git_remote.txt
+git_status_full.txt
+*_check.txt

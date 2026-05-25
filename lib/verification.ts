@@ -1097,13 +1097,13 @@ export const verifyApi = {
         )
         const baselineExplanation = result.explanation
         const baselineRecommendations = result.recommendations.length
-          enhancedResult = await withTimeout(
-            maybeEnhanceWithAssistant(
-              result,
-              normalizedClaim || result.claim || fallbackClaim,
-              normalizedUrl,
-              usedFallback,
-              loadConfig.assistantMaxResults
+        enhancedResult = await withTimeout(
+          maybeEnhanceWithAssistant(
+            result,
+            normalizedClaim || result.claim || fallbackClaim,
+            normalizedUrl,
+            usedFallback,
+            loadConfig.assistantMaxResults
           ),
           Math.max(1200, getRemainingBudget(120))
         ).catch(() => result)

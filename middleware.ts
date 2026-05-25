@@ -34,6 +34,7 @@ export function middleware(request: NextRequest) {
   // === 1. REDIRECCIÓN HTTPS (en producción) ===
   if (
     process.env.NODE_ENV === "production" &&
+    process.env.FORCE_HTTPS === "true" &&
     request.headers.get("x-forwarded-proto") !== "https"
   ) {
     const url = new URL(request.url);

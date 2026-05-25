@@ -15,7 +15,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 
 # Instalar dependencias (solo producción)
-RUN npm ci --only=production || npm install --production
+RUN npm ci
 
 # ---- Stage 2: Build ----
 FROM node:22-alpine AS builder
@@ -56,6 +56,7 @@ USER nextjs
 # Variables de entorno para el runtime
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
 
 # Exponer puerto
 EXPOSE 3000
