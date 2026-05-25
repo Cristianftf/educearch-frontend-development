@@ -1,0 +1,1070 @@
+DOCUMENTO MAESTRO DEL PROYECTO EDUCEARCH
+=========================================
+
+Version del documento: 1.0
+Fecha de referencia: 2026-05-25
+Proyecto: Plataforma de Competencias Informacionales en Salud
+
+Este es el documento maestro del proyecto. Sustituye a los documentos explicativos anteriores del repositorio.
+Su objetivo es explicar, paso a paso, que se puede hacer por rol, que usuarios se pueden usar para pruebas,
+que tecnologias hay que instalar en Windows y como dejar funcionando frontend, backend, PostgreSQL y Redis.
+
+
+1. RESUMEN GENERAL DEL SISTEMA
+==============================
+
+EDUCEARCH es una plataforma web para entrenar y evaluar competencias informacionales en salud. El proyecto
+esta dividido en dos partes principales:
+
+1. Frontend:
+   - Aplicacion web con Next.js 15, React 19 y TypeScript.
+   - Se ejecuta normalmente en http://localhost:3000.
+   - Usa rutas por rol: /student, /professor y /admin.
+   - Consume el backend por /api mediante rewrites de Next.js o directamente por NEXT_PUBLIC_API_URL.
+
+2. Backend:
+   - API REST con Spring Boot, Java 21, Spring Security, JWT, JPA/Hibernate, Flyway, PostgreSQL y Redis.
+   - Se ejecuta normalmente en http://localhost:8080.
+   - Expone endpoints bajo /api.
+   - Protege las operaciones con JWT y roles: STUDENT, PROFESSOR y ADMIN.
+
+3. Base de datos:
+   - PostgreSQL.
+   - Base esperada en desarrollo: uci_competencia.
+   - Usuario por defecto del backend: postgres.
+   - Contrasena por defecto en application.properties: 1234.
+   - Las tablas se crean y actualizan automaticamente con Flyway al arrancar el backend.
+
+4. Cache:
+   - Redis en localhost:6379.
+   - El backend usa Redis como cache en desarrollo.
+
+5. Docker:
+   - Existe docker-compose.yml para levantar PostgreSQL, Redis, backend y frontend.
+   - Docker es opcional por ahora. Este documento prioriza la instalacion manual en Windows.
+
+
+2. TECNOLOGIAS QUE DEBEN INSTALARSE EN WINDOWS
+==============================================
+
+Instalacion minima recomendada:
+
+1. Git
+   - Necesario para clonar el repositorio y trabajar con ramas.
+   - Descargar desde: https://git-scm.com/download/win
+   - Durante la instalacion se puede dejar la configuracion por defecto.
+   - Verificar en PowerShell:
+     git --version
+
+2. Node.js 20 LTS o superior
+   - Necesario para ejecutar el frontend Next.js.
+   - Recomendado: Node.js 20 LTS o 22 LTS.
+   - Descargar desde: https://nodejs.org/
+   - Verificar:
+     node --version
+     npm --version
+
+3. Java JDK 21
+   - Obligatorio para el backend. El pom.xml define java.version=21.
+   - Se puede instalar Temurin JDK 21, Microsoft Build of OpenJDK 21 u Oracle JDK 21.
+   - Descargar Temurin desde: https://adoptium.net/
+   - Configurar JAVA_HOME apuntando a la carpeta del JDK.
+   - Agregar %JAVA_HOME%\bin al PATH.
+   - Verificar:
+     java -version
+     echo $env:JAVA_HOME
+
+4. Maven
+   - El backend trae Maven Wrapper: backend/mvnw.cmd.
+   - Por eso Maven global no es estrictamente obligatorio.
+   - Si se instala Maven global, verificar:
+     mvn -version
+   - Si no se instala Maven global, usar siempre:
+     .\mvnw.cmd
+
+5. PostgreSQL 16 o superior
+   - Necesario para la base de datos principal.
+   - Descargar desde: https://www.postgresql.org/download/windows/
+   - Durante la instalacion:
+     - Instalar PostgreSQL Server.
+     - Instalar pgAdmin 4 si se desea administrar visualmente.
+     - Recordar la contrasena del usuario postgres.
+   - Para usar la configuracion actual sin modificar archivos, la contrasena del usuario postgres debe ser:
+     1234
+   - Si se usa otra contrasena, hay que cambiar spring.datasource.password en backend/src/main/resources/application.properties
+     o arrancar el backend con la variable SPRING_DATASOURCE_PASSWORD.
+
+6. Redis
+   - Necesario porque el backend tiene spring.cache.type=redis y busca Redis en localhost:6379.
+   - Opciones en Windows:
+     - Instalar Memurai Community Edition, compatible con Redis.
+     - Usar Redis dentro de WSL.
+     - Usar Docker solo para Redis, aunque Docker sea opcional para el resto.
+   - Verificar que el servicio este escuchando en el puerto 6379.
+
+7. Visual Studio Code o IntelliJ IDEA
+   - Opcional, pero recomendado para trabajar comodamente.
+   - Extensiones utiles en VS Code:
+     - Extension Pack for Java.
+     - Spring Boot Extension Pack.
+     - ESLint.
+     - Prettier.
+     - Tailwind CSS IntelliSense.
+
+8. Docker Desktop
+   - Opcional.
+   - Puede servir para levantar PostgreSQL y Redis sin instalarlos manualmente.
+   - Tambien puede levantar todo el stack con docker-compose.yml.
+
+
+3. ESTRUCTURA PRINCIPAL DEL PROYECTO
+====================================
+
+Carpetas importantes:
+
+1. app/
+   - Rutas de Next.js App Router.
+   - Contiene paginas publicas y dashboards por rol.
+
+2. components/
+   - Componentes reutilizables de interfaz.
+   - Incluye componentes de busqueda, bibliografia, casos, chat, auditoria y UI base.
+
+3. contexts/
+   - Contextos React para autenticacion y estado por rol.
+   - auth-context.tsx controla login, logout, rutas protegidas y permisos.
+
+4. lib/
+   - Cliente HTTP y modulos de comunicacion con el backend.
+   - api-client.ts centraliza base URL, token JWT, timeouts y reintentos.
+
+5. backend/
+   - Proyecto Spring Boot.
+   - Contiene controladores REST, servicios, repositorios, entidades, seguridad y migraciones.
+
+6. backend/src/main/resources/db/migration/
+   - Migraciones Flyway.
+   - Flyway ejecuta estos scripts automaticamente sobre PostgreSQL.
+
+7. docs/
+   - Contiene este documento maestro.
+
+
+4. VARIABLES Y CONFIGURACION IMPORTANTE
+=======================================
+
+Frontend:
+
+Archivo recomendado para desarrollo:
+  .env.local
+
+Valores recomendados:
+  NEXT_PUBLIC_API_URL=/api
+  BACKEND_INTERNAL_URL=http://localhost:8080
+
+Explicacion:
+  - NEXT_PUBLIC_API_URL=/api hace que el navegador llame al frontend en /api.
+  - next.config.mjs reescribe /api hacia BACKEND_INTERNAL_URL.
+  - BACKEND_INTERNAL_URL debe apuntar al backend Spring Boot.
+
+Backend:
+
+Archivo principal:
+  backend/src/main/resources/application.properties
+
+Valores relevantes por defecto:
+  server.port=8080
+  spring.datasource.url=jdbc:postgresql://localhost:5432/uci_competencia
+  spring.datasource.username=postgres
+  spring.datasource.password=1234
+  spring.flyway.enabled=true
+  spring.jpa.hibernate.ddl-auto=validate
+  spring.data.redis.host=localhost
+  spring.data.redis.port=6379
+  spring.cache.type=redis
+  app.seed.enabled=true
+  app.frontend.base-url=http://localhost:3000
+
+Variables opcionales:
+  JWT_SECRET
+  FRONTEND_BASE_URL
+  GOOGLE_AI_API_KEY
+  PUBMED_API_KEY
+  PUBMED_EMAIL
+  AI_PROVIDER
+  GOOGLE_AI_MODEL
+
+Notas:
+  - Las funciones con PubMed pueden trabajar mejor si se configura PUBMED_EMAIL y, opcionalmente, PUBMED_API_KEY.
+  - Las funciones de asistente IA requieren GOOGLE_AI_API_KEY si se desea respuesta real del proveedor configurado.
+  - En desarrollo app.seed.enabled=true crea usuarios de prueba automaticamente.
+  - En produccion application-prod.properties desactiva app.seed.enabled.
+
+
+5. PREPARACION DE POSTGRESQL EN WINDOWS
+=======================================
+
+Paso 1: Instalar PostgreSQL.
+  - Instalar PostgreSQL 16 o superior.
+  - Definir una contrasena para el usuario postgres.
+  - Para evitar cambios, usar 1234 como contrasena.
+
+Paso 2: Confirmar que el servicio esta iniciado.
+  - Abrir "Servicios" en Windows.
+  - Buscar un servicio similar a postgresql-x64-16.
+  - Estado esperado: En ejecucion.
+
+Paso 3: Crear la base de datos.
+
+Opcion A: Con pgAdmin.
+  1. Abrir pgAdmin.
+  2. Conectarse al servidor local.
+  3. Click derecho en Databases.
+  4. Create -> Database.
+  5. Nombre: uci_competencia.
+  6. Owner: postgres.
+  7. Guardar.
+
+Opcion B: Con PowerShell y psql.
+  1. Abrir PowerShell.
+  2. Ejecutar:
+     psql -U postgres
+  3. Escribir la contrasena.
+  4. Ejecutar:
+     CREATE DATABASE uci_competencia;
+  5. Salir:
+     \q
+
+Paso 4: Verificar conexion.
+  psql -U postgres -d uci_competencia
+
+Paso 5: No crear tablas manualmente.
+  - El backend usa Flyway.
+  - Al arrancar el backend se ejecutan las migraciones de backend/src/main/resources/db/migration/.
+  - Como spring.jpa.hibernate.ddl-auto=validate, Hibernate valida que el esquema exista y coincida, pero no lo crea por su cuenta.
+
+Paso 6: Si la contrasena no es 1234.
+  - Cambiar en application.properties:
+    spring.datasource.password=TU_CONTRASENA
+  - O arrancar con variable de entorno:
+    $env:SPRING_DATASOURCE_PASSWORD="TU_CONTRASENA"
+
+
+6. PREPARACION DE REDIS EN WINDOWS
+==================================
+
+El backend espera Redis en:
+  host: localhost
+  puerto: 6379
+
+Opcion A: Memurai.
+  1. Instalar Memurai Community Edition.
+  2. Iniciar el servicio.
+  3. Confirmar que escucha en 6379.
+
+Opcion B: Redis con WSL.
+  1. Instalar WSL.
+  2. Instalar una distribucion Linux, por ejemplo Ubuntu.
+  3. Dentro de Ubuntu:
+     sudo apt update
+     sudo apt install redis-server
+     sudo service redis-server start
+  4. Verificar:
+     redis-cli ping
+     Respuesta esperada: PONG
+
+Opcion C: Redis con Docker, solo para Redis.
+  docker run --name educearch-redis -p 6379:6379 -d redis:7-alpine
+
+Si Redis no esta levantado:
+  - El backend puede fallar al iniciar o al usar cache.
+  - Antes de diagnosticar errores de backend, comprobar primero PostgreSQL y Redis.
+
+
+7. INSTALACION Y EJECUCION LOCAL PASO A PASO
+============================================
+
+Paso 1: Abrir PowerShell en la carpeta del proyecto.
+  cd D:\educearch-frontend-development
+
+Paso 2: Instalar dependencias del frontend.
+  npm install
+
+Paso 3: Crear o revisar .env.local.
+  Contenido recomendado:
+    NEXT_PUBLIC_API_URL=/api
+    BACKEND_INTERNAL_URL=http://localhost:8080
+
+Paso 4: Preparar PostgreSQL.
+  - Crear la base uci_competencia.
+  - Confirmar usuario postgres y contrasena.
+  - Confirmar que el puerto 5432 esta disponible.
+
+Paso 5: Preparar Redis.
+  - Confirmar que Redis o Memurai esta iniciado en localhost:6379.
+
+Paso 6: Ejecutar backend.
+  cd backend
+  .\mvnw.cmd spring-boot:run
+
+Resultado esperado del backend:
+  - La aplicacion arranca en http://localhost:8080.
+  - Flyway aplica migraciones.
+  - Se crean usuarios de prueba porque app.seed.enabled=true.
+
+Paso 7: En otra terminal, ejecutar frontend.
+  cd D:\educearch-frontend-development
+  npm run dev
+
+Resultado esperado del frontend:
+  - Next.js arranca en http://localhost:3000.
+
+Paso 8: Abrir el navegador.
+  http://localhost:3000
+
+Paso 9: Probar login.
+  - Usar cualquiera de los usuarios de prueba de la seccion 8.
+  - Al autenticar correctamente, la app redirige segun el rol:
+    - student -> /student
+    - professor -> /professor
+    - admin -> /admin
+
+
+8. USUARIOS DE PRUEBA POR ROL
+=============================
+
+Estos usuarios se crean automaticamente por DataInitializer cuando app.seed.enabled=true.
+Si ya existen, el inicializador actualiza nombre, rol, facultad, departamento, estado activo y contrasena.
+
+1. Administrador
+   Email: admin.test@uci.cu
+   Username: admin
+   Password: Admin123!
+   Rol backend: ROLE_ADMIN
+   Rol frontend: admin
+   Ruta principal: /admin
+
+2. Profesor
+   Email: professor.test@uci.cu
+   Username: professor
+   Password: Professor123!
+   Rol backend: ROLE_PROFESSOR
+   Rol frontend: professor
+   Ruta principal: /professor
+
+3. Estudiante
+   Email: student.test@uci.cu
+   Username: student
+   Password: Student123!
+   Rol backend: ROLE_STUDENT
+   Rol frontend: student
+   Ruta principal: /student
+
+Notas de autenticacion:
+  - El endpoint de login acepta email o username en el campo email.
+  - El frontend guarda el JWT en localStorage con la clave auth_token.
+  - El cliente envia Authorization: Bearer <token>.
+  - El cliente tambien envia X-UCI-Platform y X-User-Role.
+
+Credenciales internas usadas en pruebas de integracion:
+  - student@university.edu / TestPassword123!
+  - professor@university.edu / TestPassword123!
+Estas credenciales pertenecen a tests automatizados y no necesariamente existen en una base local normal,
+porque se crean dentro de pruebas con H2 y rollback transaccional.
+
+
+9. QUE PUEDE HACER CADA ROL
+===========================
+
+9.1. Rol ESTUDIANTE
+-------------------
+
+Ruta principal:
+  /student
+
+Permisos declarados en frontend:
+  - search:execute
+  - search:save
+  - verify:claim
+  - export:bibliography
+  - progress:view_own
+  - case:view_assigned
+  - case:submit
+
+Pantallas principales:
+  - /student
+  - /student/search
+  - /student/verify
+  - /student/bibliography
+  - /student/pyramid
+  - /student/cases
+  - /student/chat
+
+Cosas que puede hacer:
+
+1. Entrar al dashboard de estudiante.
+   - Ver resumen de actividad propia.
+   - Ver progreso propio.
+
+2. Ejecutar busquedas academicas.
+   - Usar la busqueda basada en terminos de salud.
+   - Consultar sugerencias MeSH.
+   - Guardar historial de busquedas.
+   - Consultar sesiones de busqueda anteriores.
+
+3. Usar el asistente de busqueda.
+   - Enviar una consulta para ayuda en construccion o refinamiento de busquedas.
+   - Esta funcion puede depender de la configuracion de IA.
+
+4. Consultar piramide de evidencia.
+   - Analizar resultados de busqueda por nivel de evidencia.
+   - Visualizar clasificacion de estudios.
+
+5. Verificar afirmaciones de salud.
+   - Enviar una afirmacion o claim.
+   - Consultar resultados de verificacion.
+   - Revisar historial de verificaciones.
+
+6. Generar y exportar bibliografias.
+   - Generar referencias.
+   - Ver historial.
+   - Descargar bibliografias.
+   - Exportar bibliografia mediante /api/export/bibliography.
+
+7. Trabajar con casos asignados.
+   - Ver casos asignados por profesores.
+   - Consultar detalle de un caso.
+   - Enviar solucion o respuesta del caso.
+   - Consultar su entrega.
+
+8. Ver progreso propio.
+   - Consultar /api/progress/me.
+   - Ver progreso detallado desde el frontend.
+
+9. Usar chat.
+   - Ver contactos autorizados.
+   - Enviar mensajes.
+   - Marcar mensajes como leidos.
+
+Restricciones del estudiante:
+  - No puede acceder a /admin.
+  - No puede acceder a /professor.
+  - No puede crear, editar, asignar ni evaluar casos como profesor.
+  - No puede administrar usuarios ni configuracion del sistema.
+
+
+9.2. Rol PROFESOR
+-----------------
+
+Ruta principal:
+  /professor
+
+Permisos declarados en frontend:
+  - search:execute
+  - search:save
+  - verify:claim
+  - export:bibliography
+  - case:create
+  - case:edit
+  - case:assign
+  - case:evaluate
+  - hedge:manage
+  - student:view_progress
+  - analytics:view_class
+
+Pantallas principales:
+  - /professor
+  - /professor/search
+  - /professor/cases
+  - /professor/cases/new
+  - /professor/cases/[id]
+  - /professor/cases/[id]/edit
+  - /professor/evaluations
+  - /professor/evaluations/[id]
+  - /professor/hedges
+  - /professor/students
+  - /professor/analytics
+  - /professor/chat
+
+Cosas que puede hacer:
+
+1. Entrar al dashboard de profesor.
+   - Ver resumen de actividad docente.
+   - Consultar estadisticas de clase.
+
+2. Ejecutar busquedas academicas.
+   - El profesor comparte con el estudiante los endpoints de busqueda.
+   - Puede usar busqueda, historial, sesiones, sugerencias MeSH y piramide de evidencia.
+
+3. Verificar afirmaciones.
+   - Puede usar los endpoints de verificacion igual que el estudiante.
+
+4. Generar y exportar bibliografias.
+   - Puede generar y descargar bibliografias.
+   - Puede exportar bibliografia.
+
+5. Crear casos de estudio.
+   - Crear nuevos casos clinicos o academicos.
+   - Definir dificultad, contenido, preguntas y articulos requeridos.
+
+6. Editar y eliminar casos.
+   - Modificar casos existentes.
+   - Eliminar casos cuando corresponda.
+
+7. Asignar casos a estudiantes.
+   - Consultar estudiantes asignables.
+   - Asignar un caso a uno o varios estudiantes.
+
+8. Revisar entregas.
+   - Consultar entregas por caso.
+   - Consultar una entrega concreta.
+   - Crear evaluaciones.
+   - Editar o eliminar evaluaciones.
+   - Ver evaluaciones pendientes y revisadas.
+
+9. Gestionar hedges o filtros de busqueda.
+   - Crear, listar, consultar, editar y eliminar filtros.
+   - Consultar categorias.
+   - Probar un hedge.
+
+10. Ver estudiantes y analiticas.
+   - Consultar estudiantes.
+   - Consultar progreso de un estudiante.
+   - Ver rendimiento de clase.
+   - Ver analiticas por estudiante.
+
+11. Exportar reportes de progreso.
+   - Generar reportes de progreso.
+   - Descargar reportes permitidos.
+
+12. Usar chat.
+   - Comunicarse con contactos autorizados.
+
+Restricciones del profesor:
+  - No puede acceder a /admin.
+  - No puede administrar usuarios globalmente.
+  - No puede cambiar configuracion del sistema.
+  - No puede acceder al panel de auditoria ni mantenimiento administrativo.
+
+
+9.3. Rol ADMINISTRADOR
+----------------------
+
+Ruta principal:
+  /admin
+
+Permisos declarados en frontend:
+  - *
+
+Pantallas principales:
+  - /admin
+  - /admin/users
+  - /admin/audit
+  - /admin/system
+  - /admin/health
+  - /admin/settings
+  - /admin/chat
+
+Cosas que puede hacer:
+
+1. Entrar al dashboard administrativo.
+   - Ver estadisticas globales.
+   - Ver estado del sistema.
+   - Ver alertas.
+   - Ver actividad reciente.
+
+2. Gestionar usuarios.
+   - Listar usuarios con paginacion.
+   - Filtrar por rol, estado y texto de busqueda.
+   - Ver detalle de usuario.
+   - Crear usuarios.
+   - Editar usuarios.
+   - Eliminar usuarios.
+   - Cambiar rol.
+   - Activar o desactivar usuarios.
+   - Importar usuarios desde estructuras o CSV.
+
+3. Usar formato CSV para carga masiva.
+   - Columnas esperadas: name, email, role, faculty, status.
+   - Roles validos: student, professor, admin.
+   - Ejemplo:
+     Juan Perez,juan.perez@estudiante.uci.cu,student,Medicina,active
+     Dra. Maria Lopez,maria.lopez@uci.cu,professor,Medicina,active
+     Admin Sistema,admin@uci.cu,admin,,active
+
+4. Consultar auditoria.
+   - Ver logs de auditoria.
+   - Filtrar y exportar auditoria.
+   - Generar reportes administrativos.
+
+5. Monitorear salud del sistema.
+   - Consultar /api/admin/health.
+   - Consultar dashboard y estado de servicios.
+   - Revisar alertas.
+
+6. Administrar configuracion del sistema.
+   - Consultar configuracion.
+   - Actualizar configuracion.
+   - Revisar APIs externas.
+   - Probar PubMed.
+
+7. Operaciones de mantenimiento.
+   - Crear backups logicos.
+   - Listar backups.
+   - Restaurar backup.
+   - Eliminar backup.
+   - Limpiar cache.
+   - Optimizar base de datos.
+   - Limpiar logs.
+   - Reconstruir indices de busqueda.
+
+8. Monitoreo de errores.
+   - Consultar errores detectados.
+   - Lanzar analisis de errores.
+
+9. Usar chat.
+   - Acceder al chat administrativo con contactos autorizados.
+
+Restricciones del administrador:
+  - Tiene control total dentro del sistema administrativo.
+  - Por diseno del frontend, si intenta entrar en rutas de estudiante o profesor sera redirigido a /admin.
+
+
+10. ENDPOINTS PRINCIPALES POR AREA
+==================================
+
+Autenticacion publica:
+  POST /api/auth/login
+  POST /api/auth/register
+  POST /api/auth/refresh
+  POST /api/auth/logout
+  POST /api/auth/forgot-password
+  POST /api/auth/reset-password
+  GET  /api/auth/me
+
+Busqueda y verificacion para estudiante/profesor:
+  POST /api/search/execute
+  POST /api/search/assistant
+  POST /api/search/external-fallback
+  GET  /api/search/mesh/suggestions
+  GET  /api/search/results/{searchId}/evidence-pyramid
+  GET  /api/search/history
+  PUT  /api/search/{searchId}
+  DELETE /api/search/{searchId}
+  GET  /api/search/sessions/{sessionId}
+  POST /api/verify/claim
+  GET  /api/verify/result/{verificationId}
+  GET  /api/verify/history
+
+Bibliografia y formatos:
+  GET  /api/bibliography/history
+  GET  /api/bibliography/{id}/download
+  POST /api/export/bibliography
+  GET  /api/formats/available
+
+Casos:
+  GET  /api/cases                         Solo profesor
+  GET  /api/cases/students                Solo profesor
+  GET  /api/cases/{id}                    Profesor o estudiante
+  POST /api/cases                         Solo profesor
+  PUT  /api/cases/{id}                    Solo profesor
+  DELETE /api/cases/{id}                  Solo profesor
+  POST /api/cases/{id}/assign             Solo profesor
+  GET  /api/cases/{caseId}/submissions    Solo profesor
+  GET  /api/cases/assigned                Solo estudiante
+  POST /api/cases/{caseId}/submit         Solo estudiante
+  GET  /api/cases/{caseId}/submission     Solo estudiante
+  POST /api/cases/submissions/{submissionId}/evaluate  Solo profesor
+  GET  /api/submissions/{submissionId}     Profesor o estudiante
+
+Profesor:
+  GET  /api/professor/analytics/overview
+  GET  /api/professor/analytics/student/{studentId}
+  GET  /api/professor/dashboard/overview
+  GET  /api/professor/students
+  GET  /api/professor/cases
+  POST /api/professor/cases
+  GET  /api/professor/analytics/class-performance
+  GET  /api/evaluations/pending
+  GET  /api/evaluations/reviewed
+  POST /api/evaluations/{submissionId}
+  GET  /api/evaluations/submission/{submissionId}
+  PUT  /api/evaluations/{evaluationId}
+  DELETE /api/evaluations/{evaluationId}
+  GET  /api/evaluations
+  GET  /api/hedges
+  GET  /api/hedges/{id}
+  POST /api/hedges
+  PUT  /api/hedges/{id}
+  DELETE /api/hedges/{id}
+  GET  /api/hedges/categories
+  POST /api/hedges/test
+
+Estudiante:
+  GET /api/student/dashboard/overview
+  GET /api/student/progress/detailed
+  GET /api/student/search/history
+  GET /api/progress/me
+
+Progreso para profesor/admin:
+  GET /api/progress/{studentId}
+
+Administrador:
+  GET  /api/admin/users
+  GET  /api/admin/users/{id}
+  POST /api/admin/users
+  PUT  /api/admin/users/{id}
+  DELETE /api/admin/users/{id}
+  PUT  /api/admin/users/{id}/role
+  PUT  /api/admin/users/{id}/status
+  POST /api/admin/users/import
+  POST /api/admin/users/import-csv
+  GET  /api/admin/audit/logs
+  GET  /api/admin/audit/export
+  POST /api/admin/audit/export
+  GET  /api/admin/monitoring/errors
+  POST /api/admin/monitoring/errors/analyze
+  GET  /api/admin/health
+  GET  /api/admin/dashboard
+  GET  /api/admin/system/overview
+  GET  /api/admin/settings
+  PUT  /api/admin/settings
+  POST /api/admin/backup
+  GET  /api/admin/backups
+  POST /api/admin/backups/{backupId}/restore
+  DELETE /api/admin/backups/{backupId}
+  GET  /api/admin/alerts
+  POST /api/admin/alerts
+  PUT  /api/admin/alerts/{alertId}
+  DELETE /api/admin/alerts/{alertId}
+  POST /api/admin/external-apis/check
+  POST /api/admin/test-pubmed
+  POST /api/admin/cache/clear
+  POST /api/admin/db/optimize
+  POST /api/admin/logs/cleanup
+  POST /api/admin/search/reindex
+
+Chat:
+  GET  /api/chat/contacts
+  GET  /api/chat/messages
+  POST /api/chat/send
+  POST /api/chat/read
+
+Sistema:
+  GET /actuator/health
+  GET /api/system/health                 Solo admin
+  GET /api/system/metrics/prometheus     Solo admin
+  Swagger /v3/api-docs y /swagger-ui     Solo admin en desarrollo, deshabilitado en prod
+
+
+11. REGISTRO DE USUARIOS DESDE LA APP
+=====================================
+
+El endpoint POST /api/auth/register permite registro publico, pero el backend ignora intentos de registrar roles
+distintos a student. Es decir:
+
+1. Un usuario que se registra desde la app queda como estudiante.
+2. Para crear profesores o administradores se debe usar:
+   - Usuario administrador desde /admin/users.
+   - Importacion CSV desde /admin/users.
+   - Insercion controlada en base de datos, no recomendada si se puede usar la UI.
+
+Politica de contrasena:
+  - Minimo 8 caracteres.
+  - Debe tener al menos una mayuscula.
+  - Debe tener al menos un digito.
+  - Debe tener al menos un simbolo.
+
+Ejemplos validos:
+  Student123!
+  Professor123!
+  Admin123!
+
+
+12. EJECUCION DE PRUEBAS
+========================
+
+Frontend:
+
+1. Tests unitarios:
+   npm run test:unit
+
+2. Tests en modo watch:
+   npm run test
+
+3. Tests end-to-end:
+   npm run test:e2e
+
+4. Lint:
+   npm run lint
+
+Backend:
+
+1. Ejecutar todos los tests:
+   cd backend
+   .\mvnw.cmd test
+
+2. Ejecutar una prueba concreta de autenticacion:
+   cd backend
+   .\mvnw.cmd -Dtest=AuthComprehensiveIntegrationTest test
+
+Notas de tests backend:
+  - El perfil integration usa H2 en memoria en modo PostgreSQL.
+  - app.seed.enabled=false en integration.
+  - Redis cache se desactiva en integration.
+  - Las pruebas de autenticacion crean usuarios internos y hacen rollback.
+
+
+13. EJECUCION CON DOCKER OPCIONAL
+=================================
+
+El proyecto incluye docker-compose.yml con:
+  - postgres
+  - redis
+  - backend
+  - frontend
+
+Para usarlo:
+  docker compose up --build
+
+URLs esperadas:
+  Frontend: http://localhost:3000
+  Backend: http://localhost:8080
+  PostgreSQL: localhost:5432
+  Redis: localhost:6379
+
+Variables recomendadas en .env.local o entorno:
+  POSTGRES_PASSWORD=changeme
+  REDIS_PASSWORD=changeme
+  JWT_SECRET=change-me-with-at-least-32-random-characters
+  FRONTEND_BASE_URL=http://localhost:3000
+  SERVER_SSL_ENABLED=false
+
+Nota importante:
+  - En docker-compose el backend arranca con SPRING_PROFILES_ACTIVE=prod.
+  - En prod app.seed.enabled=false, por lo tanto no se crean usuarios de prueba automaticamente.
+  - Si se necesita probar por roles con Docker completo, hay que crear usuarios manualmente o cambiar temporalmente
+    la configuracion de seed solo para ambiente local controlado.
+
+
+14. ORDEN CORRECTO PARA ARRANCAR TODO
+=====================================
+
+Orden recomendado en instalacion manual:
+
+1. PostgreSQL iniciado.
+2. Base uci_competencia creada.
+3. Redis iniciado.
+4. Backend iniciado con .\mvnw.cmd spring-boot:run.
+5. Frontend iniciado con npm run dev.
+6. Navegador abierto en http://localhost:3000.
+7. Login con usuarios de prueba.
+
+Si algo falla, seguir este orden de diagnostico:
+
+1. Verificar Java:
+   java -version
+
+2. Verificar Node:
+   node --version
+   npm --version
+
+3. Verificar PostgreSQL:
+   psql -U postgres -d uci_competencia
+
+4. Verificar Redis:
+   redis-cli ping
+
+5. Verificar backend:
+   http://localhost:8080/actuator/health
+
+6. Verificar frontend:
+   http://localhost:3000
+
+
+15. PROBLEMAS FRECUENTES Y SOLUCIONES
+=====================================
+
+Problema: El backend no conecta a PostgreSQL.
+  Causas probables:
+    - PostgreSQL no esta iniciado.
+    - La base uci_competencia no existe.
+    - La contrasena de postgres no es 1234.
+    - El puerto 5432 esta ocupado por otra instancia.
+  Solucion:
+    - Crear la base.
+    - Ajustar spring.datasource.password.
+    - Probar conexion con psql.
+
+Problema: Error de validacion de esquema JPA.
+  Causa probable:
+    - Flyway no pudo ejecutar migraciones.
+    - La base tiene tablas antiguas o inconsistentes.
+  Solucion:
+    - Revisar logs de Flyway.
+    - En ambiente local descartable, recrear la base uci_competencia.
+    - No modificar tablas manualmente salvo que se sepa exactamente que migracion falta.
+
+Problema: El backend falla por Redis.
+  Causas probables:
+    - Redis no esta instalado.
+    - Redis no esta iniciado.
+    - El puerto 6379 no esta disponible.
+  Solucion:
+    - Iniciar Memurai, Redis en WSL o Redis con Docker.
+    - Confirmar redis-cli ping -> PONG.
+
+Problema: El frontend no llega al backend.
+  Causas probables:
+    - Backend apagado.
+    - BACKEND_INTERNAL_URL incorrecto.
+    - NEXT_PUBLIC_API_URL mal configurado.
+  Solucion:
+    - Usar NEXT_PUBLIC_API_URL=/api.
+    - Usar BACKEND_INTERNAL_URL=http://localhost:8080.
+    - Reiniciar npm run dev despues de cambiar .env.local.
+
+Problema: Login devuelve 401.
+  Causas probables:
+    - Usuario no existe.
+    - app.seed.enabled=false.
+    - Contrasena incorrecta.
+    - Usuario inactivo.
+  Solucion:
+    - Confirmar que el backend arranco en perfil default.
+    - Confirmar que DataInitializer creo usuarios.
+    - Usar las credenciales exactas de la seccion 8.
+
+Problema: Acceso a ruta equivocada redirige.
+  Explicacion:
+    - El frontend protege rutas por rol.
+    - Un estudiante que intenta /admin vuelve a /student.
+    - Un profesor que intenta /admin vuelve a /professor.
+    - Un admin que intenta /student o /professor vuelve a /admin.
+
+Problema: Swagger no abre.
+  Explicacion:
+    - /swagger-ui/** y /v3/api-docs/** requieren rol ADMIN.
+    - En perfil prod estan deshabilitados.
+
+Problema: Funciones de IA no responden como se espera.
+  Causa probable:
+    - GOOGLE_AI_API_KEY no configurada.
+  Solucion:
+    - Configurar GOOGLE_AI_API_KEY.
+    - Revisar GOOGLE_AI_MODEL y GOOGLE_AI_BASE_URL.
+
+Problema: PubMed limita o falla consultas.
+  Causas probables:
+    - Falta PUBMED_EMAIL.
+    - Falta PUBMED_API_KEY.
+    - Conexion externa bloqueada.
+  Solucion:
+    - Configurar PUBMED_EMAIL.
+    - Configurar PUBMED_API_KEY si se dispone de una.
+    - Confirmar acceso a internet.
+
+
+16. NOTAS DE SEGURIDAD PARA DESARROLLO Y PRODUCCION
+===================================================
+
+Desarrollo:
+  - app.seed.enabled=true crea usuarios de prueba.
+  - app.auth.password-reset.expose-dev-link=true puede exponer link de reset para desarrollo.
+  - CORS permite localhost y dominios de tunnelmole.
+  - JWT_SECRET tiene valor por defecto inseguro si no se configura.
+
+Produccion:
+  - Usar perfil prod.
+  - Configurar JWT_SECRET fuerte.
+  - Configurar FRONTEND_BASE_URL real.
+  - Desactivar seed de usuarios.
+  - Configurar CORS solo con dominios reales.
+  - Configurar SSL si aplica.
+  - Revisar whitelist de IPs en application-prod.properties.
+  - No usar contrasenas de prueba.
+  - No usar postgres/1234.
+
+
+17. COMANDOS RAPIDOS
+====================
+
+Instalar frontend:
+  npm install
+
+Arrancar frontend:
+  npm run dev
+
+Compilar frontend:
+  npm run build
+
+Arrancar backend:
+  cd backend
+  .\mvnw.cmd spring-boot:run
+
+Probar backend:
+  cd backend
+  .\mvnw.cmd test
+
+Crear base PostgreSQL:
+  psql -U postgres
+  CREATE DATABASE uci_competencia;
+  \q
+
+Levantar Redis con Docker:
+  docker run --name educearch-redis -p 6379:6379 -d redis:7-alpine
+
+Levantar todo con Docker:
+  docker compose up --build
+
+
+18. CHECKLIST FINAL PARA UNA MAQUINA WINDOWS NUEVA
+==================================================
+
+1. Instalar Git.
+2. Instalar Node.js 20 LTS o superior.
+3. Instalar JDK 21 y configurar JAVA_HOME.
+4. Instalar PostgreSQL 16 o superior.
+5. Crear la base uci_competencia.
+6. Asegurar que postgres tenga la contrasena esperada o ajustar application.properties.
+7. Instalar e iniciar Redis, Memurai o Redis en WSL.
+8. Abrir PowerShell en el proyecto.
+9. Ejecutar npm install.
+10. Revisar .env.local.
+11. Entrar a backend.
+12. Ejecutar .\mvnw.cmd spring-boot:run.
+13. En otra terminal, ejecutar npm run dev.
+14. Abrir http://localhost:3000.
+15. Entrar con:
+    - admin.test@uci.cu / Admin123!
+    - professor.test@uci.cu / Professor123!
+    - student.test@uci.cu / Student123!
+16. Probar que cada usuario entra a su panel correcto.
+
+
+19. FUENTES DEL PROYECTO ANALIZADAS PARA ESTE DOCUMENTO
+=======================================================
+
+Este documento se elaboro revisando los archivos reales del proyecto, entre ellos:
+
+  package.json
+  next.config.mjs
+  .env.example
+  .env.local
+  docker-compose.yml
+  backend/pom.xml
+  backend/src/main/resources/application.properties
+  backend/src/main/resources/application-prod.properties
+  backend/src/test/resources/application-integration.properties
+  backend/src/main/java/com/uci/competencia/config/DataInitializer.java
+  backend/src/main/java/com/uci/competencia/config/SecurityConfig.java
+  backend/src/main/java/com/uci/competencia/auth/AuthController.java
+  backend/src/main/java/com/uci/competencia/controller/api/*
+  contexts/auth-context.tsx
+  lib/api-client.ts
+  lib/auth.ts
+  app/student/*
+  app/professor/*
+  app/admin/*
+
+Fin del documento maestro.

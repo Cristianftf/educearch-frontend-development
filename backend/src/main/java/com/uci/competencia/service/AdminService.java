@@ -218,11 +218,6 @@ public interface AdminService {
     Map<String, Object> analyzeRecentErrors(int windowMinutes, int limit);
 
     /**
-     * Ejecutar analisis de resultados de pruebas asistido por IA.
-     */
-    Map<String, Object> analyzeTestingLogs(Map<String, Object> payload);
-
-    /**
      * Optimizar base de datos
      */
     void optimizeDatabase();

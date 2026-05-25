@@ -253,7 +253,7 @@ function normalizeVerificationResult(value: unknown, fallbackClaim?: string): Ve
   const item = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
   const score =
     typeof item.score === 'number' && Number.isFinite(item.score)
-      ? Math.max(0, Math.min(100, item.score))
+      ? normalizePercentScore(item.score)
       : 0
 
   return {

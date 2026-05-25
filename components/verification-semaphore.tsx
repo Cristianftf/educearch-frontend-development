@@ -3,7 +3,7 @@
 import { cn } from "@/lib/utils"
 import { AlertTriangle, CheckCircle, XCircle, HelpCircle } from "lucide-react"
 
-type VerificationStatus = "verified" | "conflicting" | "unverified" | "pending"
+type VerificationStatus = "verified" | "conflicting" | "misinformation" | "unverified" | "pending"
 
 type VerificationSemaphoreProps = {
   status: VerificationStatus
@@ -31,6 +31,15 @@ const statusConfig = {
     description: "Existen estudios con resultados contradictorios",
     textColor: "text-amber-700",
     bgLight: "bg-amber-50",
+  },
+  misinformation: {
+    color: "bg-red-500",
+    glowColor: "shadow-red-500/50",
+    icon: XCircle,
+    label: "Infodemia detectada",
+    description: "El claim se considera desinformación basada en la evidencia disponible",
+    textColor: "text-red-700",
+    bgLight: "bg-red-50",
   },
   unverified: {
     color: "bg-red-500",
@@ -94,7 +103,7 @@ export function VerificationSemaphore({
     >
       {/* Semaphore Light */}
       <div className="flex flex-col gap-1">
-        {(["verified", "conflicting", "unverified"] as const).map((s) => {
+        {(["verified", "conflicting", "misinformation"] as const).map((s) => {
           const isActive = status === s || (status === "pending" && s === "conflicting")
           const lightConfig = statusConfig[s]
 
@@ -146,7 +155,7 @@ export function VerificationSemaphoreVertical({
       {/* Vertical Semaphore */}
       <div className="flex justify-center mb-4">
         <div className="bg-gray-800 rounded-lg p-2 flex flex-col gap-2">
-          {(["verified", "conflicting", "unverified"] as const).map((s) => {
+          {(["verified", "conflicting", "misinformation"] as const).map((s) => {
             const isActive = status === s
             const lightConfig = statusConfig[s]
 

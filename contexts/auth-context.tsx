@@ -5,6 +5,25 @@ import { useRouter, usePathname } from 'next/navigation'
 import type { User, UserRole } from '@/types'
 import { authApi, api } from '@/lib/api'
 
+function getCookieValue(name: string): string | null {
+  if (typeof document === 'undefined') return null
+  return document.cookie
+    .split('; ')
+    .find((cookie) => cookie.startsWith(`${name}=`))
+    ?.split('=')[1] ?? null
+}
+
+function setCookie(name: string, value: string, maxAgeSeconds = 3600) {
+  if (typeof document === 'undefined') return
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
+  document.cookie = `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${maxAgeSeconds}; SameSite=Lax${secure}`
+}
+
+function clearCookie(name: string) {
+  if (typeof document === 'undefined') return
+  document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax`
+}
+
 interface AuthContextType {
   user: User | null
   isLoading: boolean
@@ -31,13 +50,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname()
 
   const checkAuth = useCallback(async () => {
-    const token = localStorage.getItem('auth_token')
+    let token = localStorage.getItem('auth_token')
+    let userRole = localStorage.getItem('user_role')
+
+    if (!token) {
+      token = getCookieValue('auth_token')
+      if (token) {
+        localStorage.setItem('auth_token', token)
+      }
+    }
+
+    if (!userRole) {
+      userRole = getCookieValue('user_role')
+      if (userRole) {
+        localStorage.setItem('user_role', userRole)
+      }
+    }
+
     if (!token) {
       setIsLoading(false)
       return
     }
 
     api.setToken(token)
+    if (userRole) {
+      api.setUserRole(userRole)
+    }
 
     try {
       const userData = await authApi.me()
@@ -45,8 +83,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       api.setUserRole(userData.role)
     } catch {
       localStorage.removeItem('auth_token')
-      api.setToken(null)
-      api.setUserRole(null)
+      localStorage.removeItem('user_role')
+      clearCookie('auth_token')
+      clearCookie('user_role')
     } finally {
       setIsLoading(false)
     }
@@ -89,6 +128,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { user: userData, token } = await authApi.login(email, password)
       localStorage.setItem('auth_token', token)
+      localStorage.setItem('user_role', userData.role)
+      setCookie('auth_token', token)
+      setCookie('user_role', userData.role)
       api.setToken(token)
       api.setUserRole(userData.role)
       setUser(userData)
@@ -105,6 +147,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Ignore logout errors
     } finally {
       localStorage.removeItem('auth_token')
+      localStorage.removeItem('user_role')
+      clearCookie('auth_token')
+      clearCookie('user_role')
       api.setToken(null)
       api.setUserRole(null)
       setUser(null)

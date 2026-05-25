@@ -512,23 +512,6 @@ public class AdminController {
         }
     }
 
-    @PostMapping("/testing/analyze")
-    public ResponseEntity<Map<String, Object>> analyzeTestingLogs(
-            @RequestBody(required = false) Map<String, Object> payload) {
-        log.info("Analyzing testing logs with AI");
-        try {
-            Map<String, Object> response = adminService.analyzeTestingLogs(payload != null ? payload : Map.of());
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            log.error("Error running AI testing analysis: {}", e.getMessage(), e);
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("error", "Error al ejecutar analisis de pruebas");
-            errorResponse.put("message", e.getMessage());
-            errorResponse.put("timestamp", LocalDateTime.now());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
-    }
-
     @GetMapping("/health")
     public ResponseEntity<Map<String, Object>> getSystemHealth() {
         log.info("Getting system health");

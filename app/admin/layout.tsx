@@ -38,7 +38,6 @@ import {
   MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
-  FlaskConical,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -50,7 +49,6 @@ const adminNavItems = [
   { href: "/admin/audit", label: "Auditoría", icon: FileText },
   { href: "/admin/system", label: "Sistema", icon: Server },
   { href: "/admin/health", label: "Salud del Sistema", icon: Activity },
-  { href: "/admin/testing", label: "Pruebas XP", icon: FlaskConical },
   { href: "/admin/settings", label: "Configuración", icon: Settings },
   { href: "/admin/chat", label: "Chat", icon: MessageCircle },
 ]

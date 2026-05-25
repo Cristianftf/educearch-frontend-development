@@ -13,7 +13,6 @@ import com.uci.competencia.repository.SystemLogRepository;
 import com.uci.competencia.repository.SearchSessionRepository;
 import com.uci.competencia.service.AdminService;
 import com.uci.competencia.service.SystemErrorInsightService;
-import com.uci.competencia.service.external.OpenAIService;
 import com.uci.competencia.service.specification.UserSpecifications;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -63,8 +62,6 @@ public class AdminServiceImpl implements AdminService {
     private final SystemErrorInsightService systemErrorInsightService;
     private final DataSource dataSource;
     private final ObjectMapper objectMapper;
-    private final OpenAIService openAIService;
-
     @Autowired(required = false)
     private CacheManager cacheManager;
 
@@ -2069,30 +2066,6 @@ public class AdminServiceImpl implements AdminService {
         return systemErrorInsightService.analyzeRecentErrors(windowMinutes, limit);
     }
 
-    @Override
-    public Map<String, Object> analyzeTestingLogs(Map<String, Object> payload) {
-        Map<String, Object> summary = extractTestingSummary(payload);
-        String prompt = buildTestingAiPrompt(payload, summary);
-        LocalDateTime now = LocalDateTime.now();
-
-        try {
-            String raw = openAIService.generateText(prompt, true);
-            Map<String, Object> parsed = parseTestingAiResponse(raw);
-            if (parsed != null) {
-                parsed.put("generatedAt", now.toString());
-                parsed.putIfAbsent("summary", buildFallbackSummaryText(summary));
-                parsed.putIfAbsent("confidence", 0.55d);
-                return parsed;
-            }
-        } catch (Exception ex) {
-            log.warn("AI testing analysis failed: {}", ex.getMessage());
-        }
-
-        Map<String, Object> fallback = buildFallbackTestingAnalysis(summary);
-        fallback.put("generatedAt", now.toString());
-        return fallback;
-    }
-
     // ======================== MAINTENANCE ========================
 
     @Override
@@ -2123,155 +2096,4 @@ public class AdminServiceImpl implements AdminService {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> extractTestingSummary(Map<String, Object> payload) {
-        Object summaryObj = payload != null ? payload.get("summary") : null;
-        Map<String, Object> summary = summaryObj instanceof Map ? new HashMap<>((Map<String, Object>) summaryObj) : new HashMap<>();
-        int total = toInt(summary.get("total"), 0);
-        int passed = toInt(summary.get("passed"), 0);
-        int failed = toInt(summary.get("failed"), 0);
-        int skipped = toInt(summary.get("skipped"), 0);
-        summary.put("total", Math.max(0, total));
-        summary.put("passed", Math.max(0, passed));
-        summary.put("failed", Math.max(0, failed));
-        summary.put("skipped", Math.max(0, skipped));
-        return summary;
-    }
-
-    private String buildTestingAiPrompt(Map<String, Object> payload, Map<String, Object> summary) {
-        String jsonPayload = safeJson(payload, 7500);
-        String summaryText = buildFallbackSummaryText(summary);
-        StringBuilder builder = new StringBuilder();
-        builder.append("Analiza resultados de pruebas de software XP y devuelve JSON valido sin markdown.\n");
-        builder.append("Formato exacto:\n");
-        builder.append("{\"summary\":\"...\",\"strengths\":[\"...\"],\"gaps\":[\"...\"],\"improvements\":[\"...\"],");
-        builder.append("\"risks\":[\"...\"],\"nextActions\":[\"...\"],\"confidence\":0.0}\n");
-        builder.append("Resumen actual: ").append(summaryText).append("\n");
-        builder.append("Contexto JSON (logs y plan): ").append(jsonPayload).append("\n");
-        builder.append("Condiciones:\n");
-        builder.append("1) Responde en espanol tecnico y accionable.\n");
-        builder.append("2) Prioriza recomendaciones para pruebas automatizadas primero.\n");
-        builder.append("3) Identifica brechas por suite y casos pendientes.\n");
-        builder.append("4) No incluyas texto fuera del JSON.\n");
-        return builder.toString();
-    }
-
-    private Map<String, Object> parseTestingAiResponse(String raw) {
-        if (!hasText(raw)) return null;
-        String json = extractFirstJsonObject(raw);
-        if (!hasText(json)) return null;
-        try {
-            JsonNode node = objectMapper.readTree(json);
-            Map<String, Object> result = new LinkedHashMap<>();
-            result.put("summary", trimToLength(node.path("summary").asText(""), 1800));
-            result.put("strengths", readStringArray(node.path("strengths"), 12));
-            result.put("gaps", readStringArray(node.path("gaps"), 12));
-            result.put("improvements", readStringArray(node.path("improvements"), 12));
-            result.put("risks", readStringArray(node.path("risks"), 10));
-            result.put("nextActions", readStringArray(node.path("nextActions"), 10));
-            double confidence = node.path("confidence").asDouble(0.6d);
-            confidence = Math.max(0d, Math.min(1d, confidence));
-            result.put("confidence", confidence);
-            return result;
-        } catch (Exception ex) {
-            log.debug("Could not parse AI testing JSON response: {}", ex.getMessage());
-            return null;
-        }
-    }
-
-    private Map<String, Object> buildFallbackTestingAnalysis(Map<String, Object> summary) {
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("summary", buildFallbackSummaryText(summary));
-        response.put("strengths", List.of("Existe una base de pruebas unitarias y evidencias en el panel."));
-        response.put("gaps", List.of("Brechas en integracion, E2E, resiliencia, seguridad y rendimiento."));
-        response.put("improvements", List.of(
-            "Automatizar suites B1-B8 y ampliar cobertura de API.",
-            "Agregar casos E2E por rol y flujos criticos.",
-            "Definir objetivos de rendimiento y medirlos en CI."
-        ));
-        response.put("risks", List.of(
-            "Cobertura incompleta puede ocultar fallos en produccion.",
-            "Faltan evidencias automatizadas de resiliencia y seguridad."
-        ));
-        response.put("nextActions", List.of(
-            "Priorizar ejecucion de pruebas criticas (auth, search, verify).",
-            "Registrar evidencia manual de las suites pendientes.",
-            "Preparar entorno para ejecutar E2E en CI."
-        ));
-        response.put("confidence", 0.45d);
-        return response;
-    }
-
-    private String buildFallbackSummaryText(Map<String, Object> summary) {
-        int total = toInt(summary.get("total"), 0);
-        int passed = toInt(summary.get("passed"), 0);
-        int failed = toInt(summary.get("failed"), 0);
-        int skipped = toInt(summary.get("skipped"), 0);
-        return String.format(
-            Locale.US,
-            "Total %d pruebas. Pasaron %d, fallaron %d, pendientes %d.",
-            total,
-            passed,
-            failed,
-            skipped
-        );
-    }
-
-    private String safeJson(Object payload, int maxLen) {
-        try {
-            String json = objectMapper.writeValueAsString(payload);
-            if (json.length() <= maxLen) return json;
-            return json.substring(0, maxLen) + "...";
-        } catch (Exception ex) {
-            return "";
-        }
-    }
-
-    private List<String> readStringArray(JsonNode node, int max) {
-        if (node == null || !node.isArray()) return List.of();
-        List<String> values = new ArrayList<>();
-        for (JsonNode item : node) {
-            if (values.size() >= max) break;
-            String value = trimToLength(item.asText(""), 420);
-            if (hasText(value)) values.add(value);
-        }
-        return values;
-    }
-
-    private String extractFirstJsonObject(String raw) {
-        int start = raw.indexOf('{');
-        if (start < 0) return null;
-        int depth = 0;
-        for (int i = start; i < raw.length(); i++) {
-            char ch = raw.charAt(i);
-            if (ch == '{') depth++;
-            if (ch == '}') depth--;
-            if (depth == 0) {
-                return raw.substring(start, i + 1);
-            }
-        }
-        return null;
-    }
-
-    private boolean hasText(String value) {
-        return value != null && !value.trim().isEmpty();
-    }
-
-    private String trimToLength(String value, int max) {
-        if (value == null) return "";
-        if (value.length() <= max) return value.trim();
-        return value.substring(0, max).trim();
-    }
-
-    private int toInt(Object value, int fallback) {
-        if (value instanceof Number) return ((Number) value).intValue();
-        if (value instanceof String) {
-            try {
-                return Integer.parseInt(((String) value).trim());
-            } catch (NumberFormatException ignored) {
-                return fallback;
-            }
-        }
-        return fallback;
-    }
 }

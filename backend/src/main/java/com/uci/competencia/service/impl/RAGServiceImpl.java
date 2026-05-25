@@ -235,11 +235,13 @@ public class RAGServiceImpl implements RAGService {
         }
 
         double total = supportScore + contradictScore;
+        int evidenceCount = supporting.size() + contradicting.size();
         double supportRatio = total > 0 ? supportScore / total : 0.5;
-        double heuristicScore = Math.round(supportRatio * 1000.0) / 10.0;
-        double heuristicConfidence = Math.abs(supportRatio - 0.5) * 2;
+        double evidenceStrength = calculateEvidenceStrength(total, evidenceCount);
+        double heuristicScore = Math.round(supportRatio * evidenceStrength * 1000.0) / 1000.0;
+        double heuristicConfidence = calculateHeuristicConfidence(supportRatio, evidenceStrength);
 
-        Verdict heuristicVerdict = resolveVerdict(total, supportRatio, supporting.size() + contradicting.size());
+        Verdict heuristicVerdict = resolveVerdict(evidenceStrength, supportRatio, evidenceCount);
         AIVerdictBundle aiBundle = buildVerdictWithAI(
             claim,
             supporting,
@@ -250,9 +252,16 @@ public class RAGServiceImpl implements RAGService {
         );
 
         Verdict finalVerdict = aiBundle.verdict != null ? aiBundle.verdict : heuristicVerdict;
+        if (evidenceCount < 3 && total < 0.6) {
+            finalVerdict = Verdict.INSUFFICIENT_EVIDENCE;
+        }
+
         String status = mapVerdictToStatus(finalVerdict);
         double finalScore = aiBundle.score != null ? clampScore(aiBundle.score) : heuristicScore;
         double finalConfidence = aiBundle.confidence != null ? clampConfidence(aiBundle.confidence) : heuristicConfidence;
+        if (evidenceCount < 3 && total < 0.6) {
+            finalConfidence = Math.min(finalConfidence, 0.4);
+        }
 
         VerificationResponseDTO response = new VerificationResponseDTO();
         response.setClaim(claim);
@@ -266,6 +275,14 @@ public class RAGServiceImpl implements RAGService {
         response.setVerdict(finalVerdict != null ? finalVerdict.name() : null);
         response.setConfidence(finalConfidence);
         response.setEvidenceCount(evidence.size());
+        response.setScoreBreakdown(Map.of(
+            "supportScore", Math.round(supportScore * 1000.0) / 1000.0,
+            "contradictScore", Math.round(contradictScore * 1000.0) / 1000.0,
+            "supportRatio", Math.round(supportRatio * 1000.0) / 1000.0,
+            "evidenceStrength", evidenceStrength,
+            "heuristicScore", heuristicScore,
+            "heuristicConfidence", heuristicConfidence
+        ));
         response.setVerifiedAt(LocalDateTime.now().toString());
         return response;
     }
@@ -640,14 +657,14 @@ public class RAGServiceImpl implements RAGService {
         return fallbackTitle != null ? fallbackTitle : "";
     }
 
-    private Verdict resolveVerdict(double totalEvidence, double supportRatio, int evidenceCount) {
-        if (totalEvidence == 0 || evidenceCount < 3) {
+    private Verdict resolveVerdict(double evidenceStrength, double supportRatio, int evidenceCount) {
+        if (evidenceCount < 3 || evidenceStrength < 0.35) {
             return Verdict.INSUFFICIENT_EVIDENCE;
         }
-        if (supportRatio >= 0.6 && totalEvidence >= 0.6) {
+        if (supportRatio >= 0.65) {
             return Verdict.SUPPORTED;
         }
-        if (supportRatio <= 0.4 && totalEvidence >= 0.6) {
+        if (supportRatio <= 0.35) {
             return Verdict.REFUTED;
         }
         return Verdict.CONFLICTING;
@@ -662,6 +679,22 @@ public class RAGServiceImpl implements RAGService {
         };
     }
 
+    private double calculateEvidenceStrength(double totalEvidence, int evidenceCount) {
+        if (totalEvidence <= 0 || evidenceCount <= 0) {
+            return 0.0;
+        }
+        double evidenceQuality = Math.min(1.0, totalEvidence / 1.4);
+        double evidenceCountScore = Math.min(1.0, evidenceCount / 6.0);
+        double strength = (evidenceQuality * 0.7) + (evidenceCountScore * 0.3);
+        return Math.round(Math.max(0.0, Math.min(1.0, strength)) * 1000.0) / 1000.0;
+    }
+
+    private double calculateHeuristicConfidence(double supportRatio, double evidenceStrength) {
+        double polarity = Math.abs(supportRatio - 0.5) * 2.0;
+        double confidence = evidenceStrength * (0.35 + 0.65 * polarity);
+        return Math.round(Math.max(0.0, Math.min(1.0, confidence)) * 1000.0) / 1000.0;
+    }
+
     private AIVerdictBundle buildVerdictWithAI(
         String claim,
         List<VerificationResponseDTO.EvidenceDTO> supporting,
@@ -673,17 +706,20 @@ public class RAGServiceImpl implements RAGService {
         StringBuilder prompt = new StringBuilder();
         prompt.append("Devuelve UNICAMENTE un JSON valido con las claves exactas ");
         prompt.append("verdict (SUPPORTED|REFUTED|CONFLICTING|INSUFFICIENT_EVIDENCE), ");
-        prompt.append("score (numero 0-100), confidence (numero 0-1), ");
+        prompt.append("score (numero 0-100, donde 100 significa que el claim es completamente verdadero y 0 significa que el claim es completamente falso), ");
         prompt.append("explanation (string) y recommendations (array de strings). ");
         prompt.append("No uses markdown ni texto fuera del JSON.\\n");
         prompt.append("Actua como un verificador medico. Basate estrictamente en la evidencia adjunta ");
         prompt.append("y no inventes datos externos.\\n");
+        prompt.append("Si el veredicto es REFUTED, el score sigue representando la probabilidad de verdad del claim.\\n");
         prompt.append("Contexto (evidencia recuperada de PubMed y stance calculado):\\n");
         prompt.append("Claim del usuario: ").append(claim).append("\\n");
         prompt.append("Veredicto heuristico previo: ")
             .append(heuristicVerdict != null ? heuristicVerdict.name() : "UNKNOWN")
             .append("\\n");
-        prompt.append("Score heuristico previo (0-100): ").append(heuristicScore).append("\\n");
+        prompt.append("Score heuristico previo (0-100): ")
+            .append(Math.round(heuristicScore * 100.0 * 100.0) / 100.0)
+            .append("\\n");
         prompt.append("Confianza heuristica previa (0-1): ").append(heuristicConfidence).append("\\n");
         prompt.append("Evidencia que soporta el claim:\\n");
         for (VerificationResponseDTO.EvidenceDTO e : supporting.stream().limit(4).toList()) {
@@ -799,7 +835,8 @@ public class RAGServiceImpl implements RAGService {
         if (score == null) {
             return 0.0;
         }
-        return Math.max(0.0, Math.min(100.0, score));
+        double clamped = Math.max(0.0, Math.min(100.0, score));
+        return clamped > 1.0 ? clamped / 100.0 : clamped;
     }
 
     private double clampConfidence(Double confidence) {

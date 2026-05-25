@@ -3,6 +3,7 @@
 import React from "react"
 
 import { useState } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/auth-context'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,10 +13,20 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { BookOpen, AlertCircle, Loader2 } from 'lucide-react'
 
 export default function LoginPage() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const redirectPath = searchParams.get('redirect') ?? ''
   const { login, isLoading } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+
+  const safeRedirect = (path: string) => {
+    if (!path || !path.startsWith('/') || path.startsWith('/login')) {
+      return '/admin'
+    }
+    return path
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -28,6 +39,7 @@ export default function LoginPage() {
 
     try {
       await login(email, password)
+      router.push(safeRedirect(redirectPath))
     } catch (err) {
       setError('Credenciales inválidas. Por favor, intente de nuevo.')
     }
